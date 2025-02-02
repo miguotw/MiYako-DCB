@@ -96,7 +96,10 @@ client.on('interactionCreate', async interaction => {
 });
 
 // 載入外部模組 
-require('./src/logger')(client, sendLog);
+require('./src/logger/member.js')(client, sendLog);
+require('./src/logger/message.js')(client, sendLog);
+require('./src/logger/role.js')(client, sendLog);
+require('./src/logger/voice.js')(client, sendLog);
 require('./src/event/member_join.js')(client);
 require('./src/event/member_leave.js')(client);
 

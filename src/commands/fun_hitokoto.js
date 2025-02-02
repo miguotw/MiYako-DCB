@@ -29,16 +29,14 @@ module.exports = {
             // 創建嵌入訊息
             const embed = new EmbedBuilder()
                 .setColor(EMBED_COLOR) // 設置顏色
-                .setTitle('🍵 ┃一言')  // 標題
+                .setTitle('🍵 ┃ 一言')  // 標題
                 .setDescription(hitokotoText) // 顯示短句
                 .addFields({
                     name: '　',
                     value: hitokotoFrom || '未知', // 顯示來源，如果沒有來源則顯示 '未知'
                 })
-                .setFooter({
-                    text: '使用 Hitokoto 語句 API', // 頁腳文字
-                });
-
+                .setFooter({text: '使用 Hitokoto 語句 API' }); // 頁腳文字
+                
             // 發送嵌入訊息
             await interaction.reply({
                 embeds: [embed],

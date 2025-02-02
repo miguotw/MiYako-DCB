@@ -9,9 +9,10 @@ const config = yaml.parse(configFile);
 
 const TWITCH_CLIENT_ID = config.API.Twitch.Client_ID;
 const TWITCH_ACCESS_TOKEN = config.API.Twitch.Access_Token;
-const TWITCH_USER_LOGIN = config.Stream.User_Login;
 const MESSAGE_STREAM = config.Message.Stream;
 const TWITCH_USER_AVATAR = config.Stream.User_Avatar;
+const TWITCH_USER_LOGIN = config.Stream.User_Login;
+const ROLE = config.Stream.Role;
 const EMBED_COLOR = config.Embed_Color;  // 嵌入介面顏色
 
 module.exports = {
@@ -32,7 +33,7 @@ module.exports = {
             });
         }
 
-        const roleId = '1119629095437865042'; // 身分組 ID
+        const roleId = ROLE && ROLE.trim() !== '' ? `<@&${ROLE}>` : '@everyone'; // 若 ROLE 為空則提及 everyone
         const streamTitle = interaction.options.getString('標題'); // 使用者輸入的標題
         const randomValue = Math.floor(100000 + Math.random() * 900000); // 生成隨機數以避免快取
         const randomMessage = MESSAGE_STREAM[Math.floor(Math.random() * MESSAGE_STREAM.length)]; // 隨機選擇一條訊息
@@ -60,10 +61,10 @@ module.exports = {
         
         // 發送消息，包含嵌入內容和按鈕
         await interaction.channel.send({
-            content: `<@&${roleId}> ${randomMessage}`,
+            content: `${roleId} ${randomMessage}`,
             embeds: [embed],
             components: [row],  // 添加按鈕
-            allowedMentions: { roles: [roleId] }
+            allowedMentions: { parse: ['everyone', 'roles'] } // 確保可提及 everyone 或 roles
         });
 
         // 提示已發送公告

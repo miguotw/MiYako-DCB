@@ -12,14 +12,14 @@ Logger:
     Time_Zone: 0 # 時區偏移
 
   Type:
+    Member: true # 成員加入與離開
     Message:
-      Create: true # 成員傳送訊息
+      Create: false # 成員傳送訊息
       Update: true # 訊息被變更
       Delete: true # 訊息被刪除
 
-    Voice: true # 語音活動
     Role: true # 身分組被變更
-    Member: true # 成員加入與離開
+    Voice: true # 語音活動    
 
 #-------------------------------
 # 嵌入介面
@@ -51,6 +51,7 @@ Message:
 Stream:
   User_Login: "" # 要監控的頻道名稱
   User_Avatar: "" # 要監控的使用者頭像網址
+  Role: "" # 要提及的身分組 ID ，若不填寫則預設為 @everyone
 
 #-------------------------------
 # 外部 API
@@ -60,3 +61,8 @@ API:
   Twitch:
     Client_ID: "" # 暫時無作用
     Access_Token: "" # 暫時無作用
+
+  Minecraft:
+    Starlight_Skin: "https://starlightskins.lunareclipse.studio"
+    Minotar: "https://minotar.net"
+    Mcsrvstat: "https://api.mcsrvstat.us"
