@@ -1,4 +1,5 @@
 const { Events } = require('discord.js');
+const { sendLog } = require('../../log');
 const fs = require('fs');
 const yaml = require('yaml');
 
@@ -7,15 +8,23 @@ const configFile = fs.readFileSync('./config.yml', 'utf8');
 const config = yaml.parse(configFile);
 
 
-module.exports = (client, sendLog) => {
+module.exports = (client) => {
     // 成員加入與離開
     if (config.Logger.Type.Member) {
         client.on(Events.GuildMemberAdd, async (member) => {
-            sendLog(`🚧 ${member.user.username} 已加入「${member.guild.name}」`);
+            try {
+                sendLog(client, `🚧 ${member.user.username} 已加入「${member.guild.name}」`);
+            } catch (error) {
+                sendLog(client, `❌ 在 GuildMemberAdd 事件中發生錯誤`, "ERROR", error);
+            }
         });
 
         client.on(Events.GuildMemberRemove, async (member) => {
-            sendLog(`🚧 ${member.user.username} 已離開「${member.guild.name}」`);
+            try {
+                sendLog(client, `🚧 ${member.user.username} 已離開「${member.guild.name}」`);
+            } catch (error) {
+                sendLog(client, `❌ 在 GuildMemberRemove 事件中發生錯誤`, "ERROR", error);
+            }
         });
 
     }

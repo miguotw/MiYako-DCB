@@ -1,4 +1,5 @@
 const { Events, EmbedBuilder } = require('discord.js');
+const { sendLog } = require('../../log');
 const fs = require('fs');
 const yaml = require('yaml');
 
@@ -28,7 +29,7 @@ module.exports = (client) => {
 
             await systemChannel.send({ embeds: [embed] });
         } catch (error) {
-            console.error(`❌ 無法發送歡迎訊息至「${member.guild.name}」`, error);
+            sendLog(client, `❌ 無法發送歡迎訊息至「${member.guild.name}」`, "ERROR", error);
         }
     });
 };

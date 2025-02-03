@@ -1,4 +1,4 @@
-const { Events } = require('discord.js');
+const { sendLog } = require('../../log');
 const fs = require('fs');
 const yaml = require('yaml');
 
@@ -7,7 +7,7 @@ const configFile = fs.readFileSync('./config.yml', 'utf8');
 const config = yaml.parse(configFile);
 
 
-module.exports = (client, sendLog) => {
+module.exports = (client) => {
     // 記錄成員身分組變更
     if (config.Logger.Type.Role) {
         client.on('guildMemberUpdate', async (oldMember, newMember) => {
@@ -42,7 +42,7 @@ module.exports = (client, sendLog) => {
                 return acc;
             }, []).join(', ') || '無權限';
 
-            sendLog(`${roleChanges}\n ${user.tag} 擁有的身分組: ${roles}\n ${user.tag} 擁有的權限: ${permissions}`);
+            sendLog(client, `${roleChanges}\n ${user.tag} 擁有的身分組: ${roles}\n ${user.tag} 擁有的權限: ${permissions}`);
         });
     }
 };
