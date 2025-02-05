@@ -38,20 +38,20 @@ const sendLog = (client, message, level = 'INFO', error = null) => {
         
         // 確保機器人 ready 後才發送到頻道
         if (!client.isReady()) {
-            console.error('❌ 機器人尚未 ready，無法發送日誌到頻道。');
+            // console.error('❌ 機器人尚未 ready，無法發送日誌到頻道。');
             return;
         }
         
         const logChannel = client.channels.cache.get(config.Logger.Settings.Channel);
         if (logChannel) {
             logChannel.send(`\`\`\`diff\n${logSymbol} ${logMessage}\n\`\`\``).catch(err => {
-                console.error('❌ 無法發送日誌到頻道：', err);
+                console.error(`${prefix} ❌ 無法發送日誌到頻道：`, err);
             });
         } else {
-            console.error("❌ 無法找到日誌頻道，請檢查 config.yml。");
+            console.error(`${prefix} ❌ 無法找到日誌頻道，請檢查 config.yml。`);
         }
     } catch (err) {
-        console.error('❌ 在 sendLog 函數中發生錯誤：', err);
+        console.error(`${prefix} ❌ 在 sendLog 函數中發生錯誤：`, err);
     }
 };
 

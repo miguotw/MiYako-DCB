@@ -1,4 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { sendLog } = require('../../../log');
+const { errorReply } = require('../../../error_reply');
 const fs = require('fs');
 const yaml = require('yaml');
 const util = require('minecraft-server-util');
@@ -37,29 +39,36 @@ module.exports = {
         const subcommand = interaction.options.getSubcommand();
 
         if (subcommand === '外觀') {
-            const playerName = interaction.options.getString('玩家名稱');
-            const Starlight_Skin = `${STARILGHT_SKIN}/render/default/${playerName}/full`;
-            const Minotar_Avatar = `${MINOTAR}/avatar/${playerName}/64.png`;
-            const Minotar_Download = `${MINOTAR}/download/${playerName}`;
+            try {
+                const playerName = interaction.options.getString('玩家名稱');
+                const Starlight_Skin = `${STARILGHT_SKIN}/render/default/${playerName}/full`;
+                const Minotar_Avatar = `${MINOTAR}/avatar/${playerName}/64.png`;
+                const Minotar_Download = `${MINOTAR}/download/${playerName}`;
             
-            // 創建嵌入訊息
-            const embed = new EmbedBuilder()
-                .setColor(EMBED_COLOR) // 設置顏色
-                .setTitle(`🧱 ┃ 玩家外觀 - ${playerName}`)  // 標題
-                .setThumbnail(Minotar_Avatar) // 設置 avatar 圖示
-                .setImage(Starlight_Skin)
-                .setFooter({ text: '使用 Minotar 與 StarLight Skins API' });
+                // 創建嵌入訊息
+                const embed = new EmbedBuilder()
+                    .setColor(EMBED_COLOR) // 設置顏色
+                    .setTitle(`🧱 ┃ 玩家外觀 - ${playerName}`)  // 標題
+                    .setThumbnail(Minotar_Avatar) // 設置 avatar 圖示
+                    .setImage(Starlight_Skin)
+                    .setFooter({ text: '使用 Minotar 與 StarLight Skins API' });
 
-            // 創建下載按鈕
-            const row = new ActionRowBuilder()
-                .addComponents(
-                    new ButtonBuilder()
-                        .setLabel(`下載 ${playerName} 的外觀`)
-                        .setStyle(ButtonStyle.Link)
-                        .setURL(Minotar_Download)
-                );
+                // 創建下載按鈕
+                const row = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder()
+                            .setLabel(`下載 ${playerName} 的外觀`)
+                            .setStyle(ButtonStyle.Link)
+                            .setURL(Minotar_Download)
+                    );
 
-            await interaction.reply({ embeds: [embed], components: [row] });
+                await interaction.reply({ embeds: [embed], components: [row] });
+
+            } catch (error) {
+                // 錯誤處理
+                sendLog(interaction.client, `❌ 在執行 /麥塊 外觀 指令時發生錯誤`, "ERROR", error); // 記錄錯誤日誌
+                errorReply(interaction, '**發生未預期的錯誤，請向開發者回報！**'); // 向用戶顯示錯誤訊息
+            };
             
         } else if (subcommand === '伺服器狀態') {
             const serverIP = interaction.options.getString('伺服器位址');
@@ -102,8 +111,9 @@ module.exports = {
                     
                     await interaction.reply({ embeds: [embed], components: [row] });
                 } catch (error) {
-                    await interaction.reply({ content: `❌ 無法連接到伺服器 ${serverIP}，請確認 IP 是否正確。`, ephemeral: true });
+                    errorReply(interaction, `無法連接到伺服器 ${serverIP}，請確認 IP 是否正確。`); // 向用戶顯示錯誤訊息
                 }
+            
             }
         }
     };

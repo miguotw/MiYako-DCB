@@ -1,4 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { sendLog } = require('../../../log');
+const { errorReply } = require('../../../error_reply');
 const fs = require('fs');
 const yaml = require('yaml');
 const axios = require('axios');
@@ -41,12 +43,11 @@ module.exports = {
             await interaction.reply({
                 embeds: [embed],
             });
+            
         } catch (error) {
-            console.error('❌ 無法獲取 Hitokoto API 資料：', error);
-            await interaction.reply({
-                content: '無法獲取短句，請稍後再試。',
-                ephemeral: true,
-            });
+            // 錯誤處理
+            sendLog(interaction.client, `❌ 無法獲取 Hitokoto API 資料：`, "ERROR", error); // 記錄錯誤日誌
+            errorReply(interaction, '**無法獲取短句，請稍後再試！**\n- 原因：連線至 Hitokoto API 時出現錯誤。'); // 向用戶顯示錯誤訊息
         }
     }
 };

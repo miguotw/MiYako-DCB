@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, PermissionsBitField } = require('discord.js');
 const { sendLog } = require('../../../log');
+const { errorReply } = require('../../../error_reply');
 const fs = require('fs');
 const yaml = require('yaml');
 
@@ -32,10 +33,7 @@ module.exports = {
         try {
             // 檢查使用者是否具有管理者權限
             if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-                return interaction.reply({
-                    content: '你必須是伺服器的管理者才能使用此指令！',
-                    ephemeral: true
-                });
+                return errorReply(interaction, '**你必須是伺服器的管理者才能使用此指令！**');
             }
 
             const messageId = interaction.options.getString('訊息哀滴'); // 使用者輸入的訊息 ID
@@ -46,13 +44,17 @@ module.exports = {
             try {
                 const message = await interaction.channel.messages.fetch(messageId);
                 const messageContent = message.content; // 獲取訊息的內容
+                const imageUrl = message.attachments.first()?.url || null; // 如果有圖片則取第一張
+                // const guildIcon = interaction.guild.iconURL(); // 取得伺服器圖標
 
                 // 創建嵌入內容
                 const embed = new EmbedBuilder()
                     .setColor(EMBED_COLOR)
                     .setTitle('📢 ┃ 公告')
                     .setDescription(messageContent)
-                    .setTimestamp();
+
+                if (imageUrl) embed.setImage(imageUrl); // 設置圖片
+                // if (guildIcon) embed.setThumbnail(guildIcon); // 設置伺服器圖標
 
                 // 根據是否有提供身分組來設置 content
                 const content = role ? `${role}` : null;
@@ -71,17 +73,11 @@ module.exports = {
                 });
             } catch (error) {
                 sendLog(interaction.client, `❌ 在執行 /公告 指令時發生錯誤`, "ERROR", error);
-                await interaction.reply({
-                    content: '無法找到該訊息 ID，請確認訊息 ID 是否正確！',
-                    ephemeral: true
-                });
+                return errorReply(interaction, '**無法找到該訊息 ID，請檢查以下內容！**\n 1. 機器人應具有 `讀取訊息歷史`、`檢視頻道`、`發送訊息`、`嵌入連結`、`提及身分組` 權限。\n 2. 確認訊息 ID 是否正確！');
             }
         } catch (error) {
             sendLog(interaction.client, `❌ 在執行 /公告 指令時發生未預期的錯誤`, "ERROR", error);
-            await interaction.reply({
-                content: '發生未預期的錯誤，請稍後再試！',
-                ephemeral: true
-            });
+            return errorReply(interaction, '**發生未預期的錯誤，請向開發者回報！**');
         }
     }
 };
