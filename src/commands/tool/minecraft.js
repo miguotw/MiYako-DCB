@@ -112,6 +112,7 @@ module.exports = {
                     
                     await interaction.reply({ embeds: [embed], components: [row] });
                 } catch (error) {
+                    sendLog(interaction.client, `❌ 在執行 /麥塊 伺服器狀態 指令時發生錯誤`, "ERROR", error); // 記錄錯誤日誌
                     errorReply(interaction, `無法連接到伺服器 ${serverIP}，請確認 IP 是否正確。`); // 向用戶顯示錯誤訊息
                 }
             
