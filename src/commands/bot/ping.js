@@ -1,8 +1,9 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { sendLog } = require('../../../log');
-const { errorReply } = require('../../../error_reply');
 const fs = require('fs');
 const yaml = require('yaml');
+const path = require('path');
+const { sendLog } = require(path.join(process.cwd(), 'core/log'));
+const { errorReply } = require(path.join(process.cwd(), 'core/error_reply'));
 
 // 讀取 YAML 設定檔
 const configFile = fs.readFileSync('./config.yml', 'utf8'); // 根據你的專案結構調整路徑

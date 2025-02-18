@@ -1,7 +1,8 @@
 const { Events } = require('discord.js');
-const { sendLog } = require('../../log');
 const fs = require('fs');
 const yaml = require('yaml');
+const path = require('path');
+const { sendLog } = require(path.join(process.cwd(), 'core/log'));
 
 // 讀取 YAML 設定檔
 const configFile = fs.readFileSync('./config.yml', 'utf8');

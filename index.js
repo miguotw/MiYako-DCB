@@ -1,10 +1,10 @@
 const { Client, GatewayIntentBits, REST, Routes, Collection } = require('discord.js');
-const { sendLog } = require('./log');
 const fs = require('fs');
 const path = require('path');
 const yaml = require('yaml');
 const axios = require('axios');
 const OpenCC = require('opencc-js');
+const { sendLog } = require(path.join(process.cwd(), 'core/log'));
 
 // 讀取 YAML 設定檔
 const configFile = fs.readFileSync('./config.yml', 'utf8');
