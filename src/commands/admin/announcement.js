@@ -41,6 +41,9 @@ module.exports = {
             const channel = interaction.options.getChannel('選擇頻道'); // 使用者選擇的頻道
             const role = interaction.options.getRole('選擇身分組'); // 使用者選擇的身分組（可為空）
 
+            // 發送執行指令的摘要到 sendLog
+            sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/公告 訊息哀滴(${messageId}) 選擇頻道(${channel}) 選擇身分組(${role})`, "INFO");
+
             // 嘗試獲取訊息內容
             try {
                 const message = await interaction.channel.messages.fetch(messageId);

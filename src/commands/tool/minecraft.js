@@ -42,6 +42,10 @@ module.exports = {
         if (subcommand === '外觀') {
             try {
                 const playerName = interaction.options.getString('玩家名稱');
+
+                // 發送執行指令的摘要到 sendLog
+                sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/麥塊 外觀(${playerName})`, "INFO");
+
                 const Starlight_Skin = `${STARILGHT_SKIN}/render/default/${playerName}/full`;
                 const Minotar_Avatar = `${MINOTAR}/avatar/${playerName}/64.png`;
                 const Minotar_Download = `${MINOTAR}/download/${playerName}`;
@@ -72,9 +76,12 @@ module.exports = {
             };
             
         } else if (subcommand === '伺服器狀態') {
-            const serverIP = interaction.options.getString('伺服器位址');
-            
             try {
+                const serverIP = interaction.options.getString('伺服器位址');
+
+                // 發送執行指令的摘要到 sendLog
+                sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/麥塊 伺服器位址(${serverIP})`, "INFO");
+
                 const response = await util.status(serverIP);
                 const serverIcon = `${MCARVSTAT}/icon/${serverIP}`;
                 const latency = response.roundTripLatency ?? '無法獲取';

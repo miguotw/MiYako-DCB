@@ -34,8 +34,13 @@ module.exports = {
                 return errorReply(interaction, '**你必須是伺服器的管理者才能使用此指令！**');
             }
 
-            const roleId = ROLE && ROLE.trim() !== '' ? `<@&${ROLE}>` : '@everyone'; // 若 ROLE 為空則提及 everyone
             const streamTitle = interaction.options.getString('標題'); // 使用者輸入的標題
+
+            // 發送執行指令的摘要到 sendLog
+            sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/直播 標題(${streamTitle})`, "INFO");
+
+
+            const roleId = ROLE && ROLE.trim() !== '' ? `<@&${ROLE}>` : '@everyone'; // 若 ROLE 為空則提及 everyone
             const randomValue = Math.floor(100000 + Math.random() * 900000); // 生成隨機數以避免快取
             const randomMessage = MESSAGE_STREAM[Math.floor(Math.random() * MESSAGE_STREAM.length)]; // 隨機選擇一條訊息
 

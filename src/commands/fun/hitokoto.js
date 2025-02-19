@@ -20,6 +20,9 @@ module.exports = {
         .setDescription('獲取一條動漫相關的名言短句'),
     async execute(interaction) {
         try {
+            // 發送執行指令的摘要到 sendLog
+            sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/一言`, "INFO");
+
             // 請求短句 API
             const response = await axios.get(HITOKOTO);
             const { hitokoto, from } = response.data;

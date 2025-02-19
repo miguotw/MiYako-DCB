@@ -21,9 +21,12 @@ module.exports = {
                 .setRequired(false)),
 
     async execute(interaction) {
-        const question = interaction.options.getString('問題'); // 獲取使用者輸入的問題
-
         try {
+            const question = interaction.options.getString('問題'); // 獲取使用者輸入的問題
+
+            // 發送執行指令的摘要到 sendLog
+            sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/deepseek 問題(${question})`, "INFO");
+
             // 創建嵌入訊息
             const embed = new EmbedBuilder()
             .setColor(EMBED_COLOR) // 設置顏色
