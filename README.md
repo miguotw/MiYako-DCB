@@ -23,36 +23,26 @@
 
 ## 🚀 使用方式
 
-> 推薦使用 [Node JS](https://nodejs.org/) (`v18`)
+**推薦使用 [Node JS](https://nodejs.org/) (`v18`)**
 
-1. **Clone 儲存庫**  
-
-    將本儲存庫 clone 到本地：
+1. **Clone 儲存庫：**將本儲存庫 clone 到本地
 
     ```bash
-    git clone https://github.com/your-repo/MiYako-DCB.git
+    git clone https://github.com/miguotw/MiYako-DCB.git
     ```
 
-2. **設定配置文件** 
+2. **設定配置文件：**填妥 `config_example.yml` 所有空缺項目，並將其重新命名為 `config.yml`
 
-    填妥 `config_example.yml` 所有空缺項目，並將其重新命名為 `config.yml`。
-
-4. **安裝依賴項目**
-
-    在終端輸入以下指令以安裝必要依賴項目：
+4. **安裝依賴項目：**在終端輸入以下指令以安裝必要依賴項目
 
     ```bash
     npm install
     ```
 
-5. **啟動機器人**
-
-    在終端輸入以下指令以啟動機器人：
+5. **啟動機器人：**在終端輸入以下指令以啟動機器人
 
     ```bash
     node index.js
     ```
 
-6. **完成！**
-
-    您可以將機器人部屬到本地或雲端主機！
+6. **完成！**您可以將機器人部屬到本地或雲端主機！
