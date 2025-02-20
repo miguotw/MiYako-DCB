@@ -13,7 +13,7 @@ const DELETE_LIMIT = Math.min(config.Admin.Message_Delete.Limit || 100, 100); //
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('刪除訊息')
-        .setDescription('刪除大量訊息')
+        .setDescription('批量刪除訊息')
         .addIntegerOption(option =>
             option.setName('數量')
                 .setDescription(`要刪除的訊息數量 (1~${DELETE_LIMIT})`)
