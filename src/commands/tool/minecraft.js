@@ -7,6 +7,7 @@ const { errorReply } = require(path.join(process.cwd(), 'core/error_reply'));
 
 // 導入設定檔內容
 const EMBED_COLOR = config.Embed_Color;
+const EMBED_EMOJI = config.Emoji.Commands.Minecraft;
 const STARILGHT_SKIN = config.API.Minecraft.Starlight_Skin; // 皮膚 API 連結
 const MINOTAR = config.API.Minecraft.Minotar; // 皮膚 API 連結
 const MCARVSTAT = config.API.Minecraft.Mcsrvstat; // 伺服器圖示 API 連結
@@ -49,7 +50,7 @@ module.exports = {
                 // 創建嵌入訊息
                 const embed = new EmbedBuilder()
                     .setColor(EMBED_COLOR) // 設置顏色
-                    .setTitle(`🧱 ┃ 玩家外觀 - ${playerName}`)  // 標題
+                    .setTitle(`${EMBED_EMOJI} ┃ 玩家外觀 - ${playerName}`)  // 標題
                     .setThumbnail(Minotar_Avatar) // 設置 avatar 圖示
                     .setImage(Starlight_Skin)
                     .setFooter({ text: '使用 Minotar 與 StarLight Skins API' });
@@ -94,7 +95,7 @@ module.exports = {
                 
                 const embed = new EmbedBuilder()
                     .setColor(EMBED_COLOR)
-                    .setTitle(`🧱 ┃ 伺服器狀態 - ${serverIP}`)
+                    .setTitle(`${EMBED_EMOJI} ┃ 伺服器狀態 - ${serverIP}`)
                     .setDescription(response.motd.clean)
                     .setThumbnail(serverIcon) // 顯示伺服器圖示
                     .addFields(

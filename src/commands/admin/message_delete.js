@@ -6,6 +6,8 @@ const { errorReply } = require(path.join(process.cwd(), 'core/error_reply'));
 
 // 導入設定檔內容
 const EMBED_COLOR = config.Embed_Color;
+const EMBED_EMOJI = config.Emoji.Commands.Message_Delete;
+const LOADING_EMOJI = config.Emoji.Loading;
 const DELETE_LIMIT = Math.min(config.Admin.Message_Delete.Limit || 100, 100); //讀取最大刪除數量，當設定值超過 100 時，限制最大值為 100
 
 module.exports = {
@@ -37,8 +39,8 @@ module.exports = {
             // 提示開始刪除
             const embed = new EmbedBuilder()
                 .setColor(EMBED_COLOR) // 設置顏色
-                .setTitle('🗑️ ┃ 刪除訊息')  // 標題
-                .setDescription(`正在刪除 ${amount} 條訊息，這可能需要一些時間...`)
+                .setTitle(`${EMBED_EMOJI} ┃ 刪除訊息`)  // 標題
+                .setDescription(`正在刪除 ${amount} 條訊息，這可能需要一些時間 ${LOADING_EMOJI}`)
 
             await interaction.reply({
                 embeds: [embed],

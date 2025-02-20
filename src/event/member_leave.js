@@ -6,6 +6,7 @@ const { sendLog } = require(path.join(process.cwd(), 'core/log'));
 // 導入設定檔內容
 const LEAVE_MESSAGES = config.Message.Member.Leave;
 const EMBED_COLOR = config.Embed_Color;
+const EMBED_EMOJI = config.Emoji.Event.Member;
 
 module.exports = (client) => {
     client.on(Events.GuildMemberRemove, async (member) => {
@@ -17,7 +18,7 @@ module.exports = (client) => {
 
             const embed = new EmbedBuilder()
                 .setColor(EMBED_COLOR)
-                .setTitle('🚧 ┃ 成員離開 (；′⌒`)')
+                .setTitle(`${EMBED_EMOJI} ┃ 成員離開 (；′⌒')`)
                 .setDescription(`**${member.user.username}** 已離開 **${member.guild.name}**！`)
                 .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
                 .addFields({

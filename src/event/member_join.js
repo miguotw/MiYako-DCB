@@ -6,6 +6,7 @@ const { sendLog } = require(path.join(process.cwd(), 'core/log'));
 // 導入設定檔內容
 const JOIN_MESSAGES = config.Message.Member.Join;
 const EMBED_COLOR = config.Embed_Color;
+const EMBED_EMOJI = config.Emoji.Event.Member;
 
 module.exports = (client) => {
     client.on(Events.GuildMemberAdd, async (member) => {
@@ -17,7 +18,7 @@ module.exports = (client) => {
 
             const embed = new EmbedBuilder()
                 .setColor(EMBED_COLOR)
-                .setTitle('🚧 ┃ 歡迎新成員！')
+                .setTitle(`${EMBED_EMOJI} ┃ 歡迎新成員！`)
                 .setDescription(`**${member.user.username}** 已加入 **${member.guild.name}**！`)
                 .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
                 .addFields({

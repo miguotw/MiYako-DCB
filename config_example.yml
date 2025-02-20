@@ -48,6 +48,24 @@ Message:
     - "開播啦！一起享受這場直播！"
 
 #-------------------------------
+# 表情符號
+Emoji:
+  Commands:
+    Announcement: "📢"
+    Message_Delete: "🗑️"
+    Stream: "🍘"
+    Ping: "🏓"
+    Deepseek: "🐋" 
+    Hitokoto: "🍵"
+    Minecraft: "🧱"
+    
+  Event:
+    Member: "🚧"
+
+  Error_Reply: "❌"
+  Loading: "..."
+
+#-------------------------------
 # 管理功能
 Admin:
   Message_Delete:

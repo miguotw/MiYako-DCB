@@ -6,6 +6,8 @@ const { errorReply } = require(path.join(process.cwd(), 'core/error_reply'));
 
 // 導入設定檔內容
 const EMBED_COLOR = config.Embed_Color;
+const EMBED_EMOJI = config.Emoji.Commands.Deepseek;
+const LOADING_EMOJI = config.Emoji.Loading;
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -26,8 +28,8 @@ module.exports = {
             // 創建嵌入訊息
             const embed = new EmbedBuilder()
             .setColor(EMBED_COLOR) // 設置顏色
-            .setTitle('🐋 ┃ DeepSeek')  // 標題
-            .setDescription('思考中...')
+            .setTitle(`${EMBED_EMOJI} ┃ DeepSeek`)  // 標題
+            .setDescription(`思考中 ${LOADING_EMOJI}`)
 
             // 發送初始 Embed
             await interaction.reply({
@@ -39,7 +41,7 @@ module.exports = {
                 try {
                     const embed = new EmbedBuilder()
                     .setColor(EMBED_COLOR) // 設置顏色
-                    .setTitle('🐋 ┃ DeepSeek')  // 標題
+                    .setTitle(`${EMBED_EMOJI} ┃ DeepSeek`)  // 標題
                     .setDescription('服务器繁忙，请稍后再试。')
 
                     await interaction.editReply({

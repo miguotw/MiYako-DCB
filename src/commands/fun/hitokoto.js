@@ -8,6 +8,7 @@ const { errorReply } = require(path.join(process.cwd(), 'core/error_reply'));
 
 // 導入設定檔內容
 const EMBED_COLOR = config.Embed_Color;
+const EMBED_EMOJI = config.Emoji.Commands.Hitokoto;
 const HITOKOTO = config.API.Hitokoto;
 
 module.exports = {
@@ -31,7 +32,7 @@ module.exports = {
             // 創建嵌入訊息
             const embed = new EmbedBuilder()
                 .setColor(EMBED_COLOR) // 設置顏色
-                .setTitle('🍵 ┃ 一言')  // 標題
+                .setTitle(`${EMBED_EMOJI} ┃ 一言`)  // 標題
                 .setDescription(hitokotoText) // 顯示短句
                 .addFields({
                     name: '　',

@@ -6,6 +6,7 @@ const { errorReply } = require(path.join(process.cwd(), 'core/error_reply'));
 
 // 導入設定檔內容
 const EMBED_COLOR = config.Embed_Color;
+const EMBED_EMOJI = config.Emoji.Commands.Ping;
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -22,7 +23,7 @@ module.exports = {
             // 創建一個嵌入訊息
             const embed = new EmbedBuilder()
                 .setColor(EMBED_COLOR) // 設置顏色
-                .setTitle('🏓 ┃ 乓！')  // 標題
+                .setTitle(`${EMBED_EMOJI} ┃ 乓！`)  // 標題
                 .setDescription(`機器人延遲延遲: ${latency}ms`) // 顯示延遲時間
                 .setTimestamp();  // 加入時間戳
 

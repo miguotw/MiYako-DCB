@@ -6,6 +6,7 @@ const { errorReply } = require(path.join(process.cwd(), 'core/error_reply'));
 
 // 導入設定檔內容
 const EMBED_COLOR = config.Embed_Color;
+const EMBED_EMOJI = config.Emoji.Commands.Announcement;
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -50,7 +51,7 @@ module.exports = {
                 // 創建嵌入內容
                 const embed = new EmbedBuilder()
                     .setColor(EMBED_COLOR)
-                    .setTitle('📢 ┃ 公告')
+                    .setTitle(`${EMBED_EMOJI} ┃ 公告`)
                     .setDescription(messageContent)
 
                 if (imageUrl) embed.setImage(imageUrl); // 設置圖片

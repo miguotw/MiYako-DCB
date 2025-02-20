@@ -4,6 +4,7 @@ const { config } = require(path.join(process.cwd(), 'core/config'));
 
 // 導入設定檔內容
 const EMBED_COLOR_ERROR = config.Embed_Color_error;  
+const EMBED_EMOJI = config.Emoji.Error_Reply;
 
 /**
 // 回覆錯誤訊息給使用者
@@ -12,7 +13,7 @@ const EMBED_COLOR_ERROR = config.Embed_Color_error;
  */
 async function errorReply(interaction, errorMessage) {
     const embed = new EmbedBuilder()
-        .setTitle('錯誤 / 無權限')
+        .setTitle(`${EMBED_EMOJI} ┃ 執行時失敗`)
         .setColor(EMBED_COLOR_ERROR)
         .setDescription(errorMessage)
 

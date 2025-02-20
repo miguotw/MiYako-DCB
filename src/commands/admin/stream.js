@@ -13,6 +13,7 @@ const TWITCH_USER_AVATAR = config.Stream.User_Avatar;
 const TWITCH_USER_LOGIN = config.Stream.User_Login;
 const ROLE = config.Stream.Role;
 const EMBED_COLOR = config.Embed_Color;
+const EMBED_EMOJI = config.Emoji.Commands.Stream;
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -42,9 +43,7 @@ module.exports = {
 
             // 創建嵌入內容
             const embed = new EmbedBuilder()
-                .setAuthor({ 
-                    name: '🍘 ┃ 直播通知'
-                })
+                .setAuthor({ name: `${EMBED_EMOJI} ┃ 直播通知`})
                 .setColor(EMBED_COLOR)
                 .setTitle(streamTitle)
                 .setURL(`https://www.twitch.tv/${TWITCH_USER_LOGIN}`)
