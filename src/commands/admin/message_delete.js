@@ -1,16 +1,12 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionsBitField } = require('discord.js');
-const fs = require('fs');
-const yaml = require('yaml');
 const path = require('path');
+const { SlashCommandBuilder, EmbedBuilder, PermissionsBitField } = require('discord.js');
+const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/log'));
 const { errorReply } = require(path.join(process.cwd(), 'core/error_reply'));
 
-// 讀取 YAML 設定檔
-const configFile = fs.readFileSync('./config.yml', 'utf8'); // 根據你的專案結構調整路徑
-const config = yaml.parse(configFile);
-
-const EMBED_COLOR = config.Embed_Color;  // 嵌入介面顏色
-const DELETE_LIMIT = Math.min(config.Admin.Message_Delete.Limit || 100, 100); // 從 YAML 配置檔中讀取最大刪除數量
+// 導入設定檔內容
+const EMBED_COLOR = config.Embed_Color;
+const DELETE_LIMIT = Math.min(config.Admin.Message_Delete.Limit || 100, 100); //讀取最大刪除數量，當設定值超過 100 時，限制最大值為 100
 
 module.exports = {
     data: new SlashCommandBuilder()

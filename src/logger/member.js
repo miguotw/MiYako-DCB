@@ -1,17 +1,13 @@
-const { Events } = require('discord.js');
-const fs = require('fs');
-const yaml = require('yaml');
 const path = require('path');
+const { Events } = require('discord.js');
+const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/log'));
 
-// 讀取 YAML 設定檔
-const configFile = fs.readFileSync('./config.yml', 'utf8');
-const config = yaml.parse(configFile);
-
-
+// 成員加入與離開
 module.exports = (client) => {
-    // 成員加入與離開
+
     if (config.Logger.Type.Member) {
+        //成員加入
         client.on(Events.GuildMemberAdd, async (member) => {
             try {
                 sendLog(client, `🚧 ${member.user.username} 已加入「${member.guild.name}」`);
@@ -20,6 +16,7 @@ module.exports = (client) => {
             }
         });
 
+        //成員離開
         client.on(Events.GuildMemberRemove, async (member) => {
             try {
                 sendLog(client, `🚧 ${member.user.username} 已離開「${member.guild.name}」`);

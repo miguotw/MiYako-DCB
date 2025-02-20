@@ -1,15 +1,11 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const fs = require('fs');
-const yaml = require('yaml');
 const path = require('path');
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/log'));
 const { errorReply } = require(path.join(process.cwd(), 'core/error_reply'));
 
-// 讀取 YAML 設定檔
-const configFile = fs.readFileSync('./config.yml', 'utf8'); // 根據你的專案結構調整路徑
-const config = yaml.parse(configFile);
-
-const EMBED_COLOR = config.Embed_Color;  // 嵌入介面顏色
+// 導入設定檔內容
+const EMBED_COLOR = config.Embed_Color;
 
 module.exports = {
     data: new SlashCommandBuilder()

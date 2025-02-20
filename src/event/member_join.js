@@ -1,14 +1,11 @@
-const { Events, EmbedBuilder } = require('discord.js');
-const fs = require('fs');
-const yaml = require('yaml');
 const path = require('path');
+const { Events, EmbedBuilder } = require('discord.js');
+const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/log'));
 
-// 讀取 YAML 設定檔
-const configFile = fs.readFileSync('./config.yml', 'utf8');
-const config = yaml.parse(configFile);
+// 導入設定檔內容
 const JOIN_MESSAGES = config.Message.Member.Join;
-const EMBED_COLOR = config.Embed_Color;  // 嵌入介面顏色
+const EMBED_COLOR = config.Embed_Color;
 
 module.exports = (client) => {
     client.on(Events.GuildMemberAdd, async (member) => {

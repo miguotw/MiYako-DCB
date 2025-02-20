@@ -1,13 +1,12 @@
+const path = require('path');
 const { EmbedBuilder } = require('discord.js');
-const fs = require('fs');
-const yaml = require('yaml');
+const { config } = require(path.join(process.cwd(), 'core/config'));
 
-const configFile = fs.readFileSync('./config.yml', 'utf8');
-const config = yaml.parse(configFile);
-const EMBED_COLOR_ERROR = config.Embed_Color_error;  // 嵌入介面顏色
+// 導入設定檔內容
+const EMBED_COLOR_ERROR = config.Embed_Color_error;  
 
 /**
- * 回覆錯誤訊息給使用者
+// 回覆錯誤訊息給使用者
  * @param {Interaction} interaction - Discord 的 interaction 物件
  * @param {string} errorMessage - 錯誤訊息內容
  */

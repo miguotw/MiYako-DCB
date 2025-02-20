@@ -1,15 +1,10 @@
-const fs = require('fs');
-const yaml = require('yaml');
 const path = require('path');
+const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/log'));
 
-// 讀取 YAML 設定檔
-const configFile = fs.readFileSync('./config.yml', 'utf8');
-const config = yaml.parse(configFile);
-
-
+// 記錄語音頻道進出
 module.exports = (client) => {
-    // 記錄語音頻道進出
+
     if (config.Logger.Type.Voice) {
         client.on('voiceStateUpdate', (oldState, newState) => {
             const user = newState.member.user; // 取得使用者資料

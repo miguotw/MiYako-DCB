@@ -1,16 +1,12 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const fs = require('fs');
-const yaml = require('yaml');
-const util = require('minecraft-server-util');
 const path = require('path');
+const util = require('minecraft-server-util');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/log'));
 const { errorReply } = require(path.join(process.cwd(), 'core/error_reply'));
 
-// 讀取 YAML 設定檔
-const configFile = fs.readFileSync('./config.yml', 'utf8');
-const config = yaml.parse(configFile);
-
-const EMBED_COLOR = config.Embed_Color;  // 嵌入介面顏色
+// 導入設定檔內容
+const EMBED_COLOR = config.Embed_Color;
 const STARILGHT_SKIN = config.API.Minecraft.Starlight_Skin; // 皮膚 API 連結
 const MINOTAR = config.API.Minecraft.Minotar; // 皮膚 API 連結
 const MCARVSTAT = config.API.Minecraft.Mcsrvstat; // 伺服器圖示 API 連結

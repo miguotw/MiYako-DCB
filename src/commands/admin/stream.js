@@ -1,22 +1,18 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionsBitField } = require('discord.js');
-const fs = require('fs');
-const yaml = require('yaml');
-const axios = require('axios');
 const path = require('path');
+const axios = require('axios');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionsBitField } = require('discord.js');
+const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/log'));
 const { errorReply } = require(path.join(process.cwd(), 'core/error_reply'));
 
-// 讀取 YAML 設定檔
-const configFile = fs.readFileSync('./config.yml', 'utf8'); // 根據你的專案結構調整路徑
-const config = yaml.parse(configFile);
-
+// 導入設定檔內容
 const TWITCH_CLIENT_ID = config.API.Twitch.Client_ID;
 const TWITCH_ACCESS_TOKEN = config.API.Twitch.Access_Token;
 const MESSAGE_STREAM = config.Message.Stream;
 const TWITCH_USER_AVATAR = config.Stream.User_Avatar;
 const TWITCH_USER_LOGIN = config.Stream.User_Login;
 const ROLE = config.Stream.Role;
-const EMBED_COLOR = config.Embed_Color;  // 嵌入介面顏色
+const EMBED_COLOR = config.Embed_Color;
 
 module.exports = {
     data: new SlashCommandBuilder()

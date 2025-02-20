@@ -1,15 +1,10 @@
-const fs = require('fs');
-const yaml = require('yaml');
 const path = require('path');
+const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/log'));
 
-// 讀取 YAML 設定檔
-const configFile = fs.readFileSync('./config.yml', 'utf8');
-const config = yaml.parse(configFile);
-
-
+// 記錄成員身分組變更
 module.exports = (client) => {
-    // 記錄成員身分組變更
+    
     if (config.Logger.Type.Role) {
         client.on('guildMemberUpdate', async (oldMember, newMember) => {
             const user = newMember.user;
@@ -18,6 +13,7 @@ module.exports = (client) => {
 
             // 找出新增的身分組
             const addedRoles = newRoles.filter(role => !oldRoles.includes(role));
+            
             // 找出移除的身分組
             const removedRoles = oldRoles.filter(role => !newRoles.includes(role));
 

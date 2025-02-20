@@ -1,13 +1,8 @@
-const fs = require('fs');
-const yaml = require('yaml');
 const path = require('path');
+const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/log'));
 
-// 讀取 YAML 設定檔
-const configFile = fs.readFileSync('./config.yml', 'utf8');
-const config = yaml.parse(configFile);
-
-
+// 記錄訊息
 module.exports = (client) => {
     // 記錄新訊息
     if (config.Logger.Type.Message.Create) {
@@ -31,7 +26,7 @@ module.exports = (client) => {
     if (config.Logger.Type.Message.Delete) {
         client.on('messageDelete', async (message) => {
             if (!message.author.bot) {
-                sendLog(client, `🗑️ ${message.author.tag} 在「#${message.channel.name}」刪除了訊息: ${message.content || "無法獲取內容"}`, "WARN");
+                sendLog(client, `✏️ ${message.author.tag} 在「#${message.channel.name}」刪除了訊息: ${message.content || "無法獲取內容"}`, "WARN");
             }
         });
     }
