@@ -93,6 +93,19 @@ module.exports = {
                 }
                 const websiteURL = `https://www.${secondLevelDomain}`;
                 
+                // 處理玩家列表
+                const maxPlayersToList = 50; // 最多顯示的玩家數量
+                const players = response.players?.sample?.map(p => p.name) || [];
+                let playersList;
+  
+                if (players.length === 0) {
+                    playersList = '無法取得線上玩家，或目前無玩家在線。';
+                } else if (players.length > maxPlayersToList) {
+                    playersList = players.slice(0, maxPlayersToList).join('、') + `（還有 ${players.length - maxPlayersToList} 位玩家未列出）`;
+                } else {
+                    playersList = players.slice(0, maxPlayersToList).join('、');
+                }
+
                 const embed = new EmbedBuilder()
                     .setColor(EMBED_COLOR)
                     .setTitle(`${EMBED_EMOJI} ┃ 伺服器狀態 - ${serverIP}`)
@@ -101,9 +114,10 @@ module.exports = {
                     .addFields(
                         { name: '玩家在線', value: `${response.players.online} / ${response.players.max}`, inline: true },
                         { name: '遊戲版本', value: response.version.name, inline: true },
-                        { name: '遊戲延遲', value: `${latency}ms`, inline: true }
+                        { name: '遊戲延遲', value: `${latency}ms`, inline: true },
+                        { name: '線上玩家', value: `||${playersList}||`, inline: false }
                     )
-                    .setFooter({ text: '使用 Minecraft Server Util' });
+                    //.setFooter({ text: '使用 Minecraft Server Util' });
                 
                 const row = new ActionRowBuilder();
                 
