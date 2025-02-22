@@ -66,10 +66,13 @@ Emoji:
   Loading: "..."
 
 #-------------------------------
-# 管理功能
-Admin:
+# 指令設定
+Commands:
   Message_Delete:
     Limit: 30 #最多支援一次刪除 100 則訊息
+
+  Minecraft:
+    Hypixel: "mc.hypixel.net" #伺服器名稱與 IP，可繼續向下延伸，最多支援 25 個
 
 #-------------------------------
 # 直播相關

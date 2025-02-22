@@ -8,7 +8,7 @@ const { errorReply } = require(path.join(process.cwd(), 'core/error_reply'));
 const EMBED_COLOR = config.Embed_Color;
 const EMBED_EMOJI = config.Emoji.Commands.Message_Delete;
 const LOADING_EMOJI = config.Emoji.Loading;
-const DELETE_LIMIT = Math.min(config.Admin.Message_Delete.Limit || 100, 100); //讀取最大刪除數量，當設定值超過 100 時，限制最大值為 100
+const DELETE_LIMIT = Math.min(config.Commands.Message_Delete.Limit || 100, 100); //讀取最大刪除數量，當設定值超過 100 時，限制最大值為 100
 
 module.exports = {
     data: new SlashCommandBuilder()
