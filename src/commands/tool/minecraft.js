@@ -131,7 +131,6 @@ module.exports = {
                     } else {
                         secondLevelDomain = serverIP;
                     }
-                    const websiteURL = `https://www.${secondLevelDomain}`;
                     
                     // 處理玩家列表
                     const players = response.players?.sample?.map(p => p.name.replace(/_/g, '\\_')) || []; // 轉義 _ 避免 Markdown 格式
@@ -158,15 +157,32 @@ module.exports = {
                         )
                         //.setFooter({ text: '使用 Minecraft Server Util' });
                     
-                    const row = new ActionRowBuilder()
-                        .addComponents(
-                            new ButtonBuilder()
-                                .setLabel('前往伺服器官網')
-                                .setStyle(ButtonStyle.Link)
-                                .setURL(websiteURL)
-                        );
-                        
-                    await interaction.reply({ embeds: [embed], components: [row] });
+                    // 僅在使用域名查詢時顯示「前往伺服器官網」按鈕
+                    // let row;
+                    // if (isValidDomain) {
+                    //     const domainParts = serverIP.split('.');
+                    //     let secondLevelDomain;
+                    //     if (domainParts.length > 2) {
+                    //         secondLevelDomain = domainParts.slice(-2).join('.');
+                    //     } else {
+                    //         secondLevelDomain = serverIP;
+                    //     }
+                    //     const websiteURL = `https://www.${secondLevelDomain}`;
+
+                    //     row = new ActionRowBuilder()
+                    //         .addComponents(
+                    //             new ButtonBuilder()
+                    //                 .setLabel('前往伺服器官網')
+                    //                 .setStyle(ButtonStyle.Link)
+                    //                 .setURL(websiteURL)
+                    //         );
+                    // }
+
+                    // 回覆訊息
+                    await interaction.reply({ 
+                        embeds: [embed], 
+                        // components: row ? [row] : []
+                    });
                 } catch (error) {
                     // 如果伺服器不是 Minecraft 伺服器或無法連接
                     sendLog(interaction.client, `❌ 無法連接到伺服器 ${serverIP}，伺服器可能離線或無法連接`, "ERROR", error); // 記錄錯誤日誌
