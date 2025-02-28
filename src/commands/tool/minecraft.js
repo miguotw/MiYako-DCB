@@ -61,9 +61,9 @@ module.exports = {
             
                 // 創建嵌入訊息
                 const embed = new EmbedBuilder()
-                    .setColor(EMBED_COLOR) // 設置顏色
-                    .setTitle(`${EMBED_EMOJI} ┃ 玩家外觀 - ${playerName}`)  // 標題
-                    .setThumbnail(Minotar_Avatar) // 設置 avatar 圖示
+                    .setColor(EMBED_COLOR)
+                    .setTitle(`${EMBED_EMOJI} ┃ 玩家外觀 - ${playerName}`)
+                    .setThumbnail(Minotar_Avatar)
                     .setImage(Starlight_Skin)
                     .setFooter({ text: '使用 Minotar 與 StarLight Skins API' });
 
@@ -136,7 +136,7 @@ module.exports = {
                     .setColor(EMBED_COLOR)
                     .setTitle(`${EMBED_EMOJI} ┃ 伺服器狀態 - ${serverIP}`)
                     .setDescription(data.motd.clean)
-                    .setThumbnail(serverIcon) // 顯示伺服器圖示
+                    .setThumbnail(serverIcon)
                     .addFields(
                         { name: '玩家在線', value: `${data.players.online} / ${data.players.max}`, inline: true },
                         { name: '遊戲版本', value: data.version.name_clean, inline: true },
