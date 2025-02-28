@@ -43,7 +43,7 @@ module.exports = {
 
             // 創建嵌入內容
             const embed = new EmbedBuilder()
-                .setAuthor({ name: `${EMBED_EMOJI} ┃ 直播通知`})
+                .setAuthor({ name: `🍘 ┃ 直播通知`})
                 .setColor(EMBED_COLOR)
                 .setTitle(streamTitle)
                 .setURL(`https://www.twitch.tv/${TWITCH_USER_LOGIN}`)
