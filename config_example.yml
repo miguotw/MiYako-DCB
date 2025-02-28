@@ -51,11 +51,12 @@ Message:
 # 表情符號
 Emoji:
   Commands:
+    About: "🔰"
     Announcement: "📢"
     Message_Delete: "🗑️"
     Stream: "🍘"
     Ping: "🏓"
-    Deepseek: "🐋" 
+    Deepseek: "🐋"
     Hitokoto: "🍵"
     IP_Query: "ℹ️"
     Minecraft: "🧱"
@@ -83,10 +84,16 @@ Stream:
   Role: "" # 要提及的身分組 ID ，若不填寫則預設為 @everyone
 
 #-------------------------------
+# 關於
+About:
+  Bot_Nicdname: "みやこ"
+  Introduce: "みやこ機器人第三代！\n這是一個基於 discord.js 集合許多功能的綜合型機器人，\n本專案目前仍在積極開發中！前往 [GitHub 倉庫](https://github.com/miguotw/MiYako-DCB) 。"
+
+#-------------------------------
 # 外部 API
 API:
-  Hitokoto:  https://v1.hitokoto.cn/?c=a&encode=json
-  IP_API: http://ip-api.com/
+  Hitokoto: "https://v1.hitokoto.cn/?c=a&encode=json"
+  IP_API: "http://ip-api.com/"
 
   Twitch:
     Client_ID: "" # 暫時無作用
