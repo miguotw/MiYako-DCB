@@ -86,7 +86,7 @@ require('./src/event/member_leave.js')(client);
 
 // 當機器人啟動時，發送日誌訊息到指定頻道
 client.once('ready', async () => {
-    sendLog(client, `✅ 機器人已啟動！以「${client.user.tag}」身分登入！`);
+    sendLog(client, `✅ 機器人已啟動！以「${client.user.tag}」身分登入！在 ${client.guilds.cache.size} 個伺服器提供服務！`);
 
     try {
         // 使用 axios 獲取一言內容
@@ -103,22 +103,6 @@ client.once('ready', async () => {
     } catch (error) {
         sendLog(client, "❌ 無法獲取 Hitokoto API 資料：", "ERROR", error);
     }
-
-    try {
-        // 列出機器人所在的伺服器
-        const guilds = client.guilds.cache;
-        let guildList = '✅ 在以下伺服器提供服務：\n';
-        guilds.forEach(guild => {
-            guildList += ` - ${guild.name} (${guild.id})\n`;
-        });
-
-        // 發送伺服器列表
-        sendLog(client, guildList);
-    } catch (error) {
-        // 如果列出伺服器時發生錯誤，記錄錯誤訊息
-        sendLog(client, "❌ 列出伺服器時發生錯誤：", "ERROR", error);
-    }
 });
-
 
 client.login(TOKEN);
