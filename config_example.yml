@@ -57,6 +57,7 @@ Emoji:
     Ping: "🏓"
     Deepseek: "🐋" 
     Hitokoto: "🍵"
+    IP_Query: "ℹ️"
     Minecraft: "🧱"
     
   Event:
@@ -85,6 +86,7 @@ Stream:
 # 外部 API
 API:
   Hitokoto:  https://v1.hitokoto.cn/?c=a&encode=json
+  IP_API: http://ip-api.com/
 
   Twitch:
     Client_ID: "" # 暫時無作用
