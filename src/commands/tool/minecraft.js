@@ -48,7 +48,7 @@ module.exports = {
     async execute(interaction) {
         const subcommand = interaction.options.getSubcommand();
 
-        if (subcommand === '外觀') {
+        if (subcommand === '玩家外觀資訊') {
             try {
                 const playerName = interaction.options.getString('玩家名稱');
 
@@ -84,7 +84,7 @@ module.exports = {
                 errorReply(interaction, '**發生未預期的錯誤，請向開發者回報！**'); // 向用戶顯示錯誤訊息
             };
             
-        } else if (subcommand === '伺服器狀態') {
+        } else if (subcommand === '伺服器狀態資訊') {
             try {
                 // 優先使用「選擇預設伺服器」，若未選擇則使用「輸入伺服器位址」
                 const serverIP = interaction.options.getString('選擇預設伺服器') || interaction.options.getString('輸入伺服器位址');
