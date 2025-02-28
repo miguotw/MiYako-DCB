@@ -19,16 +19,16 @@ module.exports = {
         .setDescription('麥塊相關的輔助功能')
         .addSubcommand(subcommand => 
             subcommand
-                .setName('外觀')
-                .setDescription('查詢 Minecraft 玩家的外觀')
+                .setName('玩家外觀資訊')
+                .setDescription('查詢 Minecraft 玩家的外觀資訊')
                 .addStringOption(option => 
                     option.setName('玩家名稱')
                           .setDescription('要查詢的玩家名稱')
                           .setRequired(true)))
             .addSubcommand(subcommand => 
             subcommand
-                .setName('伺服器狀態')
-                .setDescription('查詢 Minecraft 伺服器狀態')
+                .setName('伺服器狀態資訊')
+                .setDescription('查詢 Minecraft 伺服器狀態資訊')
                 .addStringOption(option => 
                     option.setName('選擇預設伺服器')
                           .setDescription('從預設列表中選擇伺服器')
@@ -127,10 +127,8 @@ module.exports = {
         
                 if (players.length === 0) {
                     playersList = '無法取得線上玩家，或目前無玩家在線。';
-                } else if (players.length <= data.players.online) {
-                    playersList = players.join('、') + ` …等。`;
                 } else {
-                    playersList = players.join('、') + `。`;
+                    playersList = players.join('、') + `\n-# 一次僅顯示最多 12 位玩家`;
                 }
         
                 // 創建嵌入訊息
@@ -143,7 +141,8 @@ module.exports = {
                         { name: '玩家在線', value: `${data.players.online} / ${data.players.max}`, inline: true },
                         { name: '遊戲版本', value: data.version.name_clean, inline: true },
                         { name: '協定版本', value: data.version.protocol.toString(), inline: true },
-                        { name: '線上玩家', value: playersList, inline: false }
+                        { name: '線上玩家', value: playersList, inline: false },
+                        { name: '真實位址', value: `||${data.ip_address}||`, inline: false }
                     );
         
                 // 回覆訊息
