@@ -9,6 +9,8 @@ const EMBED_COLOR = config.Embed_Color;
 const EMBED_EMOJI = config.Emoji.Commands.About;
 const BOTNICKNAME = config.About.Bot_Nicdname;
 const INTRODUCE = config.About.Introduce;
+const PROVIDER = config.About.Provider;
+const REPOSITORY = config.About.Repository;
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -50,7 +52,8 @@ module.exports = {
                 .setThumbnail(botAvatar)
                 .setDescription(INTRODUCE)
                 .addFields(
-                    { name: '機器人 ID', value: botID, inline: true },
+                    { name: '服務提供者', value: `<@${PROVIDER}>`, inline: true },
+                    { name: 'GitHub 儲存庫', value: `[前往 GitHub 儲存庫](${REPOSITORY})`, inline: true },
                     { name: `共有 ${commandCount} 條指令`, value: commands || '無', inline: false },
                     { name: `在 ${guilds.size.toString()} 個伺服器提供服務`, value: guildList || '無', inline: false }
                 );

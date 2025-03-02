@@ -85,14 +85,16 @@ Stream:
 #-------------------------------
 # 關於
 About:
-  Bot_Nicdname: "みやこ"
-  Introduce: "みやこ機器人第三代！\n這是一個基於 discord.js 集合許多功能的綜合型機器人，\n本專案目前仍在積極開發中！前往 [GitHub 倉庫](https://github.com/miguotw/MiYako-DCB) 。"
+  Bot_Nicdname: "みやこ" # 機器人暱稱
+  Introduce: "みやこ機器人第三代！\n這是一個基於 discord.js 集合許多功能的綜合型機器人，\n本專案目前仍在積極開發中！" # 關於機器人的介紹
+  Provider: "" # 服務提供者，請填入您的 Discord 數字 ID
+  Repository: "https://github.com/miguotw/MiYako-DCB" # 專案連結 
 
 #-------------------------------
 # 外部 API
 API:
-  Hitokoto: "https://v1.hitokoto.cn/?c=a&encode=json"
-  IP_API: "http://ip-api.com/"
+  Hitokoto: "https://v1.hitokoto.cn/?c=a&encode=json" # 一言 API
+  IP_API: "http://ip-api.com/" # IP 查詢 API
 
   Twitch:
     Client_ID: "" # 暫時無作用
