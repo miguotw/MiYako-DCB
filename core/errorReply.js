@@ -21,7 +21,7 @@ async function errorReply(interaction, errorMessage) {
             { name: errorMessage, value: `-# 如果您認為這是機器人本身的問題，請至 [GitHub 儲存庫](${REPOSITORY}) 建立一個 Issue，或與 <@${PROVIDER}> 聯繫，來報告該問題。`, inline: true }
         );
 
-    await interaction.reply({ embeds: [embed], ephemeral: true }).catch(() => {});
+    await interaction.editReply({ embeds: [embed], ephemeral: true }).catch(() => {});
 }
 
 module.exports = { errorReply };

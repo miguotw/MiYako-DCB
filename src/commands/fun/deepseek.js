@@ -19,6 +19,10 @@ module.exports = {
                 .setRequired(false)),
 
     async execute(interaction) {
+
+        //啟用延遲回覆
+        await interaction.deferReply();
+
         try {
             const question = interaction.options.getString('問題'); // 獲取使用者輸入的問題
 
@@ -32,7 +36,7 @@ module.exports = {
             .setDescription(`思考中 ${LOADING_EMOJI}`)
 
             // 發送初始 Embed
-            await interaction.reply({
+            await interaction.editReply({
                 embeds: [embed],
             });
 

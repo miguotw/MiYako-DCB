@@ -47,7 +47,7 @@ module.exports = {
         const subcommand = interaction.options.getSubcommand();
 
         //啟用延遲回覆
-        //await interaction.deferReply();
+        await interaction.deferReply();
 
         if (subcommand === '玩家外觀資訊') {
             try {
@@ -77,7 +77,7 @@ module.exports = {
                             .setURL(Minotar_Download)
                     );
 
-                await interaction.reply({ embeds: [embed], components: [row] });
+                await interaction.editReply({ embeds: [embed], components: [row] });
 
             } catch (error) {
                 // 錯誤處理
@@ -119,7 +119,7 @@ module.exports = {
                     );
         
                 // 回覆訊息
-                await interaction.reply({ 
+                await interaction.editReply({ 
                     embeds: [embed], 
                 });
             } catch (error) {

@@ -20,6 +20,10 @@ module.exports = {
                 .setRequired(true)),
 
     async execute(interaction) {
+
+        //啟用延遲回覆
+        await interaction.deferReply();
+
         try {
             const address = interaction.options.getString('位址');
 
@@ -43,7 +47,7 @@ module.exports = {
                 );
 
             // 回覆訊息
-            await interaction.reply({ embeds: [embed] });
+            await interaction.editReply({ embeds: [embed] });
 
         } catch (error) {
             // 錯誤處理

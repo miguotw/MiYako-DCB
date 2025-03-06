@@ -13,7 +13,12 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('一言')
         .setDescription('獲取一條動漫相關的名言短句'),
+        
     async execute(interaction) {
+
+        //啟用延遲回覆
+        await interaction.deferReply();
+
         try {
             // 發送執行指令的摘要到 sendLog
             sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/一言`, "INFO");
@@ -32,7 +37,7 @@ module.exports = {
                 .setFooter({text: '使用 Hitokoto 語句 API' }); // 頁腳文字
                 
             // 發送嵌入訊息
-            await interaction.reply({
+            await interaction.editReply({
                 embeds: [embed],
             });
             

@@ -13,6 +13,10 @@ module.exports = {
         .setName('延遲')
         .setDescription('測試機器人延遲'),
     async execute(interaction) {
+
+        //啟用延遲回覆
+        await interaction.deferReply();
+
         try {
             
             // 發送執行指令的摘要到 sendLog
@@ -28,7 +32,7 @@ module.exports = {
                 .setTimestamp();  // 加入時間戳
 
             // 回應只對使用者可見
-            await interaction.reply({
+            await interaction.editReply({
                 embeds: [embed],
                 ephemeral: true // 隱藏回應訊息
             });

@@ -20,6 +20,10 @@ module.exports = {
                 .setRequired(true)
         ),
     async execute(interaction) {
+
+        //啟用延遲回覆
+        await interaction.deferReply();
+
         try {
             // 檢查使用者是否具有管理者權限
             if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
@@ -42,7 +46,7 @@ module.exports = {
                 .setTitle(`${EMBED_EMOJI} ┃ 刪除訊息`)  // 標題
                 .setDescription(`正在刪除 ${amount} 條訊息，這可能需要一些時間 ${LOADING_EMOJI}`)
 
-            await interaction.reply({
+            await interaction.editReply({
                 embeds: [embed],
                 ephemeral: true
             });
