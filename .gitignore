@@ -5,8 +5,9 @@ node_modules/
 .env
 config.yml
 
-# Logs
+# Logs and testing files
 *.log
+*.bak
 
 # IDE config files
 .vscode/
