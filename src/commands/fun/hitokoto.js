@@ -1,15 +1,13 @@
 const path = require('path');
-const axios = require('axios');
-const OpenCC = require('opencc-js');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/log'));
 const { errorReply } = require(path.join(process.cwd(), 'core/error_reply'));
+const { getHitokoto } = require(path.join(process.cwd(), 'util/getHitokoto'));
 
 // 導入設定檔內容
 const EMBED_COLOR = config.Embed_Color;
 const EMBED_EMOJI = config.Emoji.Commands.Hitokoto;
-const HITOKOTO = config.API.Hitokoto;
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -20,14 +18,8 @@ module.exports = {
             // 發送執行指令的摘要到 sendLog
             sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/一言`, "INFO");
 
-            // 請求短句 API
-            const response = await axios.get(HITOKOTO);
-            const { hitokoto, from } = response.data;
-
-            // 使用 OpenCC 將簡體中文轉為繁體中文
-            const converter = OpenCC.Converter({ from: 'cn', to: 'twp' });
-            hitokotoText = converter(hitokoto);
-            hitokotoFrom = converter(from);
+            // 獲取短句
+            const { hitokotoText, hitokotoFrom } = await getHitokoto();
 
             // 創建嵌入訊息
             const embed = new EmbedBuilder()

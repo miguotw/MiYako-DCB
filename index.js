@@ -1,10 +1,9 @@
-const { Client, GatewayIntentBits, REST, Routes, Collection } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 const yaml = require('yaml');
-const axios = require('axios');
-const OpenCC = require('opencc-js');
+const { Client, GatewayIntentBits, REST, Routes, Collection } = require('discord.js');
 const { sendLog } = require(path.join(process.cwd(), 'core/log'));
+const { getHitokoto } = require(path.join(process.cwd(), 'util/getHitokoto'));
 
 // 讀取 YAML 設定檔
 const configFile = fs.readFileSync('./config.yml', 'utf8');
@@ -14,7 +13,6 @@ const config = yaml.parse(configFile);
 const TOKEN = config.Start.Token; // 讀取機器人 TOKEN
 const CLIENT_ID = config.Start.Client_ID; //應用程式ID
 const READY_TYPE = config.Message.Ready_Type; // 讀取狀態類型
-const HITOKOTO = config.API.Hitokoto; // 讀取 Hitokoto API 連結
 
 const client = new Client({
     intents: [
@@ -82,20 +80,13 @@ require('./src/logger/voice.js')(client);
 require('./src/event/member_join.js')(client);
 require('./src/event/member_leave.js')(client);
 
-
-
 // 當機器人啟動時，發送日誌訊息到指定頻道
 client.once('ready', async () => {
     sendLog(client, `✅ 機器人已啟動！以「${client.user.tag}」身分登入！在 ${client.guilds.cache.size} 個伺服器提供服務！`);
 
     try {
-        // 使用 axios 獲取一言內容
-        const response = await axios.get(HITOKOTO);
-        let hitokotoText = response.data.hitokoto;
-        
-        // 使用 OpenCC 進行簡體到繁體轉換
-        const converter = OpenCC.Converter({ from: 'cn', to: 'twp' });
-        hitokotoText = converter(hitokotoText);
+        // 獲取短句
+        const { hitokotoText } = await getHitokoto();
 
         // 設定機器人活動狀態
         client.user.setActivity(hitokotoText, { type: READY_TYPE });
