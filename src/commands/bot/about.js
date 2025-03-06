@@ -40,6 +40,12 @@ module.exports = {
             const commandCount = interaction.client.commands.size;
             const commands = interaction.client.commands.map(command => `\`${command.data.name}\``).join(' | ');
 
+            // 計算所有伺服器的成員總數
+            let totalMembers = 0;
+            guilds.forEach(guild => {
+                totalMembers += guild.memberCount;
+            });
+
             // 根據用戶選擇格式化伺服器列表
             const guildList = guilds.map(guild => {
                 return showServerID ? `- ${guild.name}（ID: ${guild.id}）` : `- ${guild.name}`;
@@ -55,7 +61,7 @@ module.exports = {
                     { name: '服務提供者', value: `<@${PROVIDER}>`, inline: true },
                     { name: 'GitHub 儲存庫', value: `[前往 GitHub 儲存庫](${REPOSITORY})`, inline: true },
                     { name: `共有 ${commandCount} 條指令`, value: commands || '無', inline: false },
-                    { name: `在 ${guilds.size.toString()} 個伺服器提供服務`, value: guildList || '無', inline: false }
+                    { name: `在 ${guilds.size.toString()} 個伺服器服務 ${totalMembers.toString()} 位成員`, value: guildList || '無', inline: false }
                 );
 
             await interaction.reply({ embeds: [embed] });
