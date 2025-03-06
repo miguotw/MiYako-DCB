@@ -11,7 +11,7 @@
   "description": "",
   "dependencies": {
     "axios": "^1.7.9",
-    "discord.js": "^14.17.3",
+    "discord.js": "^14.18.0",
     "fs": "^0.0.1-security",
     "opencc-js": "^1.0.5",
     "yaml": "^2.7.0"
