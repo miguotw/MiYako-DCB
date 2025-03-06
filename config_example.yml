@@ -93,14 +93,6 @@ About:
 #-------------------------------
 # 外部 API
 API:
-  Hitokoto: "https://v1.hitokoto.cn/?c=a&encode=json" # 一言 API
-  IP_API: "http://ip-api.com/" # IP 查詢 API
-
   Twitch:
     Client_ID: "" # 暫時無作用
     Access_Token: "" # 暫時無作用
-
-  Minecraft:
-    Starlight_Skin: "https://starlightskins.lunareclipse.studio"
-    Minotar: "https://minotar.net"
-    Mcstatus: "https://api.mcstatus.io"
