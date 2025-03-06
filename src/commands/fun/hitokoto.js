@@ -1,8 +1,8 @@
 const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { config } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/log'));
-const { errorReply } = require(path.join(process.cwd(), 'core/error_reply'));
+const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
+const { errorReply } = require(path.join(process.cwd(), 'core/errorReply'));
 const { getHitokoto } = require(path.join(process.cwd(), 'util/getHitokoto'));
 
 // 導入設定檔內容
@@ -38,8 +38,8 @@ module.exports = {
             
         } catch (error) {
             // 錯誤處理
-            sendLog(interaction.client, `❌ 無法獲取 Hitokoto API 資料：`, "ERROR", error); // 記錄錯誤日誌
-            errorReply(interaction, '**無法獲取短句，請稍後再試！**\n- 原因：連線至 Hitokoto API 時出現錯誤。'); // 向用戶顯示錯誤訊息
+            sendLog(interaction.client, `❌ 在執行 /一言 指令時發生錯誤：`, "ERROR", error); // 記錄錯誤日誌
+            errorReply(interaction, `**無法獲取短句，原因：${error.message || '未知錯誤'}**`); // 向用戶顯示錯誤訊息
         }
     }
 };

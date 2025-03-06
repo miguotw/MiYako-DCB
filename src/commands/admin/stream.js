@@ -2,8 +2,8 @@ const path = require('path');
 const axios = require('axios');
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionsBitField } = require('discord.js');
 const { config } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/log'));
-const { errorReply } = require(path.join(process.cwd(), 'core/error_reply'));
+const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
+const { errorReply } = require(path.join(process.cwd(), 'core/errorReply'));
 
 // 導入設定檔內容
 const TWITCH_CLIENT_ID = config.API.Twitch.Client_ID;

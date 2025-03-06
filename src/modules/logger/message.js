@@ -1,6 +1,6 @@
 const path = require('path');
 const { config } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/log'));
+const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 
 // 記錄訊息
 module.exports = (client) => {

@@ -1,13 +1,10 @@
-const fs = require('fs');
 const path = require('path');
-const yaml = require('yaml');
+const fs = require('fs');
 const { Client, GatewayIntentBits, REST, Routes, Collection } = require('discord.js');
-const { sendLog } = require(path.join(process.cwd(), 'core/log'));
+const { config } = require(path.join(process.cwd(), 'core/config'));
+const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
+const { errorReply } = require(path.join(process.cwd(), 'core/errorReply'));
 const { getHitokoto } = require(path.join(process.cwd(), 'util/getHitokoto'));
-
-// 讀取 YAML 設定檔
-const configFile = fs.readFileSync('./config.yml', 'utf8');
-const config = yaml.parse(configFile);
 
 // Discord bot 設定
 const TOKEN = config.Start.Token; // 讀取機器人 TOKEN
@@ -25,7 +22,24 @@ const client = new Client({
 });
 sendLog(client, '✅ 創建 Discord 客戶端成功！');
 
-// 儲存指令
+// 載入模組
+function loadModules(dir) {
+    const files = fs.readdirSync(dir, { withFileTypes: true });
+    for (const file of files) {
+        const fullPath = path.join(dir, file.name);
+        if (file.isDirectory()) {
+            loadModules(fullPath);
+        } else if (file.isFile() && file.name.endsWith('.js')) {
+            const module = require(path.resolve(fullPath));
+            module(client); // 將 client 傳遞給模組
+            sendLog(client, `✅ 已載入模組：${file.name}`);
+        }
+    }
+}
+
+loadModules('./src/modules');
+
+// 載入指令
 client.commands = new Collection();
 const commands = [];
 
@@ -36,28 +50,28 @@ function loadCommands(dir) {
         if (file.isDirectory()) {
             loadCommands(fullPath);
         } else if (file.isFile() && file.name.endsWith('.js')) {
-            const command = require(path.resolve(fullPath)); // 使用 `path.resolve()`
+            const command = require(path.resolve(fullPath));
             client.commands.set(command.data.name, command);
             commands.push(command.data.toJSON());
+            sendLog(client, `✅ 已載入指令：${file.name}`);
         }
     }
 }
 
 loadCommands('./src/commands');
 
-// 註冊斜線指令
+// 註冊指令
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 (async () => {
     try {
-        sendLog(client, '🚀 開始註冊斜線指令...');
         await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-        sendLog(client, '✅ 斜線指令註冊完成！');
+        sendLog(client, '✅ 指令註冊完成！');
     } catch (error) {
-        sendLog(client, '❌ 註冊斜線指令時發生錯誤：', "ERROR", error);
+        sendLog(client, '❌ 註冊指令時發生錯誤：', "ERROR", error);
     }
 })();
 
-// 事件：處理斜線指令
+// 事件：處理指令
 client.on('interactionCreate', async interaction => {
     if (!interaction.isCommand()) return;
 
@@ -68,17 +82,9 @@ client.on('interactionCreate', async interaction => {
         await command.execute(interaction);
     } catch (error) {
         console.error(error);
-        await interaction.reply({ content: '執行指令時發生錯誤！', ephemeral: true });
+        errorReply(interaction, '**執行指令時發生錯誤**');
     }
 });
-
-// 載入外部模組 
-require('./src/logger/member.js')(client);
-require('./src/logger/message.js')(client);
-require('./src/logger/role.js')(client);
-require('./src/logger/voice.js')(client);
-require('./src/event/member_join.js')(client);
-require('./src/event/member_leave.js')(client);
 
 // 當機器人啟動時，發送日誌訊息到指定頻道
 client.once('ready', async () => {

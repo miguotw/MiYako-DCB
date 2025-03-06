@@ -1,8 +1,8 @@
 const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { config } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/log'));
-const { errorReply } = require(path.join(process.cwd(), 'core/error_reply'));
+const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
+const { errorReply } = require(path.join(process.cwd(), 'core/errorReply'));
 
 // 導入設定檔內容
 const EMBED_COLOR = config.Embed_Color;

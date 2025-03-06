@@ -51,4 +51,4 @@ const sendLog = (client, message, level = 'INFO', error = null) => {
     }
 };
 
-module.exports = { getTimePrefix, sendLog };
+module.exports = { sendLog };

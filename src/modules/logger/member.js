@@ -1,7 +1,7 @@
 const path = require('path');
 const { Events } = require('discord.js');
 const { config } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/log'));
+const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 
 // 成員加入與離開
 module.exports = (client) => {
