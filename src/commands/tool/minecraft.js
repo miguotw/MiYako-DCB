@@ -1,10 +1,10 @@
 const path = require('path');
-const axios = require('axios');
+const fs = require('fs');
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { errorReply } = require(path.join(process.cwd(), 'core/errorReply'));
-const { getPlayerSkin, getPlayerAvatar, getPlayerSkinDownload, getServerStatus, getServerIcon } = require(path.join(process.cwd(), 'util/getMinecraftInfo'));
+const { getServerStatus } = require(path.join(process.cwd(), 'util/getServerStatus'));
 
 // 導入設定檔內容
 const EMBED_COLOR = config.Embed_Color;
@@ -99,29 +99,40 @@ module.exports = {
                 sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/麥塊 伺服器位址(${serverIP})`, "INFO");
                 
                 // 使用 mcstatus.io API 獲取伺服器狀態
-                const { ServerStatusMOTD, ServerStatusPlayersOnline, ServerStatusPlayersMax, ServerStatusVersionName, ServerStatusVersionProtocol, ServerStatusPlayersList, ServerStatusIP } = await getServerStatus(serverIP);
-        
-                // 取得伺服器圖標
-                const serverIcon = `https://api.mcstatus.io/v2/icon/${serverIP}`;
+                const { ServerStatusMOTD, ServerStatusPlayersOnline, ServerStatusOnline, ServerStatusVersionName, ServerStatusVersionProtocol, ServerStatusHostname, ServerStatusIP, ServerStatusPlayersList, ServerStatusIcon } = await getServerStatus(serverIP);
         
                 // 創建嵌入訊息
                 const embed = new EmbedBuilder()
                     .setColor(EMBED_COLOR)
                     .setTitle(`${EMBED_EMOJI} ┃ 伺服器狀態 - ${serverIP}`)
                     .setDescription(ServerStatusMOTD)
-                    .setThumbnail(serverIcon)
                     .addFields(
-                        { name: '玩家在線', value: `${ServerStatusPlayersOnline} / ${ServerStatusPlayersMax}`, inline: true },
                         { name: '遊戲版本', value: ServerStatusVersionName, inline: true },
                         { name: '協定版本', value: ServerStatusVersionProtocol, inline: true },
-                        { name: '線上玩家', value: ServerStatusPlayersList, inline: false },
-                        { name: '真實位址', value: `||${ServerStatusIP}||`, inline: false }
+                        { name: '線上模式', value: ServerStatusOnline, inline: true },
+                        { name: '玩家在線', value: ServerStatusPlayersOnline, inline: true },
+                        { name: '主機名稱', value: ServerStatusHostname, inline: true },
+                        { name: '真實位址', value: `||${ServerStatusIP}||`, inline: true },
+                        { name: '線上玩家', value: ServerStatusPlayersList, inline: false }
                     );
-        
-                // 回覆訊息
-                await interaction.editReply({ 
-                    embeds: [embed], 
-                });
+
+                // 如果有伺服器圖標，設置縮略圖並發送文件
+                if (ServerStatusIcon) {
+                    embed.setThumbnail(`attachment://${path.basename(ServerStatusIcon)}`); // 使用 path.basename 獲取文件名
+                    await interaction.editReply({ 
+                        embeds: [embed], 
+                        files: [{
+                            attachment: ServerStatusIcon,
+                            name: path.basename(ServerStatusIcon) // 確保文件名正確
+                        }]
+                    });
+                    // 刪除臨時文件
+                    fs.unlinkSync(ServerStatusIcon);
+                } else {
+                    await interaction.editReply({ 
+                        embeds: [embed] 
+                    });
+                }
             } catch (error) {
                 // 如果伺服器不是 Minecraft 伺服器或無法連接
                 sendLog(interaction.client, `❌ 在執行 /麥塊 伺服器狀態資訊 指令時發生錯誤：`, "ERROR", error); // 記錄錯誤日誌
