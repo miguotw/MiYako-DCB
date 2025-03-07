@@ -116,22 +116,30 @@ module.exports = {
                         { name: '線上玩家', value: ServerStatusPlayersList, inline: false }
                     );
 
-                // 如果有伺服器圖標，設置縮略圖並發送文件
-                if (ServerStatusIcon) {
-                    embed.setThumbnail(`attachment://${path.basename(ServerStatusIcon)}`); // 使用 path.basename 獲取文件名
-                    await interaction.editReply({ 
-                        embeds: [embed], 
-                        files: [{
-                            attachment: ServerStatusIcon,
-                            name: path.basename(ServerStatusIcon) // 確保文件名正確
-                        }]
-                    });
-                    // 刪除臨時文件
+                // 檢查 ServerStatusIcon 是否存在
+                let iconPath = ServerStatusIcon;
+                if (!iconPath || !fs.existsSync(iconPath)) {
+                    // 使用預設圖標
+                    iconPath = path.join(process.cwd(), 'assets/images/default_icon.png');
+                    if (!fs.existsSync(iconPath)) {
+                        throw new Error('預設圖標文件不存在！');
+                    }
+                }
+
+                // 設置縮略圖並發送文件
+                const iconFileName = path.basename(iconPath);
+                embed.setThumbnail(`attachment://${iconFileName}`);
+                await interaction.editReply({ 
+                    embeds: [embed], 
+                    files: [{
+                        attachment: iconPath,
+                        name: iconFileName // 確保文件名正確
+                    }]
+                });
+
+                // 如果是臨時文件（ServerStatusIcon），則刪除
+                if (ServerStatusIcon && fs.existsSync(ServerStatusIcon)) {
                     fs.unlinkSync(ServerStatusIcon);
-                } else {
-                    await interaction.editReply({ 
-                        embeds: [embed] 
-                    });
                 }
             } catch (error) {
                 // 如果伺服器不是 Minecraft 伺服器或無法連接

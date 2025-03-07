@@ -25,7 +25,7 @@ const getServerStatus = async (serverIP) => {
 
         // 處理伺服器圖標
         let ServerStatusIcon = null;
-        if (data.icon) {
+        if (data.icon && data.icon.startsWith('data:image/png;base64,')) {
             const base64Data = data.icon.split(',')[1]; // 去掉 data:image/png;base64, 前綴
             const iconBuffer = Buffer.from(base64Data, 'base64'); // 解碼 Base64
             const iconPath = `./${serverIP}_icon.png`; // 臨時文件路徑
@@ -34,13 +34,13 @@ const getServerStatus = async (serverIP) => {
         }
 
         // 抓取其他資訊
-        const ServerStatusMOTD = data.motd.clean.join('\n');
+        const ServerStatusMOTD = data.motd.clean.join('\n') || "N/A";
         const ServerStatusPlayersOnline = `${data.players.online} / ${data.players.max}`;
         const ServerStatusOnline = data.online ? '是' : '否';
-        const ServerStatusVersionName = data.version;
-        const ServerStatusVersionProtocol = data.protocol.toString();
-        const ServerStatusHostname = data.hostname;
-        const ServerStatusIP = `${data.ip}:${data.port}`;
+        const ServerStatusVersionName = data.version || "N/A";
+        const ServerStatusVersionProtocol = data.protocol.toString() || "N/A";
+        const ServerStatusHostname = data.hostname || "N/A";
+        const ServerStatusIP = `${data.ip}:${data.port}` || "N/A";
 
         return { ServerStatusMOTD, ServerStatusPlayersOnline, ServerStatusOnline, ServerStatusVersionName, ServerStatusVersionProtocol, ServerStatusHostname, ServerStatusIP, ServerStatusPlayersList, ServerStatusIcon };
     } catch (error) {
