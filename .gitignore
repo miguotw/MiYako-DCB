@@ -1,18 +1,13 @@
-# Node modules
+# Node modules and lock files
 node_modules/
-
-# Environment files
-.env
-config.yml
-
-# Logs and testing files
-*.log
-*.bak
+package-lock.json
 
 # IDE config files
 .vscode/
 .idea/
 
-# npm or yarn lock files (Optional)
-package-lock.json
-
+# Sensitive info files
+.env
+*.bak
+config.yml
+assets/miyako_chat
