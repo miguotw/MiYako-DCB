@@ -2,7 +2,7 @@ const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder, PermissionsBitField } = require('discord.js');
 const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply } = require(path.join(process.cwd(), 'core/errorReply'));
+const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
 
 // 導入設定檔內容
 const EMBED_COLOR = config.Embed_Color;
@@ -28,6 +28,10 @@ module.exports = {
                 .setRequired(false) // 設為非必填
         ),
     async execute(interaction) {
+        
+        //啟用延遲回覆
+        await interaction.deferReply({ ephemeral: false });
+
         try {
             // 檢查使用者是否具有管理者權限
             if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {

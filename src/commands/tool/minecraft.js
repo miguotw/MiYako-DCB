@@ -3,7 +3,7 @@ const fs = require('fs');
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply } = require(path.join(process.cwd(), 'core/errorReply'));
+const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
 const { getServerStatus } = require(path.join(process.cwd(), 'util/getServerStatus'));
 
 // 導入設定檔內容

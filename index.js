@@ -3,7 +3,7 @@ const fs = require('fs');
 const { Client, GatewayIntentBits, REST, Routes, Collection } = require('discord.js');
 const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply } = require(path.join(process.cwd(), 'core/errorReply'));
+const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
 const { getHitokoto } = require(path.join(process.cwd(), 'util/getHitokoto'));
 
 // Discord bot 設定

@@ -2,7 +2,7 @@ const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply } = require(path.join(process.cwd(), 'core/errorReply'));
+const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
 
 // 導入設定檔內容
 const EMBED_COLOR = config.Embed_Color;
@@ -13,6 +13,10 @@ module.exports = {
         .setName('延遲')
         .setDescription('測試機器人延遲'),
     async execute(interaction) {
+        
+        //啟用延遲回覆
+        await interaction.deferReply({ ephemeral: true });
+
         try {
             
             // 發送執行指令的摘要到 sendLog

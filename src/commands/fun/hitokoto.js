@@ -2,7 +2,7 @@ const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply } = require(path.join(process.cwd(), 'core/errorReply'));
+const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
 const { getHitokoto } = require(path.join(process.cwd(), 'util/getHitokoto'));
 
 // 導入設定檔內容
@@ -17,8 +17,7 @@ module.exports = {
     async execute(interaction) {
 
         //啟用延遲回覆
-        await interaction.deferReply();
-
+        await interaction.deferReply({ ephemeral: false });
         try {
             // 發送執行指令的摘要到 sendLog
             sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/一言`, "INFO");

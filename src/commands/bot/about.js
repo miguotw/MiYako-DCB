@@ -2,7 +2,7 @@ const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply } = require(path.join(process.cwd(), 'core/errorReply'));
+const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
 
 // 導入設定檔內容
 const EMBED_COLOR = config.Embed_Color;
@@ -22,6 +22,10 @@ module.exports = {
                   .setRequired(false)), // 讓顯示伺服器 ID 成為可選項
 
     async execute(interaction) {
+
+        //啟用延遲回覆
+        await interaction.deferReply({ ephemeral: false });
+
         try {
             // 獲取用戶選擇是否顯示伺服器 ID
             const showServerID = interaction.options.getBoolean('顯示伺服器唯一編號') || false;

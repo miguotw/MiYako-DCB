@@ -3,7 +3,7 @@ const axios = require('axios');
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionsBitField } = require('discord.js');
 const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply } = require(path.join(process.cwd(), 'core/errorReply'));
+const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
 
 // 導入設定檔內容
 const TWITCH_CLIENT_ID = config.API.Twitch.Client_ID;
@@ -25,6 +25,10 @@ module.exports = {
                 .setRequired(true)
         ),
     async execute(interaction) {
+
+        //啟用延遲回覆
+        await interaction.deferReply({ ephemeral: false });
+
         try {
             // 檢查使用者是否具有管理者權限
             if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {

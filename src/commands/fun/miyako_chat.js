@@ -2,7 +2,7 @@ const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, ModalBuilder, TextInputBuilder, ActionRowBuilder, TextInputStyle } = require('discord.js');
 const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply } = require(path.join(process.cwd(), 'core/errorReply'));
+const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
 const { chatWithDeepseek, exportChatHistory, deleteChatHistory, updateSystemPrompt, getChatHistory } = require(path.join(process.cwd(), 'util/getMiyakoChat'));
 
 // 導入設定檔內容
@@ -45,7 +45,7 @@ module.exports = {
             switch (subcommand) {
                 case '傳送訊息': {
                     // 啟用延遲回覆
-                    await interaction.deferReply();
+                    await interaction.deferReply({ ephemeral: false });
 
                     const message = interaction.options.getString('訊息');
                     const username = interaction.user.username; // 獲取用戶名
@@ -104,18 +104,24 @@ module.exports = {
                         }
 
                         case 'export': {
+                            // 啟用延遲回覆
+                            await interaction.deferReply({ ephemeral: false });
+
                             // 匯出聊天歷史
                             const filePath = exportChatHistory(userId);
                             const file = new AttachmentBuilder(filePath, { name: `miyako_chat_${userId}.json` });
-
-                            await interaction.editReply({ content: '這是您的聊天歷史紀錄：', files: [file] });
+                            
+                            infoReply(interaction, '**已匯出您的聊天歷史紀錄！**', [file]);
                             break;
                         }
 
                         case 'delete': {
+                            // 啟用延遲回覆
+                            await interaction.deferReply({ ephemeral: false });
+
                             // 刪除聊天歷史
                             deleteChatHistory(userId);
-                            await interaction.editReply({ content: '已刪除您的聊天歷史紀錄！' });
+                            infoReply(interaction, '**已刪除您的聊天歷史紀錄！**');
                             break;
                         }
                     }
@@ -142,11 +148,11 @@ module.exports.modalSubmit = async (interaction) => {
             updateSystemPrompt(userId, newPrompt);
 
             // 回覆用戶
-            await interaction.reply({ content: '系統提示詞已更新！', ephemeral: true });
+            infoReply(interaction, '**系統提示詞已更新！**');
         } catch (error) {
             // 捕獲並記錄錯誤
-            console.error('Modal 提交時發生錯誤：', error);
-            await interaction.reply({ content: `更新失敗：${error.message}`, ephemeral: true });
+            sendLog(interaction.client, '❌ 在更新系統提示詞時發生錯誤：', "ERROR", error);
+            errorReply(interaction, `**更新失敗，原因：${error.message}**`);
         }
     }
 };

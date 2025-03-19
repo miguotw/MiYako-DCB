@@ -3,7 +3,7 @@ const axios = require('axios');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply } = require(path.join(process.cwd(), 'core/errorReply'));
+const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
 const { getIPInfo } = require(path.join(process.cwd(), 'util/getIPInfo'));
 
 // 導入設定檔內容
