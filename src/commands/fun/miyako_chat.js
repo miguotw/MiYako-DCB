@@ -74,7 +74,7 @@ module.exports = {
 
                     switch (operation) {
                         case 'edit': {
-                            // 取用戶的聊天歷史，若有系統提示詞則預設為現有值，否則使用 config 裡的預設提示詞
+                            // 讀取用戶的聊天歷史，若有系統提示詞則預設為現有值，否則使用 config 裡的預設提示詞
                             let chatHistory = getChatHistory(userId);
                             let existingPrompt = '';
                             if (chatHistory.length > 0 && chatHistory[0].role === "system") {
@@ -104,9 +104,6 @@ module.exports = {
                         }
 
                         case 'export': {
-                            // 啟用延遲回覆
-                            await interaction.deferReply();
-
                             // 匯出聊天歷史
                             const filePath = exportChatHistory(userId);
                             const file = new AttachmentBuilder(filePath, { name: `miyako_chat_${userId}.json` });
@@ -116,9 +113,6 @@ module.exports = {
                         }
 
                         case 'delete': {
-                            // 啟用延遲回覆
-                            await interaction.deferReply();
-
                             // 刪除聊天歷史
                             deleteChatHistory(userId);
                             await interaction.editReply({ content: '已刪除您的聊天歷史紀錄！' });

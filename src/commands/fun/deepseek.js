@@ -19,10 +19,6 @@ module.exports = {
                 .setRequired(false)),
 
     async execute(interaction) {
-
-        //啟用延遲回覆
-        await interaction.deferReply();
-
         try {
             const question = interaction.options.getString('問題'); // 獲取使用者輸入的問題
 

@@ -22,10 +22,6 @@ module.exports = {
                   .setRequired(false)), // 讓顯示伺服器 ID 成為可選項
 
     async execute(interaction) {
-
-        //啟用延遲回覆
-        await interaction.deferReply();
-
         try {
             // 獲取用戶選擇是否顯示伺服器 ID
             const showServerID = interaction.options.getBoolean('顯示伺服器唯一編號') || false;
@@ -68,7 +64,7 @@ module.exports = {
                     { name: `在 ${guilds.size.toString()} 個伺服器服務 ${totalMembers.toString()} 位成員`, value: guildList || '無', inline: false }
                 );
 
-            await interaction.editReply({ embeds: [embed] });
+                await interaction.editReply({ embeds: [embed], ephemeral: false });
 
         } catch (error) {
             // 錯誤處理

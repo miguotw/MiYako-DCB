@@ -22,7 +22,7 @@ module.exports = {
     async execute(interaction) {
 
         //啟用延遲回覆
-        await interaction.deferReply();
+        await interaction.deferReply({ ephemeral: true });
 
         try {
             // 檢查使用者是否具有管理者權限

@@ -28,10 +28,6 @@ module.exports = {
                 .setRequired(false) // 設為非必填
         ),
     async execute(interaction) {
-
-        //啟用延遲回覆
-        await interaction.deferReply();
-
         try {
             // 檢查使用者是否具有管理者權限
             if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
