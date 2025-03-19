@@ -80,37 +80,85 @@ const deleteChatHistory = (userId) => {
  */
 const chatWithDeepseek = async (userId, message) => {
     try {
-        // 獲取該用戶的對話歷史
-        const chatHistory = getChatHistory(userId);
-
-        // 如果是第一次對話，添加系統提示詞
-        if (chatHistory.length === 0) {
-            chatHistory.push({ role: "system", content: PROMPT });
+      // 獲取完整對話歷史
+      let chatHistory = getChatHistory(userId);
+  
+        // 1. 確保 system 提示詞存在於歷史記錄開頭
+        if (chatHistory.length === 0 || chatHistory[0].role !== "system") {
+            chatHistory = [{ role: "system", content: PROMPT }, ...chatHistory];
         }
-
-        // 將用戶的新訊息加入對話歷史
-        chatHistory.push({ role: "user", content: message });
-
-        // 調用 Deepseek API
-        const completion = await openai.chat.completions.create({
-            messages: chatHistory, // 傳遞完整的對話歷史
-            model: "deepseek-chat", // 使用的模型
+    
+        // 2. 過濾出用戶與助理的對話對
+        const conversationPairs = [];
+        let currentPair = { user: null, assistant: null };
+    
+        // 反向遍歷歷史紀錄，組合成對話對
+        for (let i = chatHistory.length - 1; i >= 0; i--) {
+            const entry = chatHistory[i];
+            
+            if (entry.role === "user") {
+                currentPair.user = entry;
+            } else if (entry.role === "assistant") {
+                currentPair.assistant = entry;
+            }
+    
+            // 當配對完成時存入陣列並重置
+            if (currentPair.user && currentPair.assistant) {
+                conversationPairs.unshift({ 
+                    user: currentPair.user, 
+                    assistant: currentPair.assistant 
+                });
+                currentPair = { user: null, assistant: null };
+    
+                // 達到 30 對時停止
+                if (conversationPairs.length >= 30) break;
+            }
+        }
+    
+        // 3. 構建最終要發送的訊息序列
+        const messagesToSend = [chatHistory[0]]; // 包含 system 訊息
+    
+        // 展開對話對到訊息序列
+        conversationPairs.forEach(pair => {
+            messagesToSend.push(pair.user);
+            messagesToSend.push(pair.assistant);
         });
-
-        // 獲取 AI 的回應
-        const aiResponse = completion.choices[0].message.content;
-
-        // 將 AI 的回應加入對話歷史
-        chatHistory.push({ role: "assistant", content: aiResponse });
-
-        // 保存用戶的對話歷史
+    
+        // 4. 加入最新用戶訊息
+        messagesToSend.push({ role: "user", content: message });
+  
+        // 5. 調用 API
+        const completion = await openai.chat.completions.create({
+            messages: messagesToSend,
+            model: "deepseek-chat"
+        });
+  
+        // 6. 保存完整歷史紀錄（包含最新互動）
+        chatHistory.push({ role: "user", content: message });
+        chatHistory.push({ role: "assistant", content: completion.choices[0].message.content });
         saveChatHistory(userId, chatHistory);
-
-        // 返回 AI 的回應
-        return aiResponse;
+    
+        return completion.choices[0].message.content;
     } catch (error) {
-        throw new Error(error.message);
+      throw new Error(error.message);
     }
+  };
+
+/**
+ * 更新用戶的系統提示詞
+ * @param {string} userId - 用戶的唯一識別符
+ * @param {string} newPrompt - 新的系統提示詞
+ */
+const updateSystemPrompt = (userId, newPrompt) => {
+    let chatHistory = getChatHistory(userId);
+    if (chatHistory.length === 0 || chatHistory[0].role !== "system") {
+        // 若不存在則在最前面插入
+        chatHistory.unshift({ role: "system", content: newPrompt });
+    } else {
+        // 更新現有的系統提示詞
+        chatHistory[0].content = newPrompt;
+    }
+    saveChatHistory(userId, chatHistory);
 };
 
-module.exports = { chatWithDeepseek, exportChatHistory, deleteChatHistory };
+module.exports = { chatWithDeepseek, exportChatHistory, deleteChatHistory, updateSystemPrompt, getChatHistory };

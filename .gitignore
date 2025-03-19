@@ -10,4 +10,4 @@ package-lock.json
 .env
 *.bak
 config.yml
-assets/miyako_chat
+assets/miyako_chat/*

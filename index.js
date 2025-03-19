@@ -73,13 +73,20 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
 
 // 事件：處理指令
 client.on('interactionCreate', async interaction => {
-    if (!interaction.isCommand()) return;
-
-    const command = client.commands.get(interaction.commandName);
-    if (!command) return;
-
     try {
-        await command.execute(interaction);
+        if (interaction.isCommand()) {
+            // 處理 Slash Command
+            const command = client.commands.get(interaction.commandName);
+            if (!command) return;
+
+            await command.execute(interaction);
+        } else if (interaction.isModalSubmit()) {
+            // 處理 Modal 提交
+            const command = client.commands.find(cmd => cmd.modalSubmit);
+            if (command && command.modalSubmit) {
+                await command.modalSubmit(interaction);
+            }
+        }
     } catch (error) {
         console.error(error);
         errorReply(interaction, '**執行指令時發生錯誤**');
