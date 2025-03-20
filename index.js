@@ -7,9 +7,9 @@ const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply')
 const { getHitokoto } = require(path.join(process.cwd(), 'util/getHitokoto'));
 
 // Discord bot 設定
-const TOKEN = config.Start.Token; // 讀取機器人 TOKEN
-const CLIENT_ID = config.Start.Client_ID; //應用程式ID
-const READY_TYPE = config.Message.Ready_Type; // 讀取狀態類型
+const TOKEN = config.Startup.token; // 讀取機器人 TOKEN
+const CLIENT_ID = config.Startup.clientID; //應用程式ID
+const READY_TYPE = config.Startup.activityType; // 讀取狀態類型
 
 const client = new Client({
     intents: [

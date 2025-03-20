@@ -1,16 +1,16 @@
 const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { config } = require(path.join(process.cwd(), 'core/config'));
+const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
 
 // 導入設定檔內容
-const EMBED_COLOR = config.Embed_Color;
-const EMBED_EMOJI = config.Emoji.Commands.About;
-const BOTNICKNAME = config.About.Bot_Nicdname;
-const INTRODUCE = config.About.Introduce;
-const PROVIDER = config.About.Provider;
-const REPOSITORY = config.About.Repository;
+const EMBED_COLOR = config.embed.color.default;
+const EMBED_EMOJI = configCommands.about.emoji;
+const BOTNICKNAME = configCommands.about.botNickname;
+const INTRODUCE = configCommands.about.introduce;
+const PROVIDER = configCommands.about.provider;
+const REPOSITORY = configCommands.about.repository;
 
 module.exports = {
     data: new SlashCommandBuilder()

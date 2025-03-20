@@ -1,17 +1,18 @@
 const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, ModalBuilder, TextInputBuilder, ActionRowBuilder, TextInputStyle } = require('discord.js');
-const { config, configUtil } = require(path.join(process.cwd(), 'core/config'));
+const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
 const { chatWithDeepseek, exportChatHistory, deleteChatHistory, updateSystemPrompt, getChatHistory } = require(path.join(process.cwd(), 'util/getMiyakoChat'));
 
 // 導入設定檔內容
-const EMBED_COLOR = config.Embed_Color;
-const EMBED_EMOJI = config.Emoji.Commands.Miyako_Chat;
-const BOTNICKNAME = config.About.Bot_Nicdname;
+const EMBED_COLOR = config.embed.color.default;
+const EMBED_EMOJI = configCommands.miyakoChat.emoji;
+const PROMPT = configCommands.miyakoChat.prompt;
+const BOTNICKNAME = configCommands.about.botNickname;
 
 // 獲取語言模型選項
-const models = configUtil.getMiyakoChat.models;
+const models = configCommands.miyakoChat.models;
 const modelChoices = Object.keys(models).map(key => ({
     name: models[key].name,
     value: key
@@ -93,8 +94,7 @@ async execute(interaction) {
                         if (chatHistory.length > 0 && chatHistory[0].role === "system") {
                             existingPrompt = chatHistory[0].content;
                         } else {
-                            const { config } = require(path.join(process.cwd(), 'core/config'));
-                            existingPrompt = config.Commands.Miyako_Chat.prompt;
+                            existingPrompt = PROMPT;
                         }
                             
                         // 建立一個 Modal 供用戶輸入新的系統提示詞

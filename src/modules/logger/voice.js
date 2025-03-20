@@ -1,11 +1,11 @@
 const path = require('path');
-const { config } = require(path.join(process.cwd(), 'core/config'));
+const { configModules } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 
 // 記錄語音頻道進出
 module.exports = (client) => {
 
-    if (config.Logger.Type.Voice) {
+    if (configModules.voice.enable) {
         client.on('voiceStateUpdate', (oldState, newState) => {
             const user = newState.member.user; // 取得使用者資料
 

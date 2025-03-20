@@ -1,12 +1,12 @@
 const path = require('path');
 const { Events, EmbedBuilder } = require('discord.js');
-const { config } = require(path.join(process.cwd(), 'core/config'));
+const { config, configModules } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 
 // 導入設定檔內容
-const LEAVE_MESSAGES = config.Message.Member.Leave;
-const EMBED_COLOR = config.Embed_Color;
-const EMBED_EMOJI = config.Emoji.Event.Member;
+const EMBED_COLOR = config.embed.color.default;
+const EMBED_EMOJI = configModules.member.emoji.leave;
+const LEAVE_MESSAGES = configModules.member.message.leave;
 
 module.exports = (client) => {
     client.on(Events.GuildMemberRemove, async (member) => {

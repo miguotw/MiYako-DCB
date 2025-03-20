@@ -1,13 +1,14 @@
 const path = require('path');
 const { EmbedBuilder } = require('discord.js');
-const { config } = require(path.join(process.cwd(), 'core/config'));
+const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
 
 // 導入設定檔內容
-const EMBED_COLOR = config.Embed_Color_error;  
-const EMBED_EMOJI_ERROR = config.Emoji.Error_Reply;
-const EMBED_EMOJI_SUCCESS = config.Emoji.Success_Reply;
-const REPOSITORY = config.About.Repository;
-const PROVIDER = config.About.Provider;
+const EMBED_COLOR_ERROR = config.embed.color.error;  
+const EMBED_EMOJI_ERROR = config.emoji.error;
+const EMBED_COLOR_SUCCESS = config.embed.color.success;  
+const EMBED_EMOJI_SUCCESS = config.emoji.success;
+const REPOSITORY = configCommands.about.repository;
+const PROVIDER = configCommands.about.provider;
 
 /**
 // 回覆錯誤訊息給使用者
@@ -18,7 +19,7 @@ const PROVIDER = config.About.Provider;
 async function errorReply(interaction, errorMessage, files = []) {
     const embed = new EmbedBuilder()
         .setTitle(`${EMBED_EMOJI_ERROR} ┃ 執行時失敗`)
-        .setColor(EMBED_COLOR)
+        .setColor(EMBED_COLOR_ERROR)
         .addFields(
             { name: errorMessage, value: `-# 如果您認為這是機器人本身的問題，請至 [GitHub 儲存庫](${REPOSITORY}) 建立一個 Issue，或與 <@${PROVIDER}> 聯繫，來報告該問題。`, inline: true }
         );
@@ -41,7 +42,7 @@ async function errorReply(interaction, errorMessage, files = []) {
 async function infoReply(interaction, successMessage, files = []) {
     const embed = new EmbedBuilder()
         .setTitle(`${EMBED_EMOJI_SUCCESS} ┃ 操作成功`)
-        .setColor(EMBED_COLOR)
+        .setColor(EMBED_COLOR_SUCCESS)
         .addFields(
             { name: successMessage, value: `　`, inline: true }
         );

@@ -1,13 +1,13 @@
 const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { config } = require(path.join(process.cwd(), 'core/config'));
+const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
 
 // 導入設定檔內容
-const EMBED_COLOR = config.Embed_Color;
-const EMBED_EMOJI = config.Emoji.Commands.Deepseek;
-const LOADING_EMOJI = config.Emoji.Loading;
+const EMBED_COLOR = config.embed.color.default;
+const LOADING_EMOJI = config.emoji.loading;
+const EMBED_EMOJI = configCommands.deepseek.emoji;
 
 module.exports = {
     data: new SlashCommandBuilder()

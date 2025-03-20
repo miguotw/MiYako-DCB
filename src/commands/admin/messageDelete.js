@@ -1,14 +1,14 @@
 const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder, PermissionsBitField } = require('discord.js');
-const { config } = require(path.join(process.cwd(), 'core/config'));
+const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
 
 // 導入設定檔內容
-const EMBED_COLOR = config.Embed_Color;
-const EMBED_EMOJI = config.Emoji.Commands.Message_Delete;
-const LOADING_EMOJI = config.Emoji.Loading;
-const DELETE_LIMIT = Math.min(config.Commands.Message_Delete.Limit || 100, 100); //讀取最大刪除數量，當設定值超過 100 時，限制最大值為 100
+const EMBED_COLOR = config.embed.color.default;
+const LOADING_EMOJI = config.emoji.loading;
+const EMBED_EMOJI = configCommands.admin.messageDelete.emoji;
+const DELETE_LIMIT = Math.min(configCommands.admin.messageDelete.deleteLimit || 100, 100); //讀取最大刪除數量，當設定值超過 100 時，限制最大值為 100
 
 module.exports = {
     data: new SlashCommandBuilder()

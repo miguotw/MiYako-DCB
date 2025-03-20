@@ -1,11 +1,11 @@
 const path = require('path');
 const fs = require('fs');
 const OpenAI = require('openai');
-const { configUtil } = require(path.join(process.cwd(), 'core/config'));
+const { configCommands } = require(path.join(process.cwd(), 'core/config'));
 
 // 導入設定檔內容
-const PROMPT = configUtil.getMiyakoChat.prompt;
-const MEXLENGTH = configUtil.getMiyakoChat.mexLength;
+const PROMPT = configCommands.miyakoChat.prompt;
+const MEXLENGTH = configCommands.miyakoChat.mexLength;
 
 // 定義保存對話歷史的資料夾路徑
 const CHAT_HISTORY_DIR = path.join(process.cwd(), 'assets', 'miyako_chat');
@@ -122,7 +122,7 @@ const chatWithDeepseek = async (userId, message, modelKey = '01') => {
         messagesToSend.push({ role: "user", content: message });
 
         // 5. 根據選擇的模型初始化 OpenAI 客戶端
-        const models = configUtil.getMiyakoChat.models;
+        const models = configCommands.miyakoChat.models;
         const selectedModel = models[modelKey];
         const openai = new OpenAI({
             baseURL: selectedModel.baseURL,

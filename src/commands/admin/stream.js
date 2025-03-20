@@ -1,19 +1,16 @@
 const path = require('path');
 const axios = require('axios');
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionsBitField } = require('discord.js');
-const { config } = require(path.join(process.cwd(), 'core/config'));
+const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
 
 // 導入設定檔內容
-const TWITCH_CLIENT_ID = config.API.Twitch.Client_ID;
-const TWITCH_ACCESS_TOKEN = config.API.Twitch.Access_Token;
-const MESSAGE_STREAM = config.Message.Stream;
-const TWITCH_USER_AVATAR = config.Stream.User_Avatar;
-const TWITCH_USER_LOGIN = config.Stream.User_Login;
-const ROLE = config.Stream.Role;
-const EMBED_COLOR = config.Embed_Color;
-const EMBED_EMOJI = config.Emoji.Commands.Stream;
+const EMBED_COLOR = config.embed.color.default;
+const ROLE = configCommands.admin.stream.role;
+const MESSAGE_STREAM = configCommands.admin.stream.message;
+const TWITCH_USER_LOGIN = configCommands.admin.stream.twitchUserID;
+const TWITCH_USER_AVATAR = configCommands.admin.stream.twitchUserAvatar;
 
 module.exports = {
     data: new SlashCommandBuilder()

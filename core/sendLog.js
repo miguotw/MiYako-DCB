@@ -3,7 +3,7 @@ const { config } = require(path.join(process.cwd(), 'core/config'));
 
 const getTimePrefix = (level) => {
     const now = new Date();
-    now.setHours(now.getHours() + config.Logger.Settings.Time_Zone);
+    now.setHours(now.getHours() + config.log.timezone);
     const days = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'];
     const day = days[now.getDay()];
     const time = now.toLocaleTimeString('zh-TW', { hour12: false });
@@ -38,7 +38,7 @@ const sendLog = (client, message, level = 'INFO', error = null) => {
             return;
         }
         
-        const logChannel = client.channels.cache.get(config.Logger.Settings.Channel);
+        const logChannel = client.channels.cache.get(config.log.channel);
         if (logChannel) {
             logChannel.send(`\`\`\`diff\n${logSymbol} ${logMessage}\n\`\`\``).catch(err => {
                 console.error(`${prefix} ❌ 無法發送日誌到頻道：`, err);

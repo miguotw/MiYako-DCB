@@ -1,15 +1,15 @@
 const path = require('path');
 const fs = require('fs');
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const { config } = require(path.join(process.cwd(), 'core/config'));
+const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
 const { getServerStatus } = require(path.join(process.cwd(), 'util/getServerStatus'));
 
 // 導入設定檔內容
-const EMBED_COLOR = config.Embed_Color;
-const EMBED_EMOJI = config.Emoji.Commands.Minecraft;
-const DEFAULT_SERVERS = config.Commands.Minecraft;
+const EMBED_COLOR = config.embed.color.default;
+const EMBED_EMOJI = configCommands.minecraft.emoji;
+const DEFAULT_SERVERS = configCommands.minecraft.defaultServer;
 
 module.exports = {
     data: new SlashCommandBuilder()

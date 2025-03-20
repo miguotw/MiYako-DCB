@@ -1,12 +1,12 @@
 const path = require('path');
 const { Events } = require('discord.js');
-const { config } = require(path.join(process.cwd(), 'core/config'));
+const { configModules } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 
 // 成員加入與離開
 module.exports = (client) => {
 
-    if (config.Logger.Type.Member) {
+    if (configModules.member.enable) {
         //成員加入
         client.on(Events.GuildMemberAdd, async (member) => {
             try {

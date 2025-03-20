@@ -1,13 +1,13 @@
 const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { config } = require(path.join(process.cwd(), 'core/config'));
+const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
 const { getHitokoto } = require(path.join(process.cwd(), 'util/getHitokoto'));
 
 // 導入設定檔內容
-const EMBED_COLOR = config.Embed_Color;
-const EMBED_EMOJI = config.Emoji.Commands.Hitokoto;
+const EMBED_COLOR = config.embed.color.default;
+const EMBED_EMOJI = configCommands.hitokoto.emoji;
 
 module.exports = {
     data: new SlashCommandBuilder()

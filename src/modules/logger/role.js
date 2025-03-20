@@ -1,11 +1,11 @@
 const path = require('path');
-const { config } = require(path.join(process.cwd(), 'core/config'));
+const { configModules } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 
 // 記錄成員身分組變更
 module.exports = (client) => {
     
-    if (config.Logger.Type.Role) {
+    if (configModules.role.enable) {
         client.on('guildMemberUpdate', async (oldMember, newMember) => {
             const user = newMember.user;
             const oldRoles = oldMember.roles.cache.map(role => role.name);
