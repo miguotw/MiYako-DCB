@@ -122,7 +122,7 @@ async execute(interaction) {
 
                         // 匯出聊天歷史
                         const filePath = exportChatHistory(userId);
-                        const file = new AttachmentBuilder(filePath, { name: `miyako_chat_${userId}.json` });
+                        const file = new AttachmentBuilder(filePath, { name: `miyakoChat_${userId}.json` });
                             
                         infoReply(interaction, '**已匯出您的聊天歷史紀錄！**', [file]);
                         break;

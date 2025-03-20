@@ -8,7 +8,7 @@ const PROMPT = configCommands.miyakoChat.prompt;
 const MEXLENGTH = configCommands.miyakoChat.mexLength;
 
 // 定義保存對話歷史的資料夾路徑
-const CHAT_HISTORY_DIR = path.join(process.cwd(), 'assets', 'miyako_chat');
+const CHAT_HISTORY_DIR = path.join(process.cwd(), 'assets', 'miyakoChat');
 
 // 確保資料夾存在
 if (!fs.existsSync(CHAT_HISTORY_DIR)) {
