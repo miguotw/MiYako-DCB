@@ -9,7 +9,7 @@ package-lock.json
 # Sensitive info files
 .env
 *.bak
-config.yml
-configCommands.yml
-configModules.yml
+config/config.yml
+config/configCommands.yml
+config/configModules.yml
 assets/miyako_chat/*

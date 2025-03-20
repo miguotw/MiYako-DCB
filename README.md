@@ -34,7 +34,7 @@
     git clone https://github.com/miguotw/MiYako-DCB.git
     ```
 
-2. **設定配置文件：** 填妥 `config_example.yml` 所有空缺項目，並將其重新命名為 `config.yml`
+2. **設定配置文件：** 填妥 `./confing` 內所有文件的空缺項目，並刪除檔案名稱後面的 `_example`
 
 4. **安裝依賴項目：** 在終端輸入以下指令以安裝必要依賴項目
 
