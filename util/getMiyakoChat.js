@@ -1,18 +1,11 @@
 const path = require('path');
 const fs = require('fs');
 const OpenAI = require('openai');
-const { config } = require(path.join(process.cwd(), 'core/config'));
+const { configUtil } = require(path.join(process.cwd(), 'core/config'));
 
 // 導入設定檔內容
-const API_key = config.API.Deepseek.API_key;
-const PROMPT = config.Commands.Miyako_Chat.prompt;
-
-
-// 初始化 OpenAI 客戶端
-const openai = new OpenAI({
-    baseURL: 'https://api.deepseek.com',
-    apiKey: API_key,
-});
+const PROMPT = configUtil.getMiyakoChat.prompt;
+const MEXLENGTH = configUtil.getMiyakoChat.mexLength;
 
 // 定義保存對話歷史的資料夾路徑
 const CHAT_HISTORY_DIR = path.join(process.cwd(), 'assets', 'miyako_chat');
@@ -76,22 +69,23 @@ const deleteChatHistory = (userId) => {
  * 與 Deepseek AI 進行聊天（支援上下文）
  * @param {string} userId - 用戶的唯一識別符（例如 Discord 用戶 ID）
  * @param {string} message - 用戶輸入的訊息
+ * @param {string} modelKey - 選擇的模型鍵值
  * @returns {Promise<string>} - Deepseek AI 的回應
  */
-const chatWithDeepseek = async (userId, message) => {
+const chatWithDeepseek = async (userId, message, modelKey = '01') => {
     try {
-      // 獲取完整對話歷史
-      let chatHistory = getChatHistory(userId);
-  
+        // 獲取完整對話歷史
+        let chatHistory = getChatHistory(userId);
+
         // 1. 確保 system 提示詞存在於歷史記錄開頭
         if (chatHistory.length === 0 || chatHistory[0].role !== "system") {
             chatHistory = [{ role: "system", content: PROMPT }, ...chatHistory];
         }
-    
+
         // 2. 過濾出用戶與助理的對話對
         const conversationPairs = [];
         let currentPair = { user: null, assistant: null };
-    
+
         // 反向遍歷歷史紀錄，組合成對話對
         for (let i = chatHistory.length - 1; i >= 0; i--) {
             const entry = chatHistory[i];
@@ -101,7 +95,7 @@ const chatWithDeepseek = async (userId, message) => {
             } else if (entry.role === "assistant") {
                 currentPair.assistant = entry;
             }
-    
+
             // 當配對完成時存入陣列並重置
             if (currentPair.user && currentPair.assistant) {
                 conversationPairs.unshift({ 
@@ -109,40 +103,48 @@ const chatWithDeepseek = async (userId, message) => {
                     assistant: currentPair.assistant 
                 });
                 currentPair = { user: null, assistant: null };
-    
-                // 達到 30 對時停止
-                if (conversationPairs.length >= 30) break;
+
+                // 達到 MEXLENGTH 時停止
+                if (conversationPairs.length >= MEXLENGTH) break;
             }
         }
-    
+
         // 3. 構建最終要發送的訊息序列
         const messagesToSend = [chatHistory[0]]; // 包含 system 訊息
-    
+
         // 展開對話對到訊息序列
         conversationPairs.forEach(pair => {
             messagesToSend.push(pair.user);
             messagesToSend.push(pair.assistant);
         });
-    
+
         // 4. 加入最新用戶訊息
         messagesToSend.push({ role: "user", content: message });
-  
-        // 5. 調用 API
+
+        // 5. 根據選擇的模型初始化 OpenAI 客戶端
+        const models = configUtil.getMiyakoChat.models;
+        const selectedModel = models[modelKey];
+        const openai = new OpenAI({
+            baseURL: selectedModel.baseURL,
+            apiKey: selectedModel.apiKey,
+        });
+
+        // 6. 調用 API
         const completion = await openai.chat.completions.create({
             messages: messagesToSend,
-            model: "deepseek-chat"
+            model: selectedModel.name
         });
-  
-        // 6. 保存完整歷史紀錄（包含最新互動）
+
+        // 7. 保存完整歷史紀錄（包含最新互動）
         chatHistory.push({ role: "user", content: message });
         chatHistory.push({ role: "assistant", content: completion.choices[0].message.content });
         saveChatHistory(userId, chatHistory);
-    
+
         return completion.choices[0].message.content;
     } catch (error) {
-      throw new Error(error.message);
+        throw new Error(error.message);
     }
-  };
+};
 
 /**
  * 更新用戶的系統提示詞
