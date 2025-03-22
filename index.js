@@ -17,7 +17,8 @@ const client = new Client({
         GatewayIntentBits.GuildMessages, 
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.GuildVoiceStates
+        GatewayIntentBits.GuildVoiceStates,
+        GatewayIntentBits.DirectMessages
     ]
 });
 sendLog(client, '✅ 創建 Discord 客戶端成功！');
