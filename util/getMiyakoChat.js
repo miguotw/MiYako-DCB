@@ -163,4 +163,4 @@ const updateSystemPrompt = (userId, newPrompt) => {
     saveChatHistory(userId, chatHistory);
 };
 
-module.exports = { chatWithDeepseek, exportChatHistory, deleteChatHistory, updateSystemPrompt, getChatHistory };
+module.exports = { chatWithDeepseek, exportChatHistory, deleteChatHistory, updateSystemPrompt, getChatHistory, saveChatHistory };

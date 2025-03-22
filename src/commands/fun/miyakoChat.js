@@ -3,7 +3,7 @@ const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, ModalBuilder, Text
 const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
-const { chatWithDeepseek, exportChatHistory, deleteChatHistory, updateSystemPrompt, getChatHistory } = require(path.join(process.cwd(), 'util/getMiyakoChat'));
+const { chatWithDeepseek, exportChatHistory, deleteChatHistory, updateSystemPrompt, getChatHistory, saveChatHistory } = require(path.join(process.cwd(), 'util/getMiyakoChat'));
 
 // 導入設定檔內容
 const EMBED_COLOR = config.embed.color.default;
@@ -45,6 +45,7 @@ module.exports = {
                         .setRequired(true)
                         .addChoices(
                             { name: '編輯系統提示詞', value: 'edit' },
+                            { name: '編輯最近的回應', value: 'editLastResponse' },
                             { name: '匯出聊天紀錄', value: 'export' },
                             { name: '刪除聊天紀錄', value: 'delete' }
                         ))),
@@ -76,7 +77,8 @@ async execute(interaction) {
                     .setTitle(`${EMBED_EMOJI} ┃ 與${BOTNICKNAME}聊天`)
                     .addFields(
                         { name: `${username} 的訊息`, value: message, inline: false },
-                        { name: `${BOTNICKNAME}的回應`, value: chatResponse, inline: false }
+                        { name: `${BOTNICKNAME}的回應`, value: chatResponse, inline: false },
+                        { name:``, value: `-# 使用 ${models[modelKey].name} 模型`, inline: false }
                     );
                         
                 await interaction.editReply({ embeds: [embed] });
@@ -115,6 +117,34 @@ async execute(interaction) {
                         await interaction.showModal(modal);
                         break;
                         }
+                    
+                    case 'editLastResponse': {
+                        // 獲取用戶的聊天歷史
+                        const chatHistory = getChatHistory(userId);
+
+                        // 檢查是否有 AI 回應
+                        const lastAssistantMsg = chatHistory.reverse().find(msg => msg.role === "assistant");
+                        if (!lastAssistantMsg) {
+                            return errorReply(interaction, '**找不到最近的 AI 回應！**');
+                        }
+
+                        // 建立 Modal
+                        const modal = new ModalBuilder()
+                            .setCustomId('editLastResponseModal')
+                            .setTitle('編輯最近的回應');
+
+                        const responseInput = new TextInputBuilder()
+                            .setCustomId('newResponse')
+                            .setLabel("編輯 AI 的回應內容")
+                            .setStyle(TextInputStyle.Paragraph)
+                            .setValue(lastAssistantMsg.content);
+
+                        const actionRow = new ActionRowBuilder().addComponents(responseInput);
+                        modal.addComponents(actionRow);
+
+                        await interaction.showModal(modal);
+                        break;
+                    }
 
                     case 'export': {
                         // 啟用延遲回覆
@@ -166,6 +196,52 @@ module.exports.modalSubmit = async (interaction) => {
             // 捕獲並記錄錯誤
             sendLog(interaction.client, '❌ 在更新系統提示詞時發生錯誤：', "ERROR", error);
             errorReply(interaction, `**更新失敗，原因：${error.message}**`);
+        }
+
+    } else if (interaction.customId === 'editLastResponseModal') {
+        try {
+            const newResponse = interaction.fields.getTextInputValue('newResponse');
+            const userId = interaction.user.id;
+            const username = interaction.user.username;
+
+            // 獲取聊天紀錄
+            const chatHistory = getChatHistory(userId);
+
+            // 找到最後一則 assistant 訊息的「正向索引」
+            const lastAssistantIndex = chatHistory.reduce((acc, msg, index) => {
+                if (msg.role === 'assistant') acc = index;
+                return acc;
+            }, -1);
+
+            if (lastAssistantIndex === -1) {
+                return errorReply(interaction, '**找不到可編輯的回應！**');
+            }
+
+            // 更新回應內容（保持 role 為 assistant）
+            chatHistory[lastAssistantIndex].content = newResponse;
+            saveChatHistory(userId, chatHistory);
+
+            // 獲取對應的用戶訊息（最後一則 user 訊息）
+            const lastUserMessage = chatHistory.slice(0, lastAssistantIndex)
+                .reverse()
+                .find(msg => msg.role === 'user')?.content || "找不到先前的用戶訊息";
+
+            // 構建與「傳送訊息」相同格式的 Embed
+            const embed = new EmbedBuilder()
+                .setColor(config.embed.color.default)  // 使用 config 中的顏色設定
+                .setTitle(`${configCommands.miyakoChat.emoji} ┃ 與${configCommands.about.botNickname}聊天`)
+                .addFields(
+                    { name: `${username} 的訊息`, value: lastUserMessage, inline: false },
+                    { name: `${configCommands.about.botNickname}的回應`, value: newResponse, inline: false },
+                    { name:``, value: `-# 已被 ${username} 編輯`, inline: false }
+                );
+
+            // 發送 Embed
+            await interaction.reply({ embeds: [embed], ephemeral: false });
+            
+        } catch (error) {
+            sendLog(interaction.client, '❌ 編輯最近回應失敗：', "ERROR", error);
+            errorReply(interaction, `**更新失敗：${error.message}**`);
         }
     }
 };
