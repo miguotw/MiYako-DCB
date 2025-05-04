@@ -4,6 +4,7 @@ const { configModules } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 
 // 導入設定檔內容
+const COOLDOWN = configModules.keywords.cooldown;
 const WHITELIST = configModules.keywords.whitelist;
 const CHANNELS = configModules.keywords.channels;
 const TRIGGER_GROUPS = configModules.keywords.triggers;
@@ -29,6 +30,7 @@ module.exports = (client) => {
                 if (foundKeyword) {
                     // 從該組隨機選擇回應
                     const response = group.responses[Math.floor(Math.random() * group.responses.length)];
+                    await new Promise(resolve => setTimeout(resolve, COOLDOWN));
                     await message.channel.send(response);
                     
                     if (ENABLE) {
