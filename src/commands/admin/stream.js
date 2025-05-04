@@ -24,7 +24,7 @@ module.exports = {
     async execute(interaction) {
 
         //啟用延遲回覆
-        await interaction.deferReply({ ephemeral: false });
+        await interaction.deferReply({ ephemeral: true });
 
         try {
             // 檢查使用者是否具有管理者權限
@@ -70,10 +70,7 @@ module.exports = {
             });
 
             // 提示已發送公告
-            await interaction.editReply({
-                content: '公告已發送！',
-                ephemeral: true
-            });
+            infoReply(interaction, '**已發送直播通知！**');
 
         } catch (error) {
             // 錯誤處理
