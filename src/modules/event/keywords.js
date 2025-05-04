@@ -34,11 +34,8 @@ module.exports = (client) => {
                     // 添加冷卻時間
                     await new Promise(resolve => setTimeout(resolve, COOLDOWN));
                     
-                    // 回復訊息，但不提及使用者
-                    await message.reply({
-                        content: response,
-                        allowedMentions: { repliedUser: false }
-                    });
+                    // 回復訊息
+                    await message.channel.send(response);
                     
                     if (ENABLE) {
                         sendLog(client, `🔍 ${message.author.tag} 在「#${message.channel.name}」觸發關鍵字組「${groupName}」: \n 關鍵字內容: ${foundKeyword} \n 回應的內容: ${response}`,"INFO");
