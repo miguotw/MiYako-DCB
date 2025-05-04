@@ -64,7 +64,7 @@ keywords:
     - "1334932660581175386"
 
   # 冷卻時間(以豪秒為單位)，機器人會等待一段時間才回復消息。
-  cooldown: 3000
+  cooldown: 2000
 
   # 關鍵字觸發時，是否發送記錄到日誌頻道。
   enable: true
@@ -73,108 +73,17 @@ keywords:
   triggers:
     01:
       keywords: 
-        - "笑死"
+        - "???"
       responses: 
-        - "阿你怎麼還沒死"
-    
+        - "???"
+
     02:
-      keywords: 
-        - "閉嘴"
-      responses: 
-        - "不要"
-    
-    03:
-      keywords: 
-        - "???"
-      responses: 
-        - "???"
-
-    04:
-      keywords: 
-        - "好"
-      responses: 
-        - "好就對了"
-
-    05:
-      keywords: 
-        - "點點點"
-        - "..."
-      responses: 
-        - "點點點"
-    
-    06:
-      keywords: 
-        - "婆"
-      responses: 
-        - "那只是一張圖片 不是真的人"
-
-    07:
-      keywords: 
-        - "ㄐㄐ"
-      responses: 
-        - "ㄐㄐ"
-
-    08:
-      keywords: 
-        - "= ="
-      responses: 
-        - "= ="
-
-    09:
-      keywords: 
-        - "=="
-      responses: 
-        - "=="
-
-    10:
-      keywords: 
-        - "幹你娘"
-      responses: 
-        - "幹 你是全家死人逆"
-
-    11:
-      keywords: 
-        - "睡覺"
-      responses: 
-        - "不准 睡屁 起來嗨"
-
-    12:
-      keywords: 
-        - "不知道"
-      responses: 
-        - "不知道就惦惦"
-
-    13:
-      keywords: 
-        - "發財"
-      responses: 
-        - "發呆"
-
-    14: 
-      keywords: 
-        - "佛心公司"
-      responses: 
-        - "╰(⊙Д⊙)╮佛心公司╭(⊙Д⊙)╯"
-
-    15:
       keywords: 
         - "佛心"
       responses: 
         - "╰(⊙Д⊙)╮佛心公司╭(⊙Д⊙)╯"
 
-    16:
-      keywords: 
-        - "星爆"
-        - "10秒"
-        - "十秒"
-        - "16下"
-        - "十六下"
-        - "8763"
-      responses: 
-        - "噓拉"
-        - "噓"
-
-    17:
+    03:
       keywords: 
         - "差低"
         - "XD"
