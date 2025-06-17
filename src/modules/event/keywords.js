@@ -28,19 +28,43 @@ module.exports = (client) => {
                 );
 
                 if (foundKeyword) {
-                    // 從該組隨機選擇回應
-                    const response = group.responses[Math.floor(Math.random() * group.responses.length)];
-                    
-                    // 添加冷卻時間
-                    await new Promise(resolve => setTimeout(resolve, COOLDOWN));
-                    
-                    // 回復訊息
-                    await message.channel.send(response);
-                    
-                    if (ENABLE) {
-                        sendLog(client, `🔍 ${message.author.tag} 在「#${message.channel.name}」觸發關鍵字組「${groupName}」: \n 關鍵字內容: ${foundKeyword} \n 回應的內容: ${response}`,"INFO");
+                    // 收集本次觸發的訊息與 emoji
+                    let response = null;
+                    let reactionsUsed = [];
+
+                    // 反應 emoji（允許 reaction 欄位為單一 emoji 或陣列）
+                    if (group.reaction) {
+                        const reactions = Array.isArray(group.reaction) ? group.reaction : [group.reaction];
+                        for (const emoji of reactions) {
+                            try {
+                                await new Promise(resolve => setTimeout(resolve, COOLDOWN));
+                                await message.react(emoji);
+                                reactionsUsed.push(emoji);
+                            } catch (e) {
+                                // 無法添加的 emoji 忽略
+                            }
+                        }
                     }
-                    // 找到匹配後立即停止檢查其他組
+
+                    // 回覆訊息（允許 message 欄位為單一訊息或陣列）
+                    if (group.message) {
+                        const responses = Array.isArray(group.message) ? group.message : [group.message];
+                        response = responses[Math.floor(Math.random() * responses.length)];
+                        await new Promise(resolve => setTimeout(resolve, COOLDOWN));
+                        await message.channel.send(response);
+                    }
+
+                    // 優化日誌：同時顯示 message 與 reaction
+                    if (ENABLE) {
+                        sendLog(
+                            client,
+                            `🔍 ${message.author.tag} 在「#${message.channel.name}」觸發關鍵字組「${groupName}」:\n` +
+                            `關鍵字內容: ${foundKeyword}\n` +
+                            (response ? `回應的訊息: ${response}\n` : '') +
+                            (reactionsUsed.length > 0 ? `回應的反應: ${reactionsUsed.join(' ')}\n` : ''),
+                            "INFO"
+                        );
+                    }
                     break;
                 }
             }

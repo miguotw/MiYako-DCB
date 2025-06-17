@@ -74,19 +74,22 @@ keywords:
     01:
       keywords: 
         - "???"
-      responses: 
-        - "???"
+      reaction:
+        - "🤔"
+        - "😕"
 
     02:
       keywords: 
         - "佛心"
-      responses: 
+      message: 
         - "╰(⊙Д⊙)╮佛心公司╭(⊙Д⊙)╯"
+      reaction:
+        - "🙏"
 
     03:
       keywords: 
         - "差低"
         - "XD"
-      responses: 
+      message: 
         - "差低"
         - "XD"
