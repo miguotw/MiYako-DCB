@@ -42,6 +42,7 @@ loadModules('./src/modules');
 
 // 載入指令
 client.commands = new Collection();
+client.modalSubmitHandlers = {};
 const commands = [];
 
 function loadCommands(dir) {
@@ -55,6 +56,11 @@ function loadCommands(dir) {
             client.commands.set(command.data.name, command);
             commands.push(command.data.toJSON());
             sendLog(client, `✅ 已載入指令：${file.name}`);
+
+            // 收集 modalSubmitHandlers
+            if (command.modalSubmitHandlers) {
+                Object.assign(client.modalSubmitHandlers, command.modalSubmitHandlers);
+            }
         }
     }
 }
@@ -75,17 +81,19 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
 // 事件：處理指令
 client.on('interactionCreate', async interaction => {
     try {
+        // 處理 Slash Command
         if (interaction.isCommand()) {
-            // 處理 Slash Command
             const command = client.commands.get(interaction.commandName);
             if (!command) return;
 
             await command.execute(interaction);
+
+        // 處理 Modal 提交
         } else if (interaction.isModalSubmit()) {
-            // 處理 Modal 提交
-            const command = client.commands.find(cmd => cmd.modalSubmit);
-            if (command && command.modalSubmit) {
-                await command.modalSubmit(interaction);
+            // 根據 customId 分派
+            const handler = client.modalSubmitHandlers[interaction.customId];
+            if (handler) {
+                await handler(interaction);
             }
         }
     } catch (error) {

@@ -101,7 +101,7 @@ async execute(interaction) {
                             
                         // 建立一個 Modal 供用戶輸入新的系統提示詞
                         const modal = new ModalBuilder()
-                            .setCustomId('editSystemPromptModal')
+                            .setCustomId('miyakoChat_editSystemPromptModal')
                             .setTitle('編輯系統提示詞');
                             
                         const promptInput = new TextInputBuilder()
@@ -130,7 +130,7 @@ async execute(interaction) {
 
                         // 建立 Modal
                         const modal = new ModalBuilder()
-                            .setCustomId('editLastResponseModal')
+                            .setCustomId('miyakoChat_editLastResponseModal')
                             .setTitle('編輯最近的回應');
 
                         const responseInput = new TextInputBuilder()
@@ -181,8 +181,8 @@ async execute(interaction) {
 };
 
 // 處理 Modal 提交的函式
-module.exports.modalSubmit = async (interaction) => {
-    if (interaction.customId === 'editSystemPromptModal') {
+module.exports.modalSubmitHandlers = {
+    miyakoChat_editSystemPromptModal: async (interaction) => {
         try {
             const newPrompt = interaction.fields.getTextInputValue('systemPrompt');
             const userId = interaction.user.id;
@@ -197,8 +197,9 @@ module.exports.modalSubmit = async (interaction) => {
             sendLog(interaction.client, '❌ 在更新系統提示詞時發生錯誤：', "ERROR", error);
             errorReply(interaction, `**更新失敗，原因：${error.message}**`);
         }
+    },
 
-    } else if (interaction.customId === 'editLastResponseModal') {
+    miyakoChat_editLastResponseModal: async (interaction) => {
         try {
             const newResponse = interaction.fields.getTextInputValue('newResponse');
             const userId = interaction.user.id;
