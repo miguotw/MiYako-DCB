@@ -66,7 +66,7 @@ async execute(interaction) {
                 const username = interaction.user.username; // 獲取用戶名
                         
                 // 發送執行指令的摘要到 sendLog
-                   sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/與${BOTNICKNAME}聊天 傳送訊息`, "INFO");
+                sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/與${BOTNICKNAME}聊天 傳送訊息`, "INFO");
                         
                 // 獲取 AI 回應
                 const chatResponse = await chatWithDeepseek(userId, message, modelKey);
