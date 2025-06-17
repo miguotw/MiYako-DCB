@@ -21,27 +21,27 @@ module.exports = {
                 .setDescription('查詢 Minecraft 玩家的外觀資訊')
                 .addStringOption(option => 
                     option.setName('玩家名稱')
-                          .setDescription('要查詢的玩家名稱')
-                          .setRequired(true)))
+                            .setDescription('要查詢的玩家名稱')
+                            .setRequired(true)))
             .addSubcommand(subcommand => 
             subcommand
                 .setName('伺服器狀態資訊')
                 .setDescription('查詢 Minecraft 伺服器狀態資訊')
                 .addStringOption(option => 
                     option.setName('選擇預設伺服器')
-                          .setDescription('從預設列表中選擇伺服器')
-                          .setRequired(false)
-                          .addChoices(
+                            .setDescription('從預設列表中選擇伺服器')
+                            .setRequired(false)
+                            .addChoices(
                               // 動態添加預設伺服器選項
-                              ...Object.entries(DEFAULT_SERVERS).map(([name, ip]) => ({
-                                  name: name,
-                                  value: ip
-                              }))
-                          ))
+                                ...Object.entries(DEFAULT_SERVERS).map(([name, ip]) => ({
+                                    name: name,
+                                    value: ip
+                                }))
+                            ))
                 .addStringOption(option => 
                     option.setName('輸入伺服器位址')
-                          .setDescription('手動輸入伺服器 IP 位址')
-                          .setRequired(false))),
+                            .setDescription('手動輸入伺服器 IP 位址')
+                            .setRequired(false))),
 
     async execute(interaction) {
         const subcommand = interaction.options.getSubcommand();
