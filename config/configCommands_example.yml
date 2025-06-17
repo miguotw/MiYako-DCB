@@ -116,3 +116,9 @@ minecraft:
   #預設列表中的伺服器名稱與 IP，可繼續向下延伸，最多支援 25 個
   defaultServer:
     Hypixel: "mc.hypixel.net"
+
+
+#-------------------------------
+# /時間戳 相關設定：
+UnixTimestamp:
+  emoji: "🕒"
