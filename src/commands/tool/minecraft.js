@@ -23,7 +23,7 @@ module.exports = {
                     option.setName('玩家名稱')
                             .setDescription('要查詢的玩家名稱')
                             .setRequired(true)))
-            .addSubcommand(subcommand => 
+        .addSubcommand(subcommand => 
             subcommand
                 .setName('伺服器狀態資訊')
                 .setDescription('查詢 Minecraft 伺服器狀態資訊')
