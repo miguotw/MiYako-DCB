@@ -1,6 +1,8 @@
 const path = require('path');
 const fs = require('fs');
 const { Client, GatewayIntentBits, REST, Routes, Collection } = require('discord.js');
+const { Player } = require('discord-player');
+const { YoutubeiExtractor } = require('discord-player-youtubei');
 const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
@@ -22,6 +24,12 @@ const client = new Client({
     ]
 });
 sendLog(client, '✅ 創建 Discord 客戶端成功！');
+
+// 初始化 discord-player
+client.player = new Player(client);
+
+// 註冊 YouTube Extractor
+client.player.extractors.register(YoutubeiExtractor, {});
 
 // 載入模組
 function loadModules(dir) {
