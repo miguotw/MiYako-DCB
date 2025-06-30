@@ -20,8 +20,8 @@ async function errorReply(interaction, errorMessage, files = []) {
     const embed = new EmbedBuilder()
         .setTitle(`${EMBED_EMOJI_ERROR} ┃ 執行時失敗`)
         .setColor(EMBED_COLOR_ERROR)
-        .addFields(
-            { name: errorMessage, value: `-# 如果您認為這是機器人本身的問題，請至 [GitHub 儲存庫](${REPOSITORY}) 建立一個 Issue，或與 <@${PROVIDER}> 聯繫，來報告該問題。`, inline: true }
+        .setDescription(
+            `${errorMessage}\n-# 如果您認為這是機器人本身的問題，請至 [GitHub 儲存庫](${REPOSITORY}) 建立一個 Issue，或與 <@${PROVIDER}> 聯繫，來報告該問題。`
         );
 
     const replyOptions = { embeds: [embed], files: files };
@@ -43,9 +43,7 @@ async function infoReply(interaction, successMessage, files = []) {
     const embed = new EmbedBuilder()
         .setTitle(`${EMBED_EMOJI_SUCCESS} ┃ 操作成功`)
         .setColor(EMBED_COLOR_SUCCESS)
-        .addFields(
-            { name: successMessage, value: `　`, inline: true }
-        );
+        .setDescription(successMessage);
 
     const replyOptions = { embeds: [embed], files: files };
 

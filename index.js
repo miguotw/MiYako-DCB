@@ -104,6 +104,16 @@ client.on('interactionCreate', async interaction => {
                 await handler(interaction);
             }
         }
+        // 處理按鈕點擊
+        else if (interaction.isButton()) {
+            const command = client.commands.find(cmd => 
+                cmd.buttonHandlers && cmd.buttonHandlers[interaction.customId]
+            );
+            if (command) {
+                const handler = command.buttonHandlers[interaction.customId];
+                await handler(interaction);
+            }
+        }
     } catch (error) {
         console.error(error);
         errorReply(interaction, '**執行指令時發生錯誤**');
