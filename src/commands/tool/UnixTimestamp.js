@@ -16,18 +16,29 @@ module.exports = {
         .addSubcommand(subcommand =>
             subcommand
                 .setName('現在時間')
-                .setDescription('取得目前的 UNIX 時間戳'))
+                .setDescription('取得目前的 UNIX 時間戳')
+                .addBooleanOption(option =>
+                    option
+                        .setName('使用臨時回應')
+                        .setDescription('以臨時回應回復(僅自己可見)')
+                        .setRequired(false)))
+                
         .addSubcommand(subcommand =>
             subcommand
                 .setName('指定時間')
-                .setDescription('取得指定的 UNIX 時間戳')),
+                .setDescription('取得指定的 UNIX 時間戳')
+                .addBooleanOption(option =>
+                    option
+                        .setName('使用臨時回應')
+                        .setDescription('以臨時回應回復(僅自己可見)')
+                        .setRequired(false))),
 
 async execute(interaction) {
     try {
         const subcommand = interaction.options.getSubcommand();
         if (subcommand === '現在時間') {
-            // 停用延遲回覆
-            await interaction.deferReply({ ephemeral: false });
+            const ephemeral = interaction.options.getBoolean('使用臨時回應') || false;
+            await interaction.deferReply({ ephemeral });
 
             const now = new Date();
             const timestampSeconds = Math.floor(now.getTime() / 1000);
@@ -43,7 +54,7 @@ async execute(interaction) {
                 });
 
             sendLog(interaction.client, `🕒 ${interaction.user.tag} 執行了指令：/時間戳 現在時間`, "INFO");
-            await interaction.editReply({ embeds: [embed] });
+            await interaction.editReply({ embeds: [embed], ephemeral });
         }
 
         else if (subcommand === '指定時間') {
@@ -99,6 +110,7 @@ module.exports.modalSubmitHandlers = {
             const date = interaction.fields.getTextInputValue('dateInput');
             const time = interaction.fields.getTextInputValue('timeInput');
             const timezoneInput = interaction.fields.getTextInputValue('timezoneInput') || TIMEZONE;
+            const ephemeral = interaction.options.getBoolean('使用臨時回應') || false;
             
             // 驗證日期格式 YYYY-MM-DD
             if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -141,7 +153,7 @@ module.exports.modalSubmitHandlers = {
                     inline: false
                 });
 
-            await interaction.reply({ embeds: [embed],ephemeral: false});
+            await interaction.reply({ embeds: [embed], ephemeral });
 
         } catch (error) {
             sendLog(interaction.client, '❌ 在處理時間戳 Modal 時發生錯誤：', "ERROR", error);
