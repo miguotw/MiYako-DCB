@@ -13,6 +13,3 @@ config/config.yml
 config/configCommands.yml
 config/configModules.yml
 assets/miyakoChat/*
-
-# other
-src/commands/fun/trackTW.js

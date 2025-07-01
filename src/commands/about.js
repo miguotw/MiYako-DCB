@@ -18,8 +18,8 @@ module.exports = {
         .setDescription('查詢機器人的相關資訊與介紹')
         .addBooleanOption(option =>
             option.setName('顯示伺服器唯一編號')
-                  .setDescription('選擇顯示伺服器 ID')
-                  .setRequired(false)), // 讓顯示伺服器 ID 成為可選項
+                    .setDescription('選擇顯示伺服器 ID')
+                    .setRequired(false)), // 讓顯示伺服器 ID 成為可選項
 
     async execute(interaction) {
 
