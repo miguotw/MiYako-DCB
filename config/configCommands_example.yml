@@ -141,5 +141,5 @@ minecraft:
 
 #-------------------------------
 # /時間戳 相關設定：
-UnixTimestamp:
+unixTimestamp:
   emoji: "🕒"
