@@ -54,16 +54,9 @@ module.exports = (client) => {
                         await message.channel.send(response);
                     }
 
-                    // 優化日誌：同時顯示 message 與 reaction
+                    // 傳送日誌
                     if (ENABLE) {
-                        sendLog(
-                            client,
-                            `🔍 ${message.author.tag} 在「#${message.channel.name}」觸發關鍵字組「${groupName}」:\n` +
-                            `關鍵字內容: ${foundKeyword}\n` +
-                            (response ? `回應的訊息: ${response}\n` : '') +
-                            (reactionsUsed.length > 0 ? `回應的反應: ${reactionsUsed.join(' ')}\n` : ''),
-                            "INFO"
-                        );
+                        sendLog(client, `🔍 ${message.author.tag} 在「#${message.channel.name}」觸發「${groupName}」關鍵字組：${foundKeyword}(${response})`, "INFO");
                     }
                     break;
                 }
