@@ -306,7 +306,7 @@ module.exports = {
         this.clearUpdateInterval(interaction.guildId);
         const interval = setInterval(async () => {
             await this.updateControlPanel(interaction);
-        }, 2500);
+        }, 5000);
         this.updateIntervals.set(interaction.guildId, interval);
     },
 
