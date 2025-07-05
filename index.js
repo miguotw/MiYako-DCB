@@ -2,11 +2,10 @@ global.crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const { Client, GatewayIntentBits, REST, Routes, Collection } = require('discord.js');
-const { Player } = require('discord-player');
-const { YoutubeiExtractor } = require('discord-player-youtubei');
 const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { initPlayer } = require(path.join(process.cwd(), 'util/getDiscordPlayer'));
 const { getHitokoto } = require(path.join(process.cwd(), 'util/getHitokoto'));
 
 // Discord bot 設定
@@ -25,12 +24,6 @@ const client = new Client({
     ]
 });
 sendLog(client, '✅ 創建 Discord 客戶端成功！');
-
-// 初始化 discord-player
-client.player = new Player(client);
-
-// 註冊 YouTube Extractor
-client.player.extractors.register(YoutubeiExtractor, {});
 
 // 載入模組
 function loadModules(dir) {
@@ -81,7 +74,7 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
 (async () => {
     try {
         await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-        sendLog(client, '✅ 指令註冊完成！');
+        sendLog(client, '✅ 已註冊完成：Slash Commands');
     } catch (error) {
         sendLog(client, '❌ 註冊指令時發生錯誤：', "ERROR", error);
     }
@@ -136,5 +129,8 @@ client.once('ready', async () => {
         sendLog(client, "❌ 無法獲取 Hitokoto API 資料：", "ERROR", error);
     }
 });
+
+// 初始化 Discord Player
+initPlayer(client);
 
 client.login(TOKEN);

@@ -1,12 +1,52 @@
 const path = require('path');
-const { QueryType, useMainPlayer } = require('discord-player');
+const { Player, QueryType, useMainPlayer } = require('discord-player');
+const { YoutubeiExtractor } = require('discord-player-youtubei');
 const { configCommands } = require(path.join(process.cwd(), 'core/config'));
+const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 
 // 導入設定檔內容
-const PROGRESSBAR_LENGTH = configCommands.music.progressBar.length;
-const PROGRESSBAR_INDICATOR = configCommands.music.progressBar.indicator;
-const PROGRESSBAR_LEFTCHAR = configCommands.music.progressBar.leftChar;
-const PROGRESSBAR_RIGHTCHAR = configCommands.music.progressBar.rightChar;
+const PROGRESSBAR_LENGTH = configCommands.music.discordPlayer.progressBar.length;
+const PROGRESSBAR_INDICATOR = configCommands.music.discordPlayer.progressBar.indicator;
+const PROGRESSBAR_LEFTCHAR = configCommands.music.discordPlayer.progressBar.leftChar;
+const PROGRESSBAR_RIGHTCHAR = configCommands.music.discordPlayer.progressBar.rightChar;
+const COOKIES = configCommands.music.discordPlayer.cookies;
+
+/**
+ * 取得 cookies 中 HSID 的過期時間
+ * @param {string} cookiesStr - cookies 的 JSON 字串
+ * @returns {string} - HSID 過期時間的日期字串，若無則回傳 "未知"
+ */
+function getCookiesExpireTime(cookiesStr) {
+    try {
+        const obj = JSON.parse(cookiesStr);
+        if (!obj.cookies || !Array.isArray(obj.cookies)) return "未知";
+        const hsidCookie = obj.cookies.find(c => c.name === "VISITOR_INFO1_LIVE" && typeof c.expirationDate === "number");
+        if (hsidCookie) {
+            const date = new Date(hsidCookie.expirationDate * 1000);
+            return date.toISOString();
+        }
+        return "未知";
+    } catch {
+        return "未知";
+    }
+}
+
+/**
+ * 初始化 Player 並註冊 Extractor
+ * @param {Client} client - Discord client 實例
+ */
+const initPlayer = (client) => {
+    client.player = new Player(client);
+    sendLog(client, '✅ 初始化完成：Discord Player');
+    if (COOKIES && typeof COOKIES === 'string' && COOKIES.trim() !== '') {
+        client.player.extractors.register(YoutubeiExtractor, { cookies: COOKIES });
+        const expireTime = getCookiesExpireTime(COOKIES);
+        sendLog(client, `✅ 已註冊完成：Youtubei Extractor (已套用 cookies，有效至：${expireTime} )`);
+    } else {
+        client.player.extractors.register(YoutubeiExtractor, {});
+        sendLog(client, '✅ 已註冊完成：Youtubei Extractor (未套用 cookies )');
+    }
+};
 
 /**
  * 獲取音樂播放器實例
@@ -125,4 +165,4 @@ const controlPlayer = (guildId, action) => {
     }
 };
 
-module.exports = { getPlayer, searchMusic, playMusic, createProgressBar, getPlayerState, controlPlayer };
+module.exports = { initPlayer, getPlayer, searchMusic, playMusic, createProgressBar, getPlayerState, controlPlayer };

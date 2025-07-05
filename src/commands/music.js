@@ -88,7 +88,8 @@ module.exports = {
         try {
             await interaction.deferReply({ ephemeral: true });
             await this.createControlPanel(interaction);
-            await infoReply(interaction, `**已召喚一個音樂控制面板到目前頻道！**`);
+            infoReply(interaction, `**已召喚一個音樂控制面板到目前頻道！**`);
+            sendLog(interaction.client, `🎧 ${interaction.user.tag} 執行了指令：/音樂`, "INFO");
         } catch (error) {
             errorReply(interaction, `**執行時發生錯誤，原因：${error.message || '未知錯誤'}**`);
             sendLog(interaction.client, `❌ 在執行 音樂 時發生錯誤：`, "ERROR", error);
@@ -125,8 +126,6 @@ module.exports = {
         if (isPlaying) {
             this.startAutoUpdate(interaction);
         }
-
-        sendLog(interaction.client, `🎧 ${interaction.user.tag} 執行了互動：召喚音樂控制面板`, "INFO");
     },
 
     // 音樂控制面板：按鈕處理器
@@ -149,11 +148,11 @@ module.exports = {
                 const firstRow = new ActionRowBuilder().addComponents(songInput);
                 modal.addComponents(firstRow);
                 
-                sendLog(interaction.client, `🎧 ${interaction.user.tag} 執行了互動：點播音樂`, "INFO");
                 await interaction.showModal(modal);
+                sendLog(interaction.client, `🎧 ${interaction.user.tag} 使用了按鈕：音樂 點播音樂`, "INFO");
             } catch (error) {
-                errorReply(interaction, `**開啟點播視窗時發生錯誤，原因：${error.message || '未知錯誤'}**`);
-                sendLog(interaction.client, `❌ 在執行 音樂 開啟點播視窗 時發生錯誤：`, "ERROR", error);
+                errorReply(interaction, `**音樂 點播音樂 發生錯誤，原因：${error.message || '未知錯誤'}**`);
+                sendLog(interaction.client, `❌ 在執行 音樂 點播音樂  時發生錯誤：`, "ERROR", error);
                 return;
             }
         },
@@ -169,10 +168,10 @@ module.exports = {
                 const instance = require('./music');
                 await instance.updateControlPanel(interaction);
                 
-                sendLog(interaction.client, `🎧 ${interaction.user.tag} 執行了互動：重複播放`, "INFO");
                 await interaction.deferUpdate();
+                sendLog(interaction.client, `🎧 ${interaction.user.tag} 使用了按鈕：音樂 重複播放`, "INFO");
             } catch (error) {
-                errorReply(interaction, `**重複播放發生錯誤，原因：${error.message || '未知錯誤'}**`);
+                errorReply(interaction, `**音樂 重複播放 發生錯誤，原因：${error.message || '未知錯誤'}**`);
                 sendLog(interaction.client, `❌ 在執行 音樂 重複播放 時發生錯誤：`, "ERROR", error);
                 await interaction.deferUpdate();
             }
@@ -190,10 +189,10 @@ module.exports = {
                 const instance = require('./music');
                 await instance.updateControlPanel(interaction);
                 
-                sendLog(interaction.client, `🎧 ${interaction.user.tag} 執行了互動：暫停/繼續`, "INFO");
                 await interaction.deferUpdate();
+                sendLog(interaction.client, `🎧 ${interaction.user.tag} 使用了按鈕：音樂 暫停/繼續`, "INFO");
             } catch (error) {
-                errorReply(interaction, `**暫停/繼續 發生錯誤，原因：${error.message || '未知錯誤'}**`);
+                errorReply(interaction, `**音樂 暫停/繼續 發生錯誤，原因：${error.message || '未知錯誤'}**`);
                 sendLog(interaction.client, `❌ 在執行 音樂 暫停/繼續 時發生錯誤：`, "ERROR", error);
                 await interaction.deferUpdate();
             }
@@ -210,10 +209,10 @@ module.exports = {
                 const instance = require('./music');
                 await instance.updateControlPanel(interaction);
                 
-                sendLog(interaction.client, `🎧 ${interaction.user.tag} 執行了互動：跳過`, "INFO");
                 await interaction.deferUpdate();
+                sendLog(interaction.client, `🎧 ${interaction.user.tag} 使用了按鈕：音樂 跳過`, "INFO");
             } catch (error) {
-                errorReply(interaction, `**跳過 發生錯誤，原因：${error.message || '未知錯誤'}**`);
+                errorReply(interaction, `**音樂 跳過 發生錯誤，原因：${error.message || '未知錯誤'}**`);
                 sendLog(interaction.client, `❌ 在執行 音樂 跳過 時發生錯誤：`, "ERROR", error);
                 await interaction.deferUpdate();
             }
@@ -231,22 +230,33 @@ module.exports = {
                 const res = await searchMusic(song, interaction.member);
 
                 if (!res?.tracks.length) {
-                    return errorReply(interaction, `**沒有找到結果… 再試一次？**\n-# 由於機器人伺服器位置與您所在地可能不同，導致受到地區限制，建議更換關鍵字或使用其他連結。\n`);
+                    errorReply(interaction, `**沒有找到結果… 再試一次？**\n-# 由於機器人伺服器位置與您所在地可能不同，導致受到地區限制，建議更換關鍵字或使用其他連結。\n`);
+                    return;
                 }
 
                 try {
                     const { track } = await playMusic(interaction.member.voice.channel, song, interaction);
-                    await infoReply(interaction, `**載入 [${track.title}](${track.url}) 到序列中…**`);
-
+                    
+                    infoReply(interaction, `**載入 [${track.title}](${track.url}) 到序列中…**`);
+                    sendLog(interaction.client, `🎧 ${interaction.user.tag} 提交了互動視窗：音樂 點播音樂(${track.url})`, "INFO");
+                    
                     const instance = require('./music');
                     await instance.createControlPanel(interaction, true);
                 } catch (error) {
-                    console.log(`Play error: ${error}`);
-                    return errorReply(interaction, `**我無法加入語音頻道… 再試一次？**`);
+                    // 錯誤處理：ERR_NO_RESULT
+                    if (error.code === 'ERR_NO_RESULT' || error.message?.includes('Could not extract stream')) {
+                        errorReply(interaction, `**無法提取串流… 再試一次？**\n-# 目前正受到 YouTube 的速率限制，請稍後再試。\n`);
+                        sendLog(interaction.client, `❌ 播放器串流提取失敗：${error.message}`, "ERROR", error);
+                        return;
+                    }
+                    // 錯誤處理：其他錯誤
+                    errorReply(interaction, `**我無法加入語音頻道… 再試一次？**\n-# 您可能不在語音頻道裡，或機器人缺少權限。\n`);
+                    sendLog(interaction.client, `❌ 播放器加入語音頻道失敗：${error.message}`, "ERROR", error);
+                    return;
                 }
             } catch (error) {
-                errorReply(interaction, `**執行時發生錯誤，原因：${error.message || '未知錯誤'}**`);
-                sendLog(interaction.client, `❌ 在執行 音樂 時發生錯誤：`, "ERROR", error);
+                errorReply(interaction, `**音樂 點播音樂 發生錯誤，原因：${error.message || '未知錯誤'}**`);
+                sendLog(interaction.client, `❌ 在執行 音樂 點播音樂 時發生錯誤：`, "ERROR", error);
                 return;
             }
         }
@@ -261,7 +271,7 @@ module.exports = {
             const message = await interaction.channel.messages.fetch(messageId);
             await message.delete();
         } catch (error) {
-            sendLog(interaction.client, `❌ 在執行 音樂 刪除舊控制面板 時發生錯誤：`, "ERROR", error);
+            sendLog(interaction.client, `❌ 在執行 音樂 功能模組：刪除音樂控制面板 時發生錯誤：`, "ERROR", error);
         }
     },
 
@@ -287,7 +297,7 @@ module.exports = {
             }
         } catch (error) {
             this.clearUpdateInterval(interaction.guildId);
-            sendLog(interaction.client, `❌ 在執行 音樂 更新控制面板 時發生錯誤：`, "ERROR", error);
+            sendLog(interaction.client, `❌ 在執行 功能模組：更新音樂控制面板 時發生錯誤：`, "ERROR", error);
         }
     },
 
