@@ -152,7 +152,7 @@ module.exports = {
                 sendLog(interaction.client, `🎧 ${interaction.user.tag} 使用了按鈕：音樂 點播音樂`, "INFO");
             } catch (error) {
                 errorReply(interaction, `**音樂 點播音樂 發生錯誤，原因：${error.message || '未知錯誤'}**`);
-                sendLog(interaction.client, `❌ 在執行 音樂 點播音樂  時發生錯誤：`, "ERROR", error);
+                sendLog(interaction.client, `❌ 在執行 音樂 點播音樂 時發生錯誤：`, "ERROR", error);
                 return;
             }
         },
