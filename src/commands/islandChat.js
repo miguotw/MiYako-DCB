@@ -3,7 +3,7 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
-const { chatWithAI, getChatHistory } = require(path.join(process.cwd(), 'util/getIslandChat'));
+const { chatWithAI, getChatHistory, resetSessionCounter } = require(path.join(process.cwd(), 'util/getIslandChat'));
 
 // 導入設定檔內容
 const EMBED_COLOR = config.embed.color.default;
@@ -138,6 +138,20 @@ module.exports = {
                 await interaction.followUp({ embeds: [embed], ephemeral: true });
                 sendLog(interaction.client, `💬 ${interaction.user.tag} 取得了「諮詢」回應內容：\n${chatResponse}`, "INFO");
             } catch (error) {
+                let errorMessage = error.message;
+                if (errorMessage.includes('工作階段對話次數上限')) {
+                    errorMessage += `\n\n此限制會在工作階段結束後自動重置。`;
+                }
+                
+                await interaction.followUp({ 
+                    embeds: [
+                        new EmbedBuilder()
+                            .setColor(config.embed.color.error)
+                            .setDescription(`${EMBED_EMOJI} **${errorMessage}**`)
+                    ],
+                    ephemeral: true
+                });
+
                 await interaction.followUp({ 
                     embeds: [
                         new EmbedBuilder()

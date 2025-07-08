@@ -4,12 +4,16 @@ const OpenAI = require('openai');
 const { configCommands } = require(path.join(process.cwd(), 'core/config'));
 
 // 導入設定檔內容
-const CONTEXT = configCommands.islandChat.limit.context;
+const CONTEXT_LIMIT = configCommands.islandChat.limit.context;
+const SESSION_LIMIT = configCommands.islandChat.limit.session;
 const BASE_URL = configCommands.islandChat.models.baseURL;
 const API_KEY = configCommands.islandChat.models.apiKey;
 const MODEL = configCommands.islandChat.models.name;
 const ARCHIVE_PATH = path.join(process.cwd(), configCommands.islandChat.path.archive);
-const PROMPT_PATHS = configCommands.islandChat.path.prompt.map(p => path.join(process.cwd(), p));
+const PROMPT_PATH = configCommands.islandChat.path.prompt.map(p => path.join(process.cwd(), p));
+
+// 會話計數器
+const sessionCounters = new Map();
 
 /**
  * 讀取並合併所有提示詞檔案
@@ -18,7 +22,7 @@ const PROMPT_PATHS = configCommands.islandChat.path.prompt.map(p => path.join(pr
 const loadPrompts = () => {
     let combinedPrompt = '';
     
-    for (const promptPath of PROMPT_PATHS) {
+    for (const promptPath of PROMPT_PATH) {
         try {
             const content = fs.readFileSync(promptPath, 'utf8');
             combinedPrompt += `\n\n${content}`;
@@ -54,6 +58,31 @@ const getChatHistory = (userId) => {
 };
 
 /**
+ * 檢查並更新會話計數
+ * @param {string} userId - 用戶ID
+ * @returns {boolean} - 是否超過限制
+ */
+const checkSessionLimit = (userId) => {
+    // 如果未設定限制則直接通過
+    if (!SESSION_LIMIT || SESSION_LIMIT <= 0) return false;
+    
+    const count = sessionCounters.get(userId) || 0;
+    if (count >= SESSION_LIMIT) {
+        return true;
+    }
+    sessionCounters.set(userId, count + 1);
+    return false;
+};
+
+/**
+ * 重置會話計數
+ * @param {string} userId - 用戶ID
+ */
+const resetSessionCounter = (userId) => {
+    sessionCounters.delete(userId);
+};
+
+/**
  * 保存用戶的對話歷史
  * @param {string} userId - 用戶的唯一識別符
  * @param {Array} chatHistory - 用戶的對話歷史
@@ -73,6 +102,11 @@ const saveChatHistory = (userId, chatHistory) => {
  */
 const chatWithAI = async (userId, message) => {
     try {
+        // 檢查會話限制
+        if (checkSessionLimit(userId)) {
+            throw new Error(`已達到本工作階段對話次數上限 (${SESSION_LIMIT} 次)`);
+        }
+
         // 獲取對話歷史（不包含系統提示詞）
         let chatHistory = getChatHistory(userId);
 
@@ -80,10 +114,10 @@ const chatWithAI = async (userId, message) => {
         let fullChatHistory = [{ role: "system", content: PROMPT }, ...chatHistory];
 
         // 限制歷史記錄長度
-        if (fullChatHistory.length > CONTEXT * 2 + 1) {  // +1 是為了系統提示詞
+        if (fullChatHistory.length > CONTEXT_LIMIT * 2 + 1) {  // +1 是為了系統提示詞
             fullChatHistory = [
                 fullChatHistory[0], // 保留系統提示
-                ...fullChatHistory.slice(-CONTEXT * 2) // 保留最近的對話
+                ...fullChatHistory.slice(-CONTEXT_LIMIT * 2) // 保留最近的對話
             ];
         }
 
@@ -115,4 +149,4 @@ const chatWithAI = async (userId, message) => {
     }
 };
 
-module.exports = { chatWithAI, getChatHistory };
+module.exports = { chatWithAI, getChatHistory, resetSessionCounter };
