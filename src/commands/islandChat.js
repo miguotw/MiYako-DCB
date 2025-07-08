@@ -7,10 +7,11 @@ const { chatWithAI, getChatHistory } = require(path.join(process.cwd(), 'util/ge
 
 // 導入設定檔內容
 const EMBED_COLOR = config.embed.color.default;
+const EMBED_EMOJI_LOADING = config.emoji.loading;
 const EMBED_EMOJI = configCommands.islandChat.emoji;
-const EMBED_EMOJI_LOADING = configCommands.islandChat.loading;
 const BOTNICKNAME = configCommands.islandChat.botNickname;
 const INTRODUCE = configCommands.islandChat.introduce;
+const MAX_LENGTH = configCommands.islandChat.limit.maxLength;
 
 // 創建控制面板的 embed
 function createChatPanelEmbed(botAvatar) {
@@ -42,7 +43,7 @@ module.exports = {
             await interaction.deferReply({ ephemeral: true });
             
             // 獲取機器人頭像
-            const botAvatar = interaction.client.user.displayAvatarURL();
+            const botAvatar = interaction.client.user.displayAvatarURL({ format: 'png', dynamic: true, size: 64 });
             
             // 發送控制面板
             const embed = createChatPanelEmbed(botAvatar);
@@ -76,7 +77,7 @@ module.exports = {
                     .setStyle(TextInputStyle.Paragraph)
                     .setPlaceholder('例如：我可以蓋生怪塔嗎？')
                     .setRequired(true)
-                    .setMaxLength(256);
+                    .setMaxLength(MAX_LENGTH);
 
                 const actionRow = new ActionRowBuilder().addComponents(messageInput);
                 modal.addComponents(actionRow);

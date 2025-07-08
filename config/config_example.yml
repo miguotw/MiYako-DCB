@@ -27,9 +27,9 @@ log:
 # 嵌入介面通用設定：
 embed:
   color:
-    default: 0xf8b840
-    success: 0x2F3136
-    error: 0x2F3136
+    default: 0x1abc9c
+    success: 0x242429
+    error: 0x242429
 
 
 #-------------------------------

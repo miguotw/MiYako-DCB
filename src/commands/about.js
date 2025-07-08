@@ -14,7 +14,7 @@ const REPOSITORY = configCommands.about.repository;
 
 module.exports = {
     data: new SlashCommandBuilder()
-        .setName(`關於${BOTNICKNAME}`)
+        .setName(`關於`)
         .setDescription('查詢機器人的相關資訊與介紹')
         .addBooleanOption(option =>
             option.setName('顯示伺服器唯一編號')
@@ -31,12 +31,12 @@ module.exports = {
             const showServerID = interaction.options.getBoolean('顯示伺服器唯一編號') || false;
             
             // 發送執行指令的摘要到 sendLog
-            sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/關於${BOTNICKNAME} 顯示伺服器唯一編號(${showServerID ? '是' : '否'})`, "INFO");
+            sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/關於 顯示伺服器唯一編號(${showServerID ? '是' : '否'})`, "INFO");
 
             // 獲取機器人的相關資訊
             const botUser = interaction.client.user;
             const botUsername = botUser.username;
-            const botAvatar = botUser.displayAvatarURL({ format: 'png', dynamic: true, size: 1024 });
+            const botAvatar = botUser.displayAvatarURL({ format: 'png', dynamic: true, size: 64 });
             const botID = botUser.id;
             const guilds = interaction.client.guilds.cache;
 

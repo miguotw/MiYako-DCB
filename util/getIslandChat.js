@@ -4,7 +4,7 @@ const OpenAI = require('openai');
 const { configCommands } = require(path.join(process.cwd(), 'core/config'));
 
 // 導入設定檔內容
-const MAX_LENGTH = configCommands.islandChat.maxLength;
+const CONTEXT = configCommands.islandChat.limit.context;
 const BASE_URL = configCommands.islandChat.models.baseURL;
 const API_KEY = configCommands.islandChat.models.apiKey;
 const MODEL = configCommands.islandChat.models.name;
@@ -80,10 +80,10 @@ const chatWithAI = async (userId, message) => {
         let fullChatHistory = [{ role: "system", content: PROMPT }, ...chatHistory];
 
         // 限制歷史記錄長度
-        if (fullChatHistory.length > MAX_LENGTH * 2 + 1) {  // +1 是為了系統提示詞
+        if (fullChatHistory.length > CONTEXT * 2 + 1) {  // +1 是為了系統提示詞
             fullChatHistory = [
                 fullChatHistory[0], // 保留系統提示
-                ...fullChatHistory.slice(-MAX_LENGTH * 2) // 保留最近的對話
+                ...fullChatHistory.slice(-CONTEXT * 2) // 保留最近的對話
             ];
         }
 

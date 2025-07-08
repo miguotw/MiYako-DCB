@@ -5,7 +5,6 @@ const { Client, GatewayIntentBits, REST, Routes, Collection } = require('discord
 const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
-const { initPlayer } = require(path.join(process.cwd(), 'util/getDiscordPlayer'));
 const { getHitokoto } = require(path.join(process.cwd(), 'util/getHitokoto'));
 
 // Discord bot 設定
@@ -24,23 +23,6 @@ const client = new Client({
     ]
 });
 sendLog(client, '✅ 創建 Discord 客戶端成功！');
-
-// 載入模組
-function loadModules(dir) {
-    const files = fs.readdirSync(dir, { withFileTypes: true });
-    for (const file of files) {
-        const fullPath = path.join(dir, file.name);
-        if (file.isDirectory()) {
-            loadModules(fullPath);
-        } else if (file.isFile() && file.name.endsWith('.js')) {
-            const module = require(path.resolve(fullPath));
-            module(client); // 將 client 傳遞給模組
-            sendLog(client, `✅ 已載入模組：${file.name}`);
-        }
-    }
-}
-
-loadModules('./src/modules');
 
 // 載入指令
 client.commands = new Collection();
@@ -129,8 +111,5 @@ client.once('ready', async () => {
         sendLog(client, "❌ 無法獲取 Hitokoto API 資料：", "ERROR", error);
     }
 });
-
-// 初始化 Discord Player
-initPlayer(client);
 
 client.login(TOKEN);
