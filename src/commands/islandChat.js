@@ -3,7 +3,7 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
-const { chatWithAI, getChatHistory, resetSessionCounter } = require(path.join(process.cwd(), 'util/getIslandChat'));
+const { chatWithAI, getChatHistory, resetSessionCounter, deleteChatHistory, exportChatHistory } = require(path.join(process.cwd(), 'util/getIslandChat'));
 
 // 導入設定檔內容
 const EMBED_COLOR = config.embed.color.default;
@@ -29,7 +29,17 @@ function createChatPanelButtons() {
         .setLabel(`與「${BOTNICKNAME}」諮詢`)
         .setStyle(ButtonStyle.Primary);
 
-    return new ActionRowBuilder().addComponents(startButton);
+    const exportButton = new ButtonBuilder()
+        .setCustomId('chat_export_button')
+        .setLabel('匯出歷史紀錄')
+        .setStyle(ButtonStyle.Secondary);
+
+    const deleteButton = new ButtonBuilder()
+        .setCustomId('chat_delete_button')
+        .setLabel('刪除歷史紀錄')
+        .setStyle(ButtonStyle.Secondary);
+
+    return new ActionRowBuilder().addComponents(startButton, exportButton, deleteButton);
 }
 
 module.exports = {
@@ -86,6 +96,54 @@ module.exports = {
             } catch (error) {
                 errorReply(interaction, `**諮詢 與「${BOTNICKNAME}」諮詢 發生錯誤，原因：${error.message || '未知錯誤'}**`);
                 sendLog(interaction.client, `❌ 在執行 諮詢 與「${BOTNICKNAME}」諮詢 時發生錯誤：`, "ERROR", error);
+            }
+        },
+
+        // 匯出歷史紀錄按鈕
+        chat_export_button: async (interaction) => {
+            try {
+                await interaction.deferReply({ ephemeral: true });
+                
+                const userId = interaction.user.id;
+                const exportData = exportChatHistory(userId);
+                
+                if (!exportData) {
+                    infoReply(interaction, '**您目前沒有可匯出的聊天歷史紀錄！**');
+                    sendLog(interaction.client, `📁 ${interaction.user.tag} 嘗試匯出聊天歷史紀錄，但歷史紀錄為空`, "INFO");
+                    return;
+                }
+                
+                const file = {
+                    attachment: exportData.filePath,
+                    name: exportData.fileName
+                };
+                
+                infoReply(interaction, '**已匯出您的聊天歷史紀錄！**', [file]);
+                sendLog(interaction.client, `📁 ${interaction.user.tag} 匯出了聊天歷史紀錄`, "INFO");
+            } catch (error) {
+                errorReply(interaction, `**諮詢 匯出歷史紀錄 發生錯誤，原因：${error.message || '未知錯誤'}**`);
+                sendLog(interaction.client, `❌ 在執行 諮詢 匯出歷史紀錄 時發生錯誤：`, "ERROR", error);
+            }
+        },
+
+        // 刪除歷史紀錄按鈕
+        chat_delete_button: async (interaction) => {
+            try {
+                await interaction.deferReply({ ephemeral: true });
+                
+                const userId = interaction.user.id;
+                const deleted = deleteChatHistory(userId);
+                
+                if (deleted) {
+                    infoReply(interaction, '**已刪除您的聊天歷史紀錄！**');
+                    sendLog(interaction.client, `📁 ${interaction.user.tag} 刪除了聊天歷史紀錄`, "INFO");
+                } else {
+                    infoReply(interaction, '**您目前沒有可刪除的聊天歷史紀錄！**');
+                    sendLog(interaction.client, `📁 ${interaction.user.tag} 嘗試刪除聊天歷史紀錄，但歷史紀錄為空`, "INFO");
+                }
+            } catch (error) {
+                errorReply(interaction, `**諮詢 刪除歷史紀錄 發生錯誤，原因：${error.message || '未知錯誤'}**`);
+                sendLog(interaction.client, `❌ 在執行 諮詢 刪除歷史紀錄 時發生錯誤：`, "ERROR", error);
             }
         }
     },

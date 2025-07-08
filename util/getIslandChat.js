@@ -95,6 +95,36 @@ const saveChatHistory = (userId, chatHistory) => {
 };
 
 /**
+ * 刪除用戶的對話歷史
+ * @param {string} userId - 用戶的唯一識別符
+ * @returns {boolean} - 是否成功刪除
+ */
+const deleteChatHistory = (userId) => {
+    const filePath = path.join(ARCHIVE_PATH, `${userId}.json`);
+    if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        return true;
+    }
+    return false;
+};
+
+/**
+ * 匯出用戶的對話歷史
+ * @param {string} userId - 用戶的唯一識別符
+ * @returns {Object} - 包含檔案內容和檔案名稱的物件
+ */
+const exportChatHistory = (userId) => {
+    const filePath = path.join(ARCHIVE_PATH, `${userId}.json`);
+    if (fs.existsSync(filePath)) {
+        return {
+            filePath: filePath,
+            fileName: `${userId}.json`
+        };
+    }
+    return null;
+};
+
+/**
  * 與 AI 進行對話
  * @param {string} userId - 用戶的唯一識別符
  * @param {string} message - 用戶輸入的訊息
@@ -149,4 +179,4 @@ const chatWithAI = async (userId, message) => {
     }
 };
 
-module.exports = { chatWithAI, getChatHistory, resetSessionCounter };
+module.exports = { chatWithAI, getChatHistory, resetSessionCounter, deleteChatHistory, exportChatHistory };
