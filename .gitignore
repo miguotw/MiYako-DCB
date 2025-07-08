@@ -12,4 +12,5 @@ package-lock.json
 config/config.yml
 config/configCommands.yml
 config/configModules.yml
+assets/islandChat/archive/*
 assets/miyakoChat/*
