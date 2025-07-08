@@ -55,10 +55,10 @@ module.exports = {
             });
             
             infoReply(interaction, '**已創建 AI 對話控制面板！**');
-            sendLog(interaction.client, `💬 ${interaction.user.tag} 創建了 AI 對話控制面板`, "INFO");
+            sendLog(interaction.client, `💬 ${interaction.user.tag} 執行了指令：/諮詢`, "INFO");
         } catch (error) {
-            errorReply(interaction, `**創建控制面板時發生錯誤：${error.message || '未知錯誤'}**`);
-            sendLog(interaction.client, `❌ 創建 AI 對話控制面板時發生錯誤：`, "ERROR", error);
+            errorReply(interaction, `**諮詢 發生錯誤，原因：${error.message || '未知錯誤'}**`);
+            sendLog(interaction.client, `❌ 在執行 諮詢 時發生錯誤：`, "ERROR", error);
         }
     },
 
@@ -83,13 +83,9 @@ module.exports = {
                 modal.addComponents(actionRow);
                 
                 await interaction.showModal(modal);
-                // sendLog(interaction.client, `💬 ${interaction.user.tag} 點擊了開始對話按鈕`, "INFO");
             } catch (error) {
-                await interaction.reply({ 
-                    content: `**開啟對話時發生錯誤：${error.message || '未知錯誤'}**`, 
-                    ephemeral: true 
-                });
-                sendLog(interaction.client, `❌ 開啟 AI 對話時發生錯誤：`, "ERROR", error);
+                errorReply(interaction, `**諮詢 與「${BOTNICKNAME}」諮詢 發生錯誤，原因：${error.message || '未知錯誤'}**`);
+                sendLog(interaction.client, `❌ 在執行 諮詢 與「${BOTNICKNAME}」諮詢 時發生錯誤：`, "ERROR", error);
             }
         }
     },
@@ -98,7 +94,6 @@ module.exports = {
     modalSubmitHandlers: {
         chat_modal: async (interaction) => {
             try {
-                sendLog(interaction.client, `💬 ${interaction.user.tag} 提交了「諮詢」互動視窗：`, "INFO");
                 // 顯示等待提示
                 await interaction.deferReply({ ephemeral: true });
                 const waitMsg = await interaction.followUp({
@@ -115,6 +110,8 @@ module.exports = {
                 const userId = interaction.user.id;
                 const username = interaction.user.username;
                 
+                sendLog(interaction.client, `💬 ${interaction.user.tag} 提交了 諮詢 互動視窗：\n${message}`, "INFO");
+
                 // 獲取 AI 回應
                 const startTime = Date.now();
                 const chatResponse = await chatWithAI(userId, message);
@@ -136,31 +133,17 @@ module.exports = {
                 
                 // 發送回應
                 await interaction.followUp({ embeds: [embed], ephemeral: true });
-                sendLog(interaction.client, `💬 ${interaction.user.tag} 取得了「諮詢」回應內容：\n${chatResponse}`, "INFO");
-            } catch (error) {
-                let errorMessage = error.message;
-                if (errorMessage.includes('工作階段對話次數上限')) {
-                    errorMessage += `\n\n此限制會在工作階段結束後自動重置。`;
-                }
-                
-                await interaction.followUp({ 
-                    embeds: [
-                        new EmbedBuilder()
-                            .setColor(config.embed.color.error)
-                            .setDescription(`${EMBED_EMOJI} **${errorMessage}**`)
-                    ],
-                    ephemeral: true
-                });
+                sendLog(interaction.client, `💬 ${interaction.user.tag} 取得了 諮詢 回應內容：\n${chatResponse}`, "INFO");
 
-                await interaction.followUp({ 
-                    embeds: [
-                        new EmbedBuilder()
-                            .setColor(config.embed.color.error)
-                            .setDescription(`${EMBED_EMOJI} **對話時發生錯誤：${error.message || '未知錯誤'}**`)
-                    ],
-                    ephemeral: true
-                });
-                sendLog(interaction.client, `❌ AI 對話時發生錯誤：`, "ERROR", error);
+            } catch (error) {
+                if (error.message.includes('工作階段對話次數上限')) {
+                    errorReply(interaction, `**${error.message}**\n-# 此限制會在工作階段結束後自動重置。\n`);
+                    sendLog(interaction.client, `❌ ${interaction.user.tag} 嘗試取得 諮詢 回應內容，但工作階段對話次數達到上限：`, "ERROR", error);
+
+                } else {
+                    errorReply(interaction, `**諮詢 發生錯誤，原因：${error.message || '未知錯誤'}**`);
+                    sendLog(interaction.client, `❌ 在執行 諮詢 時發生錯誤：`, "ERROR", error);
+                }
             }
         }
     }
