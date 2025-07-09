@@ -14,6 +14,7 @@ Startup:
   # 機器人的線上狀態，可參考：online (線上)、idle (閒置/離開)、dnd (請勿打擾)、invisible (隱身)
   StatusType: "online"
 
+
 #-------------------------------
 # 日誌設定：
 log:
