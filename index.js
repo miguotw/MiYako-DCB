@@ -11,7 +11,8 @@ const { getHitokoto } = require(path.join(process.cwd(), 'util/getHitokoto'));
 // Discord bot 設定
 const TOKEN = config.Startup.token; // 讀取機器人 TOKEN
 const CLIENT_ID = config.Startup.clientID; //應用程式ID
-const READY_TYPE = config.Startup.activityType; // 讀取狀態類型
+const READY_TYPE = config.Startup.activityType; // 讀取活動狀態類型
+const STATUS_TYPE = config.Startup.StatusType; // 讀取線上狀態類型
 
 const client = new Client({
     intents: [
@@ -124,7 +125,8 @@ client.once('ready', async () => {
 
         // 設定機器人活動狀態
         client.user.setActivity(hitokotoText, { type: READY_TYPE });
-        sendLog(client, `✅ 已設定活動狀態：${READY_TYPE} ${hitokotoText}`);
+        client.user.setStatus(STATUS_TYPE);
+        sendLog(client, `✅ 已設定活動狀態：${STATUS_TYPE} ${READY_TYPE} ${hitokotoText}`);
     } catch (error) {
         sendLog(client, "❌ 無法獲取 Hitokoto API 資料：", "ERROR", error);
     }
