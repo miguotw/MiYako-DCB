@@ -86,6 +86,7 @@ module.exports = {
             };
             
         } else if (subcommand === '伺服器狀態資訊') {
+            let ServerStatusIcon = null;
             try {
                 // 優先使用「選擇預設伺服器」，若未選擇則使用「輸入伺服器位址」
                 const serverIP = interaction.options.getString('選擇預設伺服器') || interaction.options.getString('輸入伺服器位址');
@@ -99,7 +100,9 @@ module.exports = {
                 sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/麥塊 伺服器位址(${serverIP})`, "INFO");
                 
                 // 使用 mcstatus.io API 獲取伺服器狀態
-                const { ServerStatusMOTD, ServerStatusPlayersOnline, ServerStatusOnline, ServerStatusVersionName, ServerStatusVersionProtocol, ServerStatusHostname, ServerStatusIP, ServerStatusPlayersList, ServerStatusIcon } = await getServerStatus(serverIP);
+                const serverStatus = await getServerStatus(serverIP);
+                const { ServerStatusMOTD, ServerStatusPlayersOnline, ServerStatusOnline, ServerStatusVersionName, ServerStatusVersionProtocol, ServerStatusHostname, ServerStatusIP, ServerStatusPlayersList } = serverStatus;
+                ServerStatusIcon = serverStatus.ServerStatusIcon;
         
                 // 創建嵌入訊息
                 const embed = new EmbedBuilder()
@@ -136,15 +139,15 @@ module.exports = {
                         name: iconFileName // 確保文件名正確
                     }]
                 });
-
-                // 如果是臨時文件（ServerStatusIcon），則刪除
-                if (ServerStatusIcon && fs.existsSync(ServerStatusIcon)) {
-                    fs.unlinkSync(ServerStatusIcon);
-                }
             } catch (error) {
                 // 如果伺服器不是 Minecraft 伺服器或無法連接
                 sendLog(interaction.client, `❌ 在執行 /麥塊 伺服器狀態資訊 指令時發生錯誤：`, "ERROR", error); // 記錄錯誤日誌
                 errorReply(interaction, `**無法連接到伺服器，原因：${error.message || '未知錯誤'}**`); // 向用戶顯示錯誤訊息
+            } finally {
+                // 如果是臨時文件（ServerStatusIcon），則刪除
+                if (ServerStatusIcon && fs.existsSync(ServerStatusIcon)) {
+                    fs.unlinkSync(ServerStatusIcon);
+                }
             }
         }
     }

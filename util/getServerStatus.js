@@ -1,15 +1,26 @@
 const axios = require('axios');
 const fs = require('fs');
+const path = require('path');
 const { Buffer } = require('buffer');
+
+function normalizeServerAddress(serverIP) {
+    return serverIP.trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+}
+
+function createSafeIconPath(serverIP) {
+    const safeName = serverIP.replace(/[^a-zA-Z0-9.-]/g, '_');
+    return path.join(process.cwd(), `${safeName}_${Date.now()}_icon.png`);
+}
 
 // 查詢伺服器狀態
 const getServerStatus = async (serverIP) => {
     try {
-        const response = await axios.get(`https://api.mcsrvstat.us/2/${serverIP}`);
+        const normalizedServerIP = normalizeServerAddress(serverIP);
+        const response = await axios.get(`https://api.mcsrvstat.us/2/${encodeURIComponent(normalizedServerIP)}`);
         const data = response.data;
 
         // 伺服器離線時的回應
-        if (data.debug.ping === false) {
+        if (data.online === false || data.debug?.ping === false) {
             throw new Error("伺服器離線或位址格式不正確。");
         }
 
@@ -28,17 +39,17 @@ const getServerStatus = async (serverIP) => {
         if (data.icon && data.icon.startsWith('data:image/png;base64,')) {
             const base64Data = data.icon.split(',')[1]; // 去掉 data:image/png;base64, 前綴
             const iconBuffer = Buffer.from(base64Data, 'base64'); // 解碼 Base64
-            const iconPath = `./${serverIP}_icon.png`; // 臨時文件路徑
+            const iconPath = createSafeIconPath(normalizedServerIP); // 臨時文件路徑
             fs.writeFileSync(iconPath, iconBuffer); // 寫入文件
             ServerStatusIcon = iconPath; // 保存文件路徑
         }
 
         // 抓取其他資訊
-        const ServerStatusMOTD = data.motd.clean.join('\n') || "N/A";
-        const ServerStatusPlayersOnline = `${data.players.online} / ${data.players.max}`;
+        const ServerStatusMOTD = data.motd?.clean?.join('\n') || "N/A";
+        const ServerStatusPlayersOnline = `${data.players?.online ?? 0} / ${data.players?.max ?? 0}`;
         const ServerStatusOnline = data.online ? '是' : '否';
         const ServerStatusVersionName = data.version || "N/A";
-        const ServerStatusVersionProtocol = data.protocol.toString() || "N/A";
+        const ServerStatusVersionProtocol = data.protocol?.toString() || "N/A";
         const ServerStatusHostname = data.hostname || "N/A";
         const ServerStatusIP = `${data.ip}:${data.port}` || "N/A";
 
