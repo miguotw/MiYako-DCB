@@ -5,7 +5,6 @@ const { Client, GatewayIntentBits, REST, Routes, Collection } = require('discord
 const { config } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
-const { initPlayer } = require(path.join(process.cwd(), 'util/getDiscordPlayer'));
 const { getHitokoto } = require(path.join(process.cwd(), 'util/getHitokoto'));
 
 // Discord bot 設定
@@ -131,8 +130,5 @@ client.once('ready', async () => {
         sendLog(client, "❌ 無法獲取 Hitokoto API 資料：", "ERROR", error);
     }
 });
-
-// 初始化 Discord Player
-initPlayer(client);
 
 client.login(TOKEN);
