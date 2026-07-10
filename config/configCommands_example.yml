@@ -36,8 +36,8 @@ admin:
     # Twitch Developer Console 中的 Client Secret。
     twitchClientSecret: " "
 
-    # 檢查直播狀態的間隔，單位為毫秒。
-    checkInterval: 120000
+    # 檢查直播狀態的間隔，單位為分鐘。
+    checkInterval: 2
 
     # 若 Bot 啟動時主播已經在直播，是否立即發送一次通知。
     notifyOnStartupLive: true
@@ -85,6 +85,24 @@ ping:
 # /一言 相關設定：
 hitokoto:
   emoji: "🍵"
+
+
+#-------------------------------
+# /物流 相關設定：
+packageTracking:
+  emoji: "📦"
+
+  # Track.TW API Token，可至會員中心申請。
+  trackTwToken: " "
+
+  # 包裹貨態檢查間隔，單位為分鐘。
+  checkInterval: 30
+
+  # 貨態訊息超過幾個字後自動截斷並加上 ...
+  historyStatusMaxLength: 25
+
+  # 多久沒有新貨態後自動封存，單位為天。
+  archiveAfterDays: 14
 
 
 #-------------------------------

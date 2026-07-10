@@ -1,0 +1,455 @@
+const path = require('path');
+const fs = require('fs');
+const axios = require('axios');
+const {
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    EmbedBuilder
+} = require('discord.js');
+const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
+
+const PACKAGE_CONFIG = configCommands.packageTracking || {};
+const DATA_DIR = path.join(process.cwd(), 'assets', 'packageTracking');
+const API_BASE_URL = 'https://track.tw/api/v1';
+const EMBED_COLOR = config.embed.color.default;
+const EMBED_EMOJI = PACKAGE_CONFIG.emoji || '📦';
+const DEFAULT_HISTORY_STATUS_MAX_LENGTH = 25;
+const DEFAULT_ARCHIVE_AFTER_DAYS = 14;
+const DEFAULT_CHECK_INTERVAL_MINUTES = 30;
+const MS_PER_DAY = 86400000;
+const MS_PER_MINUTE = 60000;
+
+function createAddPackageButton() {
+    return new ButtonBuilder()
+        .setCustomId('package_panel_add')
+        .setLabel('新增包裹')
+        .setStyle(ButtonStyle.Success);
+}
+
+function createAddPackageRow() {
+    return new ActionRowBuilder().addComponents(createAddPackageButton());
+}
+
+function withAddPackageRow(rows = []) {
+    const outputRows = [...rows];
+    const lastRow = outputRows[outputRows.length - 1];
+    const lastRowComponents = lastRow?.components || [];
+    const canAppendToLastRow = lastRowComponents.length > 0 &&
+        lastRowComponents.length < 5 &&
+        lastRowComponents.every(component => component.data?.type === 2);
+
+    if (canAppendToLastRow) {
+        lastRow.addComponents(createAddPackageButton());
+        return outputRows;
+    }
+
+    return [...outputRows, createAddPackageRow()];
+}
+
+function ensureDataDir() {
+    if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+}
+
+function readPackageFile(filePath) {
+    try {
+        const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        return { packages: Array.isArray(data.packages) ? data.packages : [] };
+    } catch {
+        return { packages: [] };
+    }
+}
+
+function writePackageFile(filePath, store) {
+    ensureDataDir();
+    fs.writeFileSync(filePath, JSON.stringify({ packages: store.packages || [] }, null, 2), 'utf8');
+}
+
+function getUserPackageFile(userID) {
+    const normalizedUserID = String(userID || '').trim();
+    if (!/^\d+$/.test(normalizedUserID)) {
+        throw new Error('無效的使用者 ID。');
+    }
+
+    return path.join(DATA_DIR, `${normalizedUserID}.json`);
+}
+
+function isUserPackageFile(fileName) {
+    return /^\d+\.json$/.test(fileName);
+}
+
+function loadUserPackageStore(userID) {
+    ensureDataDir();
+
+    const userFile = getUserPackageFile(userID);
+    if (!fs.existsSync(userFile)) return { packages: [] };
+    return readPackageFile(userFile);
+}
+
+function saveUserPackageStore(userID, store) {
+    const userFile = getUserPackageFile(userID);
+    writePackageFile(userFile, store);
+}
+
+function getUserPackageStores() {
+    ensureDataDir();
+
+    return fs.readdirSync(DATA_DIR)
+        .filter(isUserPackageFile)
+        .map(fileName => {
+            const userID = path.basename(fileName, '.json');
+            return {
+                userID,
+                store: readPackageFile(path.join(DATA_DIR, fileName))
+            };
+        });
+}
+
+function getTrackTwToken() {
+    const token = String(PACKAGE_CONFIG.trackTwToken || '').trim();
+    if (!token) {
+        throw new Error('Track.TW API Token 尚未設定。');
+    }
+    return token;
+}
+
+function hasTrackTwToken() {
+    return String(PACKAGE_CONFIG.trackTwToken || '').trim() !== '';
+}
+
+function getHistoryStatusMaxLength() {
+    return Math.max(Number(PACKAGE_CONFIG.historyStatusMaxLength) || DEFAULT_HISTORY_STATUS_MAX_LENGTH, 1);
+}
+
+function getArchiveAfterDays() {
+    const days = Number(PACKAGE_CONFIG.archiveAfterDays);
+    if (days > 0) return days;
+
+    const archiveAfterMilliseconds = Number(PACKAGE_CONFIG.archiveAfter);
+    if (archiveAfterMilliseconds > 0) return Math.max(archiveAfterMilliseconds / MS_PER_DAY, 1 / 1440);
+
+    return DEFAULT_ARCHIVE_AFTER_DAYS;
+}
+
+function getPackageTrackingConfig() {
+    const archiveAfterDays = getArchiveAfterDays();
+
+    return {
+        emoji: EMBED_EMOJI,
+        checkInterval: Math.max((Number(PACKAGE_CONFIG.checkInterval) || DEFAULT_CHECK_INTERVAL_MINUTES) * MS_PER_MINUTE, MS_PER_MINUTE),
+        historyStatusMaxLength: getHistoryStatusMaxLength(),
+        archiveAfterDays,
+        archiveAfter: Math.max(archiveAfterDays * MS_PER_DAY, 60000)
+    };
+}
+
+function createTrackTwClient() {
+    return axios.create({
+        baseURL: API_BASE_URL,
+        headers: {
+            Authorization: `Bearer ${getTrackTwToken()}`
+        }
+    });
+}
+
+async function getAvailableCarriers() {
+    const response = await createTrackTwClient().get('/carrier/available');
+    return response.data || [];
+}
+
+async function detectCarrier(trackingNumbers) {
+    const response = await createTrackTwClient().post('/carrier/detect', {
+        tracking_numbers: trackingNumbers
+    });
+    return response.data.carriers || [];
+}
+
+async function importPackage(carrierID, trackingNumber, note = '', extraFields = null) {
+    const trackingValue = note ? `${trackingNumber},${note.replace(/,/g, '，')}` : trackingNumber;
+    const body = {
+        carrier_id: carrierID,
+        tracking_number: [trackingValue],
+        notify_state: 'inactive'
+    };
+
+    if (extraFields) {
+        body.extra_fields = {
+            [trackingNumber]: extraFields
+        };
+    }
+
+    const response = await createTrackTwClient().post('/package/import', body);
+    return response.data;
+}
+
+async function trackingPackage(userPackageID) {
+    const response = await createTrackTwClient().get(`/package/tracking/${userPackageID}`);
+    return response.data;
+}
+
+async function changePackageState(userPackageID, state) {
+    const response = await createTrackTwClient().patch(`/package/state/${userPackageID}/${state}`);
+    return response.data;
+}
+
+function findCarrier(carriers, carrierID) {
+    return carriers.find(carrier => carrier.id === carrierID);
+}
+
+function getLatestHistory(packageData) {
+    const histories = Array.isArray(packageData?.package_history) ? packageData.package_history : [];
+    if (!histories.length) return null;
+
+    return histories
+        .slice()
+        .sort((a, b) => {
+            const timeA = Number(a.time) || Date.parse(a.created_at || 0) / 1000 || 0;
+            const timeB = Number(b.time) || Date.parse(b.created_at || 0) / 1000 || 0;
+            return timeB - timeA;
+        })[0];
+}
+
+function createHistorySignature(packageData) {
+    const latestHistory = getLatestHistory(packageData);
+    if (!latestHistory) return 'no-history';
+
+    return [
+        latestHistory.status || '',
+        latestHistory.delivery_stage || '',
+        latestHistory.checkpoint_status || '',
+        latestHistory.time || '',
+        latestHistory.created_at || ''
+    ].join('|');
+}
+
+function formatHistoryTime(history) {
+    if (!history) return '未知';
+    if (Number(history.time) > 0) return `<t:${history.time}:F>`;
+    if (history.created_at) return `<t:${Math.floor(Date.parse(history.created_at) / 1000)}:F>`;
+    return '未知';
+}
+
+function sanitizeHistoryText(text) {
+    return String(text || '尚無貨態資料')
+        .replace(/\[([^\]]+)]\(([^)]+)\)/g, '$1')
+        .replace(/https?:\/\/\S+/g, '')
+        .replace(/[|｜]/g, ' / ')
+        .replace(/\s+/g, ' ')
+        .trim() || '尚無貨態資料';
+}
+
+function formatHistoryStatusText(text) {
+    const maxLength = getHistoryStatusMaxLength();
+    return text.length > maxLength
+        ? `${text.slice(0, maxLength)}...`
+        : text;
+}
+
+function formatHistoryLine(history) {
+    if (!history) return '尚無貨態資料';
+    return `${formatHistoryStatusText(sanitizeHistoryText(history.status))} | ${formatHistoryTime(history)}`.slice(0, 1024);
+}
+
+function getSortedHistories(packageData) {
+    const histories = Array.isArray(packageData?.package_history) ? packageData.package_history : [];
+    return histories
+        .slice()
+        .sort((a, b) => {
+            const timeA = Number(a.time) || Date.parse(a.created_at || 0) / 1000 || 0;
+            const timeB = Number(b.time) || Date.parse(b.created_at || 0) / 1000 || 0;
+            return timeB - timeA;
+        });
+}
+
+function formatRecordStatus(status) {
+    if (status === 'active') return '追蹤中';
+    if (status === 'archived') return '已封存';
+    return status || '未知';
+}
+
+function formatArchiveAfterDays(days) {
+    return Number.isInteger(days) ? String(days) : days.toFixed(1).replace(/\.0$/, '');
+}
+
+function getArchiveHintFooter() {
+    return `${formatArchiveAfterDays(getArchiveAfterDays())} 天沒有更新將自動封存`;
+}
+
+function createPackageEmbed(record, packageData, title = '包裹貨態') {
+    const latestHistory = getLatestHistory(packageData);
+    const historyLines = getSortedHistories(packageData)
+        .slice(1, 11)
+        .map(history => `- ${formatHistoryLine(history)}`);
+    const carrierName = packageData?.carrier?.name || record.carrierName || '未知物流';
+    const trackingNumber = packageData?.tracking_number || record.trackingNumber;
+    const shortUrl = packageData?.short_url?.identifier ? `https://track.tw/u/${packageData.short_url.identifier}` : null;
+    const embed = new EmbedBuilder()
+        .setColor(EMBED_COLOR)
+        .setTitle(`${EMBED_EMOJI} ┃ ${title}`)
+        .addFields(
+            { name: '物流商', value: carrierName || '未知', inline: true },
+            { name: '物流單號', value: `\`${trackingNumber}\``, inline: true },
+            { name: '追蹤狀態', value: formatRecordStatus(record.status), inline: true },
+            { name: '最新貨態', value: formatHistoryLine(latestHistory), inline: false },
+            { name: '歷史貨態', value: historyLines.length ? historyLines.join('\n').slice(0, 1024) : '- 尚無貨態資料', inline: false }
+        )
+        .setFooter({ text: getArchiveHintFooter() })
+        .setTimestamp();
+
+    if (record.note) {
+        embed.setDescription(record.note);
+    }
+
+    if (shortUrl) {
+        embed.setURL(shortUrl);
+    }
+
+    return embed;
+}
+
+function createStoredPackageEmbed(record, title = '包裹貨態') {
+    if (record.lastPackageData) {
+        return createPackageEmbed(record, record.lastPackageData, title);
+    }
+
+    return new EmbedBuilder()
+        .setColor(EMBED_COLOR)
+        .setTitle(`${EMBED_EMOJI} ┃ ${title}`)
+        .setDescription(record.note || '尚無本機貨態快照。')
+        .addFields(
+            { name: '物流商', value: record.carrierName || '未知', inline: true },
+            { name: '物流單號', value: `\`${record.trackingNumber}\``, inline: true },
+            { name: '追蹤狀態', value: formatRecordStatus(record.status), inline: true },
+            { name: '最新貨態', value: '尚無本機貨態快照', inline: false },
+            { name: '歷史貨態', value: '- 尚無本機貨態快照', inline: false }
+        )
+        .setFooter({ text: getArchiveHintFooter() })
+        .setTimestamp();
+}
+
+function findPackageRecord(userID, trackingNumber) {
+    const store = loadUserPackageStore(userID);
+    return store.packages.find(record =>
+        record.userID === userID &&
+        record.trackingNumber.toLowerCase() === trackingNumber.toLowerCase()
+    );
+}
+
+function findDuplicatePackage(userID, carrierID, trackingNumber) {
+    const store = loadUserPackageStore(userID);
+    return store.packages.find(record =>
+        record.userID === userID &&
+        record.carrierID === carrierID &&
+        record.trackingNumber.toLowerCase() === trackingNumber.toLowerCase() &&
+        record.status !== 'deleted'
+    );
+}
+
+function upsertPackageRecord(record) {
+    const store = loadUserPackageStore(record.userID);
+    const index = store.packages.findIndex(item => item.userPackageID === record.userPackageID);
+
+    if (index === -1) {
+        store.packages.push(record);
+    } else {
+        store.packages[index] = { ...store.packages[index], ...record };
+    }
+
+    saveUserPackageStore(record.userID, store);
+    return record;
+}
+
+function findPackageStoreByID(userPackageID) {
+    for (const { userID, store } of getUserPackageStores()) {
+        const index = store.packages.findIndex(record => record.userPackageID === userPackageID);
+        if (index !== -1) return { userID, store, index };
+    }
+
+    return null;
+}
+
+function updatePackageRecord(userPackageID, updates) {
+    const result = findPackageStoreByID(userPackageID);
+    if (!result) return null;
+
+    const { userID, store, index } = result;
+
+    store.packages[index] = {
+        ...store.packages[index],
+        ...updates,
+        updatedAt: new Date().toISOString()
+    };
+    saveUserPackageStore(userID, store);
+    return store.packages[index];
+}
+
+function deletePackageRecord(userPackageID) {
+    const result = findPackageStoreByID(userPackageID);
+    if (!result) return null;
+
+    const { userID, store, index } = result;
+
+    const [deletedRecord] = store.packages.splice(index, 1);
+    saveUserPackageStore(userID, store);
+    return deletedRecord;
+}
+
+function getPackageRecords(filter = {}) {
+    const records = filter.userID
+        ? loadUserPackageStore(filter.userID).packages
+        : getUserPackageStores().flatMap(({ store }) => store.packages);
+
+    return records.filter(record => {
+        if (filter.status && filter.status !== 'all' && record.status !== filter.status) return false;
+        if (filter.userID && record.userID !== filter.userID) return false;
+        return true;
+    });
+}
+
+function createPackageRecord({ interaction, carrier, trackingNumber, note, userPackageID, packageData }) {
+    const now = new Date().toISOString();
+    return {
+        userPackageID,
+        userID: interaction.user.id,
+        username: interaction.user.tag,
+        guildID: interaction.guildId || null,
+        channelID: interaction.channelId || null,
+        carrierID: carrier.id,
+        carrierName: carrier.name,
+        trackingNumber,
+        note: note || '',
+        status: 'active',
+        lastHistorySignature: createHistorySignature(packageData),
+        lastHistoryChangedAt: now,
+        lastPackageData: packageData,
+        createdAt: now,
+        updatedAt: now
+    };
+}
+
+module.exports = {
+    getPackageTrackingConfig,
+    hasTrackTwToken,
+    getAvailableCarriers,
+    detectCarrier,
+    importPackage,
+    trackingPackage,
+    changePackageState,
+    findCarrier,
+    getLatestHistory,
+    createHistorySignature,
+    createPackageEmbed,
+    createStoredPackageEmbed,
+    createAddPackageButton,
+    createAddPackageRow,
+    withAddPackageRow,
+    findPackageRecord,
+    findDuplicatePackage,
+    upsertPackageRecord,
+    updatePackageRecord,
+    deletePackageRecord,
+    getPackageRecords,
+    createPackageRecord
+};
