@@ -12,6 +12,7 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('公告')
         .setDescription('發送公告到指定頻道並提及指定身分組')
+        .setDMPermission(false)
         .addStringOption(option =>
             option.setName('訊息哀滴')
                 .setDescription('請輸入要作為公告的訊息 ID')
@@ -33,6 +34,10 @@ module.exports = {
         await interaction.deferReply({ ephemeral: false });
 
         try {
+            if (!interaction.inGuild()) {
+                return errorReply(interaction, '**此指令不支援在私訊中使用！**');
+            }
+
             // 檢查使用者是否具有管理者權限
             if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
                 return errorReply(interaction, '**你必須是伺服器的管理者才能使用此指令！**');
