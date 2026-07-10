@@ -20,11 +20,27 @@ admin:
 
 
   #-----------------------------
-  # /直播 指令的設定：
+  # Twitch 直播自動通知設定：
   stream:
-    
-    # 要提及的身分組 ID ，若不填寫則預設為 @everyone
-    role: " "
+
+    # 是否啟用 Twitch 直播自動通知。
+    enable: true
+
+    # 要監控的 Twitch 使用者登入名稱，可設定多個。
+    twitchUserLogin:
+      - " "
+
+    # Twitch Developer Console 中的 Client ID。
+    twitchClientID: " "
+
+    # Twitch Developer Console 中的 Client Secret。
+    twitchClientSecret: " "
+
+    # 檢查直播狀態的間隔，單位為毫秒。
+    checkInterval: 120000
+
+    # 若 Bot 啟動時主播已經在直播，是否立即發送一次通知。
+    notifyOnStartupLive: true
 
     # 發送直播公告時，附加的自定義隨機訊息，可繼續往下延伸。
     message:
@@ -32,11 +48,13 @@ admin:
       - "直播現在開始！別錯過，一起觀看吧！"
       - "開播啦！一起享受這場直播！"
 
-    # 要監控的 twitch 使用者 ID
-    twitchUserID: " "
-
-    # 要監控的 twitch 使用者頭像網址
-    twitchUserAvatar: " "
+    # 要發送通知的 Discord 伺服器、頻道與身分組。
+    # 若指定伺服器找不到 roleID，將嘗試提及 @everyone。
+    # 若沒有設定任何有效 guildID/channelID，將不執行通知。
+    targets:
+      - guildID: " "
+        channelID: " "
+        roleID: " "
 
 
 #-------------------------------
