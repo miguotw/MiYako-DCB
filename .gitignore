@@ -9,8 +9,6 @@ package-lock.json
 # Sensitive info files
 .env
 *.bak
-config/config.yml
-config/configCommands.yml
-config/configModules.yml
+config/*
 assets/miyakoChat/*
 assets/packageTracking/*
