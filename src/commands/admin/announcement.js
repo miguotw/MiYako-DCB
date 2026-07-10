@@ -72,10 +72,7 @@ module.exports = {
                 });
 
                 // 提示已發送公告
-                await interaction.editReply({
-                    content: `公告已發送到 ${channel.name}${role ? ` 並提及 ${role.name}` : ''}！`,
-                    ephemeral: true
-                });
+                infoReply(interaction, `**公告已發送到 ${channel}${role ? ` 並提及 ${role}` : ''}！**`);
             } catch (error) {
                 sendLog(interaction.client, `❌ 在執行 /公告 指令時發生錯誤`, "ERROR", error);
                 return errorReply(interaction, '**無法找到該訊息 ID，請檢查以下內容！**\n 1. 機器人應具有 `讀取訊息歷史`、`檢視頻道`、`發送訊息`、`嵌入連結`、`提及身分組` 權限。\n 2. 確認訊息 ID 是否正確！');
