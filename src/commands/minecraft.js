@@ -142,7 +142,7 @@ module.exports = {
             } catch (error) {
                 // 如果伺服器不是 Minecraft 伺服器或無法連接
                 sendLog(interaction.client, `❌ 在執行 /麥塊 伺服器狀態資訊 指令時發生錯誤：`, "ERROR", error); // 記錄錯誤日誌
-                errorReply(interaction, `**無法連接到伺服器，原因：${error.message || '未知錯誤'}**`); // 向用戶顯示錯誤訊息
+                errorReply(interaction, `**無法連接到伺服器，原因：${error.publicMessage || error.message || '未知錯誤'}**`); // 向用戶顯示錯誤訊息
             } finally {
                 // 如果是臨時文件（ServerStatusIcon），則刪除
                 if (ServerStatusIcon && fs.existsSync(ServerStatusIcon)) {

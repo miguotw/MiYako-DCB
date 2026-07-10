@@ -12,16 +12,45 @@ function createSafeIconPath(serverIP) {
     return path.join(process.cwd(), `${safeName}_${Date.now()}_icon.png`);
 }
 
+function createServerStatusError(message, publicMessage, debugDetails, cause) {
+    const error = new Error(message, cause ? { cause } : undefined);
+    error.publicMessage = publicMessage;
+    error.debugDetails = debugDetails;
+    return error;
+}
+
+function sanitizeApiResponse(data) {
+    if (!data || typeof data !== 'object') return data;
+
+    return {
+        ...data,
+        // 圖示可能包含很長的 Base64；日誌只需知道 API 是否有回傳。
+        icon: data.icon ? `[omitted: ${data.icon.length} characters]` : data.icon
+    };
+}
+
 // 查詢伺服器狀態
 const getServerStatus = async (serverIP) => {
+    const normalizedServerIP = normalizeServerAddress(serverIP);
+    const requestURL = `https://api.mcsrvstat.us/2/${encodeURIComponent(normalizedServerIP)}`;
+
     try {
-        const normalizedServerIP = normalizeServerAddress(serverIP);
-        const response = await axios.get(`https://api.mcsrvstat.us/2/${encodeURIComponent(normalizedServerIP)}`);
+        const response = await axios.get(requestURL, { timeout: 15000 });
         const data = response.data;
 
-        // 伺服器離線時的回應
+        // 伺服器離線時保留 API 回應，方便從日誌判斷 DNS、SRV 與連線原因。
         if (data.online === false || data.debug?.ping === false) {
-            throw new Error("伺服器離線或位址格式不正確。");
+            throw createServerStatusError(
+                `Minecraft status API reported the server as offline (online=${data.online}, ping=${data.debug?.ping}).`,
+                '伺服器離線或位址格式不正確。',
+                {
+                    serverInput: serverIP,
+                    normalizedServerAddress: normalizedServerIP,
+                    requestURL,
+                    httpStatus: response.status,
+                    apiResponse: sanitizeApiResponse(data)
+                }
+            );
         }
 
         // 處理玩家列表
@@ -55,7 +84,23 @@ const getServerStatus = async (serverIP) => {
 
         return { ServerStatusMOTD, ServerStatusPlayersOnline, ServerStatusOnline, ServerStatusVersionName, ServerStatusVersionProtocol, ServerStatusHostname, ServerStatusIP, ServerStatusPlayersList, ServerStatusIcon };
     } catch (error) {
-        throw new Error(error.message);
+        // 保留程式主動建立的診斷資訊，不要重新建立 Error 而遺失堆疊與內容。
+        if (error.debugDetails) throw error;
+
+        throw createServerStatusError(
+            `Minecraft status API request failed: ${error.message}`,
+            '伺服器狀態查詢服務暫時無法使用，或伺服器位址格式不正確。',
+            {
+                serverInput: serverIP,
+                normalizedServerAddress: normalizedServerIP,
+                requestURL,
+                axiosCode: error.code,
+                httpStatus: error.response?.status,
+                httpStatusText: error.response?.statusText,
+                apiResponse: sanitizeApiResponse(error.response?.data)
+            },
+            error
+        );
     }
 };
 
