@@ -61,7 +61,7 @@ function buildStreamEmbed(stream, user, twitchUserLogin) {
         .setURL(streamUrl)
         .addFields(
             { name: '直播分類', value: stream.game_name || '未設定', inline: true },
-            { name: '目前觀看人數', value: `${stream.viewer_count ?? 0}`, inline: true },
+            { name: '觀看人數', value: `${stream.viewer_count ?? 0}`, inline: true },
             { name: '開播時間', value: stream.started_at ? `<t:${Math.floor(new Date(stream.started_at).getTime() / 1000)}:R>` : '未知', inline: true }
         )
         .setImage(buildPreviewUrl(stream))
