@@ -20,6 +20,12 @@ admin:
 
 
   #-----------------------------
+  # /用戶資料 指令的設定：
+  userInfo:
+    emoji: "👤"
+
+
+  #-----------------------------
   # Twitch 直播自動通知設定：
   stream:
 
@@ -38,6 +44,9 @@ admin:
 
     # 檢查直播狀態的間隔，單位為分鐘。
     checkInterval: 1
+
+    # 更新已發送直播通知的間隔，單位為分鐘。建議配合 Twitch 縮圖更新頻率設為 5 分鐘。
+    editInterval: 5
 
     # 若 Bot 啟動時主播已經在直播，是否立即發送一次通知。
     notifyOnStartupLive: true
@@ -125,3 +134,29 @@ minecraft:
 # /時間戳 相關設定：
 unixTimestamp:
   emoji: "🕒"
+
+
+#-------------------------------
+# /音樂 相關設定：
+music:
+  emoji: "🎵"
+  panelUpdateSeconds: 10
+
+  # 播放音量百分比，可設定 0～100，預設 20。
+  volumePercent: 20
+
+  # 接下來、完整序列與移除選單的歌曲標題最大字符數，可設定 1～97。
+  queueTitleMaxLength: 25
+
+  # 單首曲目允許的最長與最短播放時間，單位為分鐘。0 表示不限制。
+  maxDurationMinutes: 180
+  minDurationMinutes: 1
+
+  # 是否允許透過播放清單連結一次加入多首歌曲。
+  allowPlaylists: true
+
+  # 啟用播放清單時，一次最多加入的曲目數。
+  maxPlaylistTracks: 25
+
+  ytDlpUpdateHours: 24
+  ytDlpPath: "assets/music/yt-dlp"

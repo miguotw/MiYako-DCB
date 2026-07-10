@@ -20,18 +20,53 @@ const DEFAULT_CHECK_INTERVAL_MINUTES = 30;
 const MS_PER_DAY = 86400000;
 const MS_PER_MINUTE = 60000;
 
-function createAddPackageButton() {
+function createAddPackageButton(customId = 'package_panel_add') {
     return new ButtonBuilder()
-        .setCustomId('package_panel_add')
+        .setCustomId(customId)
         .setLabel('新增包裹')
         .setStyle(ButtonStyle.Success);
 }
 
-function createAddPackageRow() {
-    return new ActionRowBuilder().addComponents(createAddPackageButton());
+function createAddPackageRow(customId) {
+    return new ActionRowBuilder().addComponents(createAddPackageButton(customId));
 }
 
-function withAddPackageRow(rows = []) {
+function createPackageActionButton(customId, label, style) {
+    return new ButtonBuilder()
+        .setCustomId(customId)
+        .setLabel(label)
+        .setStyle(style);
+}
+
+function createScopedPackageCustomId(customId, record) {
+    // 狀態訊息上的操作按鈕需要帶上包裹 ID，避免依賴管理面板的暫存選取狀態。
+    return record?.userPackageID ? `${customId}:${record.userPackageID}` : customId;
+}
+
+function createPackageNotificationActionsRows(record) {
+    // 物流狀態訊息上的新增按鈕使用 detached 模式，避免新增流程覆蓋原本的物流狀態訊息。
+    return withAddPackageRow([
+        new ActionRowBuilder().addComponents(
+            createPackageActionButton(
+                createScopedPackageCustomId('package_panel_refresh', record),
+                '立即更新',
+                ButtonStyle.Primary
+            ),
+            createPackageActionButton(
+                createScopedPackageCustomId('package_panel_note', record),
+                '修改備註',
+                ButtonStyle.Secondary
+            ),
+            createPackageActionButton(
+                createScopedPackageCustomId('package_panel_archive', record),
+                '封存',
+                ButtonStyle.Secondary
+            )
+        )
+    ], 'package_panel_add:detached');
+}
+
+function withAddPackageRow(rows = [], addPackageCustomId = 'package_panel_add') {
     const outputRows = [...rows];
     const lastRow = outputRows[outputRows.length - 1];
     const lastRowComponents = lastRow?.components || [];
@@ -40,11 +75,12 @@ function withAddPackageRow(rows = []) {
         lastRowComponents.every(component => component.data?.type === 2);
 
     if (canAppendToLastRow) {
-        lastRow.addComponents(createAddPackageButton());
+        // Discord 一列最多 5 個按鈕；能塞進既有按鈕列時就直接補在最後。
+        lastRow.addComponents(createAddPackageButton(addPackageCustomId));
         return outputRows;
     }
 
-    return [...outputRows, createAddPackageRow()];
+    return [...outputRows, createAddPackageRow(addPackageCustomId)];
 }
 
 function ensureDataDir() {
@@ -444,6 +480,7 @@ module.exports = {
     createStoredPackageEmbed,
     createAddPackageButton,
     createAddPackageRow,
+    createPackageNotificationActionsRows,
     withAddPackageRow,
     findPackageRecord,
     findDuplicatePackage,

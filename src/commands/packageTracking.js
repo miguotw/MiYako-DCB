@@ -24,6 +24,7 @@ const {
     createPackageEmbed,
     createAddPackageButton,
     createAddPackageRow,
+    createPackageNotificationActionsRows,
     withAddPackageRow,
     findDuplicatePackage,
     upsertPackageRecord,
@@ -84,9 +85,14 @@ function createPanelRows() {
     ];
 }
 
-function createPackageAddModal() {
+function isDetachedAddFlow(interaction) {
+    // detached 新增流程會另開一則回覆承載後續 edit，避免覆蓋目前的包裹狀態訊息。
+    return interaction.customId.endsWith(':detached');
+}
+
+function createPackageAddModal(detached = false) {
     return new ModalBuilder()
-        .setCustomId('package_panel_add_modal')
+        .setCustomId(detached ? 'package_panel_add_modal:detached' : 'package_panel_add_modal')
         .setTitle('新增包裹追蹤')
         .addComponents(
             new ActionRowBuilder().addComponents(
@@ -118,7 +124,7 @@ function createNoteModal(record) {
     }
 
     return new ModalBuilder()
-        .setCustomId('package_panel_note_modal')
+        .setCustomId(`package_panel_note_modal:${record.userPackageID}`)
         .setTitle('修改包裹備註')
         .addComponents(
             new ActionRowBuilder().addComponents(
@@ -188,23 +194,8 @@ function createPackageSelectRow(records, customId, placeholder) {
     return new ActionRowBuilder().addComponents(menu);
 }
 
-function createPackageActionsRows() {
-    return withAddPackageRow([
-        new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId('package_panel_refresh')
-                .setLabel('立即更新')
-                .setStyle(ButtonStyle.Primary),
-            new ButtonBuilder()
-                .setCustomId('package_panel_note')
-                .setLabel('修改備註')
-                .setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder()
-                .setCustomId('package_panel_archive')
-                .setLabel('封存')
-                .setStyle(ButtonStyle.Secondary)
-        )
-    ]);
+function createPackageActionsRows(record = null) {
+    return createPackageNotificationActionsRows(record);
 }
 
 function createArchivedActionsRows() {
@@ -219,7 +210,7 @@ function createArchivedActionsRows() {
                 .setLabel('刪除')
                 .setStyle(ButtonStyle.Danger)
         )
-    ]);
+    ], 'package_panel_add:detached');
 }
 
 function createManageEmbed(record, packageData = null) {
@@ -292,7 +283,7 @@ async function importAndStorePackage(interaction, pending, extraFields = null) {
     selectedArchivedPackageRecords.delete(interaction.user.id);
 
     const embed = createPackageEmbed(record, packageData, '物流追蹤 - 新增完成');
-    await interaction.editReply({ embeds: [embed], components: createPackageActionsRows() });
+    await interaction.editReply({ embeds: [embed], components: createPackageActionsRows(record) });
     sendLog(interaction.client, `📦 ${interaction.user.tag} 新增了包裹追蹤：${pending.trackingNumber}`, 'INFO');
 }
 
@@ -334,7 +325,12 @@ async function handlePanel(interaction) {
 }
 
 async function handleAddModalSubmit(interaction) {
-    await deferMessageUpdate(interaction);
+    if (isDetachedAddFlow(interaction)) {
+        // 從既有物流狀態訊息新增時另建流程訊息；後續選物流商/補填資訊/完成都 edit 這則回覆。
+        await interaction.deferReply();
+    } else {
+        await deferMessageUpdate(interaction);
+    }
 
     const trackingNumber = interaction.fields.getTextInputValue('trackingNumber').trim();
     const note = interaction.fields.getTextInputValue('note')?.trim() || '';
@@ -433,7 +429,7 @@ async function handleActivePackageSelected(interaction) {
         selectedArchivedPackageRecords.delete(interaction.user.id);
         await interaction.editReply({
             embeds: [createManageEmbed(updated.record, updated.packageData)],
-            components: createPackageActionsRows()
+            components: createPackageActionsRows(updated.record)
         });
     } catch (error) {
         sendLog(interaction.client, '❌ 選擇追蹤中包裹並更新時發生錯誤：', 'ERROR', error);
@@ -464,6 +460,25 @@ function getSelectedActiveRecord(interaction) {
     return record;
 }
 
+function getScopedUserPackageID(interaction, customId) {
+    const prefix = `${customId}:`;
+    // 從 package_panel_xxx:userPackageID 取回按鈕綁定的包裹 ID。
+    return interaction.customId.startsWith(prefix) ? interaction.customId.slice(prefix.length) : null;
+}
+
+function getTargetActiveRecord(interaction, customId) {
+    const userPackageID = getScopedUserPackageID(interaction, customId);
+    if (!userPackageID) return getSelectedActiveRecord(interaction);
+
+    // 通知訊息上的按鈕可直接指定包裹，仍限制只能操作目前使用者自己的追蹤中包裹。
+    const record = getUserRecordByID(interaction.user.id, userPackageID);
+    if (!record || record.status !== 'active') return null;
+
+    selectedActivePackageRecords.set(interaction.user.id, record.userPackageID);
+    selectedArchivedPackageRecords.delete(interaction.user.id);
+    return record;
+}
+
 function getSelectedArchivedRecord(interaction) {
     const userPackageID = selectedArchivedPackageRecords.get(interaction.user.id);
     const record = userPackageID ? getUserRecordByID(interaction.user.id, userPackageID) : null;
@@ -474,14 +489,14 @@ function getSelectedArchivedRecord(interaction) {
 async function handleRefreshSelected(interaction) {
     await deferMessageUpdate(interaction);
 
-    const record = getSelectedActiveRecord(interaction);
+    const record = getTargetActiveRecord(interaction, 'package_panel_refresh');
     if (!record) return errorReply(interaction, '**請先從管理面板選擇一筆追蹤中的包裹。**');
 
     try {
         const updated = await updateActiveRecord(record);
         await interaction.editReply({
             embeds: [createManageEmbed(updated.record, updated.packageData)],
-            components: createPackageActionsRows()
+            components: createPackageActionsRows(updated.record)
         });
     } catch (error) {
         sendLog(interaction.client, '❌ 立即更新包裹時發生錯誤：', 'ERROR', error);
@@ -492,7 +507,7 @@ async function handleRefreshSelected(interaction) {
 async function handleArchiveSelected(interaction) {
     await deferMessageUpdate(interaction);
 
-    const record = getSelectedActiveRecord(interaction);
+    const record = getTargetActiveRecord(interaction, 'package_panel_archive');
     if (!record) return errorReply(interaction, '**請先從管理面板選擇一筆追蹤中的包裹。**');
 
     try {
@@ -550,7 +565,7 @@ async function handleWakeSelected(interaction) {
         }) || record;
         await interaction.editReply({
             embeds: [createStoredPackageEmbed(updatedRecord, '物流追蹤 - 包裹已更新')],
-            components: createPackageActionsRows()
+            components: createPackageActionsRows(updatedRecord)
         });
     } catch (error) {
         sendLog(interaction.client, '❌ 喚醒包裹時發生錯誤：', 'ERROR', error);
@@ -561,14 +576,14 @@ async function handleWakeSelected(interaction) {
 async function handleNoteModalSubmit(interaction) {
     await deferMessageUpdate(interaction);
 
-    const record = getSelectedActiveRecord(interaction);
+    const record = getTargetActiveRecord(interaction, 'package_panel_note_modal');
     if (!record) return errorReply(interaction, '**請先從管理面板選擇一筆追蹤中的包裹。**');
 
     const note = interaction.fields.getTextInputValue('note')?.trim() || '';
     const updatedRecord = updatePackageRecord(record.userPackageID, { note }) || record;
     await interaction.editReply({
         embeds: [createStoredPackageEmbed(updatedRecord, '物流追蹤 - 包裹已更新')],
-        components: createPackageActionsRows()
+        components: createPackageActionsRows(updatedRecord)
     });
 }
 
@@ -621,7 +636,7 @@ module.exports = {
 
     buttonHandlers: {
         package_panel_add: async (interaction) => {
-            await interaction.showModal(createPackageAddModal());
+            await interaction.showModal(createPackageAddModal(isDetachedAddFlow(interaction)));
         },
 
         package_panel_active: handleManagePackages,
@@ -656,7 +671,7 @@ module.exports = {
         package_panel_refresh: handleRefreshSelected,
 
         package_panel_note: async (interaction) => {
-            const record = getSelectedActiveRecord(interaction);
+            const record = getTargetActiveRecord(interaction, 'package_panel_note');
             if (!record) {
                 await deferMessageUpdate(interaction);
                 return errorReply(interaction, '**請先從管理面板選擇一筆追蹤中的包裹。**');

@@ -8,7 +8,7 @@ const {
     changePackageState,
     createHistorySignature,
     createPackageEmbed,
-    createAddPackageRow,
+    createPackageNotificationActionsRows,
     getPackageRecords,
     updatePackageRecord
 } = require(path.join(process.cwd(), 'util/getPackageTracking'));
@@ -17,10 +17,11 @@ let isChecking = false;
 
 async function sendPackageUpdate(client, record, packageData) {
     const embed = createPackageEmbed(record, packageData, '物流貨態更新');
+    // 主動推送的狀態訊息也帶完整操作按鈕，且新增包裹按鈕使用 detached 模式保留原訊息。
     const payload = {
         content: `<@${record.userID}>`,
         embeds: [embed],
-        components: [createAddPackageRow()],
+        components: createPackageNotificationActionsRows(record),
         allowedMentions: { users: [record.userID] }
     };
 
@@ -45,7 +46,7 @@ async function sendPackageUpdate(client, record, packageData) {
 
         const user = await client.users.fetch(record.userID).catch(() => null);
         if (user) {
-            const message = await user.send({ embeds: [embed], components: [createAddPackageRow()] });
+            const message = await user.send({ embeds: [embed], components: createPackageNotificationActionsRows(record) });
             updatePackageRecord(record.userPackageID, {
                 lastNotificationChannelID: message.channelId,
                 lastNotificationMessageID: message.id
