@@ -44,7 +44,11 @@ const sendLog = (client, message, level = 'INFO', error = null) => {
         
         const logChannel = client.channels.cache.get(config.log.channel);
         if (logChannel) {
-            logChannel.send(`\`\`\`diff\n${logSymbol} ${logMessage}\n\`\`\``).catch(err => {
+            const maxDiscordLogLength = 1900;
+            const discordLogMessage = logMessage.length > maxDiscordLogLength
+                ? `${logMessage.slice(0, maxDiscordLogLength)}\n...（錯誤內容過長，已截斷；完整內容請查看終端日誌）`
+                : logMessage;
+            logChannel.send(`\`\`\`diff\n${logSymbol} ${discordLogMessage}\n\`\`\``).catch(err => {
                 console.error(`${prefix} ❌ 無法發送日誌到頻道：`, err);
             });
         } else {
