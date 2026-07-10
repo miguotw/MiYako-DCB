@@ -69,6 +69,12 @@ function loadCommands(dir) {
 
 loadCommands('./src/commands');
 
+function getInteractionHandler(handlers, customId) {
+    if (!handlers) return null;
+    // 支援 package_panel_xxx:payload 這類帶參數的元件 ID，讓同一個 handler 可處理指定包裹的按鈕。
+    return handlers[customId] || handlers[customId.split(':')[0]] || null;
+}
+
 // 註冊指令
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 (async () => {
@@ -93,28 +99,30 @@ client.on('interactionCreate', async interaction => {
         // 處理 Modal 提交
         } else if (interaction.isModalSubmit()) {
             // 根據 customId 分派
-            const handler = client.modalSubmitHandlers[interaction.customId];
+            const handler = getInteractionHandler(client.modalSubmitHandlers, interaction.customId);
             if (handler) {
                 await handler(interaction);
             }
         }
         // 處理按鈕點擊
         else if (interaction.isButton()) {
-            const command = client.commands.find(cmd => 
-                cmd.buttonHandlers && cmd.buttonHandlers[interaction.customId]
-            );
-            if (command) {
-                const handler = command.buttonHandlers[interaction.customId];
+            let handler = null;
+            const command = client.commands.find(cmd => {
+                handler = getInteractionHandler(cmd.buttonHandlers, interaction.customId);
+                return handler;
+            });
+            if (command && handler) {
                 await handler(interaction);
             }
         }
         // 處理選單選擇
         else if (interaction.isStringSelectMenu()) {
-            const command = client.commands.find(cmd =>
-                cmd.componentHandlers && cmd.componentHandlers[interaction.customId]
-            );
-            if (command) {
-                const handler = command.componentHandlers[interaction.customId];
+            let handler = null;
+            const command = client.commands.find(cmd => {
+                handler = getInteractionHandler(cmd.componentHandlers, interaction.customId);
+                return handler;
+            });
+            if (command && handler) {
                 await handler(interaction);
             }
         }
