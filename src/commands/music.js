@@ -26,11 +26,18 @@ const OPTIONS = {
     volumePercent: Number.isFinite(configuredVolumePercent) ? Math.min(Math.max(configuredVolumePercent, 0), 100) : 50
 };
 const COLOR = config.embed.color.default;
+const SUCCESS_COLOR = config.embed.color.success;
+const ERROR_COLOR = config.embed.color.error;
+const SUCCESS_EMOJI = config.emoji.success;
+const ERROR_EMOJI = config.emoji.error;
+const LOADING_EMOJI = config.emoji.loading;
 const EMOJI = MUSIC_CONFIG.emoji || '🎵';
+const QUEUE_TITLE_MAX_LENGTH = Math.min(Math.max(Number(MUSIC_CONFIG.queueTitleMaxLength) || 25, 1), 97);
 
 function createButtons(state, disabled = false) {
     return [new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('music_request').setLabel('點播').setStyle(ButtonStyle.Success).setDisabled(disabled),
+        new ButtonBuilder().setCustomId('music_play_next').setLabel('插播').setStyle(ButtonStyle.Success).setDisabled(disabled),
         new ButtonBuilder().setCustomId('music_pause').setLabel(state?.paused ? '繼續' : '暫停').setStyle(ButtonStyle.Primary).setDisabled(disabled || !state?.current),
         new ButtonBuilder().setCustomId('music_skip').setLabel('跳過').setStyle(ButtonStyle.Danger).setDisabled(disabled || !state?.current),
         new ButtonBuilder().setCustomId('music_queue_open:0').setLabel('序列').setStyle(ButtonStyle.Secondary).setDisabled(disabled || !state?.queue?.length)
@@ -38,16 +45,16 @@ function createButtons(state, disabled = false) {
 }
 
 function createPanelEmbed(state) {
-    const embed = new EmbedBuilder().setColor(COLOR).setTitle(`${EMOJI} ┃ 音樂管理面板`).setTimestamp();
+    const embed = new EmbedBuilder().setColor(COLOR).setTitle(`${EMOJI} ┃ 音樂 - 管理面板`);
     if (!state.current) return embed.setDescription('目前沒有播放中的音樂。使用下方「點播」按鈕加入歌曲。');
     const track = state.current;
     const elapsed = Math.min(elapsedSeconds(state), track.duration);
-    const upcoming = state.queue.slice(0, 5).map((item, index) => `${index + 1}. [${item.title}](${item.url}) · ${item.requestedBy ? `<@${item.requestedBy}>` : '未知點播者'}`).join('\n');
-    embed.setDescription(`**[${track.title}](${track.url})**`)
+    const upcoming = state.queue.slice(0, 5).map((item, index) => `${String(index + 1).padStart(2, '0')}. [${truncateTitle(item.title)}](${item.url}) \`${formatDuration(item.duration)}\` · ${item.requestedBy ? `<@${item.requestedBy}>` : '未知點播者'}`).join('\n');
+    embed.setDescription(`**[${track.title}](${track.url})** · ${track.requestedBy ? `<@${track.requestedBy}>` : '未知點播者'}`)
         .addFields(
+            { name: state.paused ? '已暫停' : '播放進度', value: `\`${formatElapsedTime(elapsed)} ${createProgressBar(elapsed, track.duration, 27)} ${formatDuration(track.duration)}\`` },
             { name: '藝人', value: track.channel, inline: true },
             { name: '年份', value: getUploadYear(track.uploadDate), inline: true },
-            { name: state.paused ? '已暫停' : '播放進度', value: `${createProgressBar(elapsed, track.duration)}\n\`${formatDuration(elapsed)} / ${formatDuration(track.duration)}\`` },
         );
     if (upcoming) embed.addFields({ name: '接下來', value: upcoming });
     if (track.thumbnail) embed.setImage(track.thumbnail);
@@ -67,14 +74,14 @@ function createHooks(client) {
             await state.panelMessage.edit({ embeds: [createPanelEmbed(state)], components: createButtons(state) }).catch(() => {});
         },
         async notifyError(state, track, error) {
-            sendLog(state.panelMessage?.client, `❌ 播放歌曲失敗：${track.title}`, 'ERROR', error);
-            await state.panelChannel?.send?.(`⚠️ 無法播放 **${track.title}**，已嘗試播放下一首。`).catch(() => {});
+            sendLog(state.panelMessage?.client, `${ERROR_EMOJI} 播放歌曲失敗：${track.title}`, 'ERROR', error);
+            await state.panelChannel?.send?.({ embeds: [createActionEmbed(`${ERROR_EMOJI} ┃ 播放歌曲失敗`, `無法播放 **${track.title}**，已嘗試播放下一首。`, ERROR_COLOR)] }).catch(() => {});
         },
         async notifyPlaybackStatus(state, type, message) {
             if (!state.panelChannel?.send) return;
-            const colors = { success: config.embed.color.success, warning: 0xF1C40F };
-            const titles = { success: '✅ ┃ 語音連線已恢復', warning: '⚠️ ┃ 音樂播放已暫停' };
-            await state.panelChannel.send({ embeds: [new EmbedBuilder().setColor(colors[type] || COLOR).setTitle(titles[type] || `${EMOJI} ┃ 音樂狀態`).setDescription(message).setTimestamp()] }).catch(() => {});
+            const colors = { success: SUCCESS_COLOR, warning: ERROR_COLOR };
+            const titles = { success: `${SUCCESS_EMOJI} ┃ 語音連線已恢復`, warning: `${ERROR_EMOJI} ┃ 音樂播放已暫停` };
+            await state.panelChannel.send({ embeds: [new EmbedBuilder().setColor(colors[type] || COLOR).setTitle(titles[type] || `${EMOJI} ┃ 音樂狀態`).setDescription(message)] }).catch(() => {});
         },
         async getVoiceChannel(state) {
             return client?.channels.fetch(state.voiceChannelID).catch(() => null);
@@ -97,7 +104,7 @@ async function restorePersistedPlayback(client) {
             await restoreGuildState(snapshot, voiceChannel, panelChannel, panelMessage, OPTIONS, createHooks(client));
             sendLog(client, `🎵 已恢復伺服器 ${snapshot.guildID} 的音樂播放。`);
         } catch (error) {
-            sendLog(client, `⚠️ 無法恢復伺服器 ${snapshot.guildID} 的音樂播放。`, 'WARN', error);
+            sendLog(client, `${ERROR_EMOJI} 無法恢復伺服器 ${snapshot.guildID} 的音樂播放。`, 'WARN', error);
         }
     }
     // 沒有序列快照的最新面板也需要在重啟後同步按鈕狀態。
@@ -112,7 +119,7 @@ async function restorePersistedPlayback(client) {
             state.panelMessage = message;
             await message.edit({ embeds: [createPanelEmbed(state)], components: createButtons(state) });
         } catch (error) {
-            sendLog(client, `⚠️ 無法同步伺服器 ${panel.guildID} 的最新音樂面板。`, 'WARN', error);
+            sendLog(client, `${ERROR_EMOJI} 無法同步伺服器 ${panel.guildID} 的最新音樂面板。`, 'WARN', error);
         }
     }
 }
@@ -142,7 +149,7 @@ function createQueuePayload(state, requestedPage) {
     const { items, page, totalPages } = paginateQueue(tracks, requestedPage);
     const offset = page * 10;
     const description = items.length
-        ? items.map((track, index) => `${offset + index + 1}. [${track.title}](${track.url}) - ${formatDuration(track.duration)} · ${track.requestedBy ? `<@${track.requestedBy}>` : '未知點播者'}`).join('\n')
+        ? items.map((track, index) => `${String(offset + index + 1).padStart(2, '0')}. [${truncateTitle(track.title)}](${track.url}) \`${formatDuration(track.duration)}\` · ${track.requestedBy ? `<@${track.requestedBy}>` : '未知點播者'}`).join('\n')
         : '目前序列為空。';
     const embed = new EmbedBuilder().setColor(COLOR).setTitle(`${EMOJI} ┃ 完整播放序列`).setDescription(description).setFooter({ text: `第 ${page + 1} / ${totalPages} 頁` });
     const components = totalPages > 1 ? [new ActionRowBuilder().addComponents(
@@ -153,7 +160,7 @@ function createQueuePayload(state, requestedPage) {
     if (pageQueueItems.length) components.push(new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder().setCustomId(`music_queue_remove:${page}`).setPlaceholder('選擇要從序列移除的歌曲')
             .setMinValues(1).setMaxValues(pageQueueItems.length)
-            .addOptions(pageQueueItems.map(track => ({ label: track.title.slice(0, 100), value: String(track.queueID).slice(0, 100) })))
+            .addOptions(pageQueueItems.map(track => ({ label: truncateTitle(track.title), value: String(track.queueID).slice(0, 100) })))
     ));
     if (state.queue.length) components.push(new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('music_queue_clear').setLabel('移除所有序列').setStyle(ButtonStyle.Danger)
@@ -162,17 +169,28 @@ function createQueuePayload(state, requestedPage) {
 }
 
 function createActionEmbed(title, description, color = COLOR) {
-    return new EmbedBuilder().setColor(color).setTitle(title).setDescription(description).setTimestamp();
+    return new EmbedBuilder().setColor(color).setTitle(title).setDescription(description);
+}
+
+function truncateTitle(title, maxLength = QUEUE_TITLE_MAX_LENGTH) {
+    const value = String(title || '未知標題');
+    const characters = Array.from(value);
+    return characters.length > maxLength ? `${characters.slice(0, maxLength).join('')}...` : value;
+}
+
+function formatElapsedTime(seconds) {
+    const value = formatDuration(seconds);
+    return value.includes(':') && value.split(':').length === 2 ? value.padStart(5, '0') : value;
 }
 
 function createDownloadEmbed(track, index, total, percent = 0) {
     const safePercent = Math.min(Math.max(Number(percent) || 0, 0), 100);
-    return new EmbedBuilder().setColor(COLOR).setTitle('⬇️ ┃ 正在下載音樂')
+    return new EmbedBuilder().setColor(SUCCESS_COLOR).setTitle(`${LOADING_EMOJI} ┃ 正在下載音樂`)
         .setDescription(`**${track?.title || '正在解析點播內容…'}**`)
         .addFields(
             { name: '下載項目', value: `${index} / ${total}`, inline: true },
             { name: '進度', value: `${safePercent.toFixed(1)}%`, inline: true }
-        ).setTimestamp();
+        );
 }
 
 function createClearQueueModal(channelID, messageID) {
@@ -183,12 +201,17 @@ function createClearQueueModal(channelID, messageID) {
     );
 }
 
+function createMusicRequestModal(insertNext = false) {
+    return new ModalBuilder().setCustomId(insertNext ? 'music_request_modal:next' : 'music_request_modal').setTitle(insertNext ? '插播音樂' : '點播音樂').addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('query').setLabel('YouTube 連結或歌曲標題').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(1000))
+    );
+}
+
 async function replyError(interaction, error) {
     const embed = new EmbedBuilder()
-        .setColor(config.embed.color.error)
-        .setTitle(`${config.emoji.error || '❌'} ┃ 音樂操作失敗`)
-        .setDescription(`❌ ${error.message || '執行音樂功能時發生錯誤。'}`)
-        .setTimestamp();
+        .setColor(ERROR_COLOR)
+        .setTitle(`${ERROR_EMOJI} ┃ 音樂操作失敗`)
+        .setDescription(`${ERROR_EMOJI} ${error.message || '執行音樂功能時發生錯誤。'}`);
     if (interaction.deferred || interaction.replied) return interaction.editReply({ content: null, embeds: [embed], components: [] }).catch(() => {});
     return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral }).catch(() => {});
 }
@@ -235,10 +258,15 @@ module.exports = {
                 const state = getState(interaction.guildId, interaction.client);
                 requireGuildVoice(interaction, state);
                 requireCurrentPanel(interaction, state);
-                const modal = new ModalBuilder().setCustomId('music_request_modal').setTitle('點播音樂').addComponents(
-                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('query').setLabel('YouTube 連結或歌曲標題').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(1000))
-                );
-                await interaction.showModal(modal);
+                await interaction.showModal(createMusicRequestModal(false));
+            } catch (error) { return replyError(interaction, error); }
+        },
+        music_play_next: async interaction => {
+            try {
+                const state = getState(interaction.guildId, interaction.client);
+                requireGuildVoice(interaction, state);
+                requireCurrentPanel(interaction, state);
+                await interaction.showModal(createMusicRequestModal(true));
             } catch (error) { return replyError(interaction, error); }
         },
         music_pause: async interaction => {
@@ -248,7 +276,7 @@ module.exports = {
                 requireCurrentPanel(interaction, state);
                 const paused = togglePause(state);
                 if (paused === null) throw new Error('目前沒有播放中的音樂。');
-                await interaction.reply({ embeds: [createActionEmbed(paused ? '⏸️ ┃ 已暫停播放' : '▶️ ┃ 已繼續播放', `<@${interaction.user.id}> ${paused ? '暫停了目前的音樂。' : '繼續播放目前的音樂。'}`, paused ? 0xF1C40F : config.embed.color.success)] });
+                await interaction.reply({ embeds: [createActionEmbed(paused ? '⏸️ ┃ 已暫停播放' : `${SUCCESS_EMOJI} ┃ 已繼續播放`, `<@${interaction.user.id}> ${paused ? '暫停了目前的音樂。' : '繼續播放目前的音樂。'}`, SUCCESS_COLOR)] });
             } catch (error) { return replyError(interaction, error); }
         },
         music_skip: async interaction => {
@@ -258,7 +286,7 @@ module.exports = {
                 requireCurrentPanel(interaction, state);
                 const skippedTitle = state.current?.title;
                 if (!skipCurrent(state)) throw new Error('目前沒有播放中的音樂。');
-                await interaction.reply({ embeds: [createActionEmbed('⏭️ ┃ 已跳過歌曲', `<@${interaction.user.id}> 跳過了 **${skippedTitle}**。`, config.embed.color.error)] });
+                await interaction.reply({ embeds: [createActionEmbed('⏭️ ┃ 已跳過歌曲', `<@${interaction.user.id}> 跳過了 **${skippedTitle}**。`, SUCCESS_COLOR)] });
             } catch (error) { return replyError(interaction, error); }
         },
         music_queue_open: handleQueueOpen,
@@ -280,7 +308,7 @@ module.exports = {
                 const removed = removeQueuedTracks(state, interaction.values);
                 const page = Number(interaction.customId.split(':')[1] || 0);
                 const payload = createQueuePayload(state, page);
-                payload.content = removed.length ? `✅ 已從序列移除 ${removed.length} 首歌曲。` : '⚠️ 選擇的歌曲已不在序列中。';
+                payload.content = removed.length ? `${SUCCESS_EMOJI} 已從序列移除 ${removed.length} 首歌曲。` : `${ERROR_EMOJI} 選擇的歌曲已不在序列中。`;
                 await interaction.update(payload);
             } catch (error) { return replyError(interaction, error); }
         }
@@ -296,16 +324,17 @@ module.exports = {
                 const channel = await interaction.client.channels.fetch(channelID).catch(() => null);
                 const message = await channel?.messages?.fetch(messageID).catch(() => null);
                 await message?.edit(createQueuePayload(state, 0)).catch(() => {});
-                await interaction.reply({ embeds: [createActionEmbed('🗑️ ┃ 已清空序列', `<@${interaction.user.id}> 已移除全部 **${removed.length}** 首待播歌曲。`, config.embed.color.error)] });
+                await interaction.reply({ embeds: [createActionEmbed('🗑️ ┃ 已清空序列', `<@${interaction.user.id}> 已移除全部 **${removed.length}** 首待播歌曲。`, SUCCESS_COLOR)] });
             } catch (error) { return replyError(interaction, error); }
         },
         music_request_modal: async interaction => {
             await interaction.deferReply();
             const downloadedTracks = [];
-            let enqueuedCount = 0;
+            const enqueuedTracks = new Set();
             try {
                 const state = getState(interaction.guildId, interaction.client);
                 const voiceChannel = requireGuildVoice(interaction, state);
+                const insertNext = interaction.customId.endsWith(':next');
                 const query = interaction.fields.getTextInputValue('query');
                 await interaction.editReply({ embeds: [createDownloadEmbed(null, 0, 1, 0)] });
                 const metadataTracks = await extractTracks(query, interaction.user.id, OPTIONS);
@@ -325,20 +354,22 @@ module.exports = {
                     await interaction.editReply({ embeds: [createDownloadEmbed(metadata, index + 1, metadataTracks.length, 100)] });
                 }
                 let firstPosition = null;
-                for (const track of downloadedTracks) {
-                    const position = await enqueue(state, track, voiceChannel, interaction.channel);
+                const insertAhead = insertNext && Boolean(state.current);
+                const enqueueOrder = insertAhead ? [...downloadedTracks].reverse() : downloadedTracks;
+                for (const track of enqueueOrder) {
+                    const position = await enqueue(state, track, voiceChannel, interaction.channel, insertAhead);
                     if (firstPosition === null) firstPosition = position;
-                    enqueuedCount++;
+                    enqueuedTracks.add(track);
                 }
                 const first = downloadedTracks[0];
-                sendLog(interaction.client, `🎵 ${interaction.user.tag} 點播：${first.title}${downloadedTracks.length > 1 ? ` 等 ${downloadedTracks.length} 首` : ''}`, 'INFO');
+                sendLog(interaction.client, `🎵 ${interaction.user.tag} ${insertNext ? '插播' : '點播'}：${first.title}${downloadedTracks.length > 1 ? ` 等 ${downloadedTracks.length} 首` : ''}`, 'INFO');
                 const description = downloadedTracks.length === 1
-                    ? `<@${interaction.user.id}> 點播了 **[${first.title}](${first.url})**。\n目前位於序列第 **${firstPosition}** 首。`
-                    : `<@${interaction.user.id}> 從播放清單加入了 **${downloadedTracks.length}** 首歌曲。\n第一首目前位於序列第 **${firstPosition}** 首。`;
-                await interaction.editReply({ embeds: [createActionEmbed('✅ ┃ 點播成功', description, config.embed.color.success)] });
+                    ? `<@${interaction.user.id}> ${insertNext ? '插播' : '點播'}了 **[${first.title}](${first.url})**。\n目前位於序列第 **${insertAhead ? 2 : firstPosition}** 首。`
+                    : `<@${interaction.user.id}> 從播放清單${insertNext ? '插播' : '加入'}了 **${downloadedTracks.length}** 首歌曲。\n第一首目前位於序列第 **${insertAhead ? 2 : firstPosition}** 首。`;
+                await interaction.editReply({ embeds: [createActionEmbed(`${SUCCESS_EMOJI} ┃ ${insertNext ? '插播' : '點播'}成功`, description, SUCCESS_COLOR)] });
             } catch (error) {
-                for (const track of downloadedTracks.slice(enqueuedCount)) deleteTrackFile(track);
-                sendLog(interaction.client, '❌ 點播音樂失敗', 'ERROR', error);
+                for (const track of downloadedTracks) if (!enqueuedTracks.has(track)) deleteTrackFile(track);
+                sendLog(interaction.client, `${ERROR_EMOJI} 點播音樂失敗`, 'ERROR', error);
                 await replyError(interaction, error);
             }
         }

@@ -145,6 +145,9 @@ music:
   # 播放音量百分比，可設定 0～100，預設 20。
   volumePercent: 20
 
+  # 接下來、完整序列與移除選單的歌曲標題最大字符數，可設定 1～97。
+  queueTitleMaxLength: 25
+
   # 單首曲目允許的最長與最短播放時間，單位為分鐘。0 表示不限制。
   maxDurationMinutes: 180
   minDurationMinutes: 1

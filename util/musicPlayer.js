@@ -92,12 +92,13 @@ function scheduleRecovery(state) {
     state.recoveryTimer.unref?.();
 }
 
-async function enqueue(state, track, voiceChannel, panelChannel) {
+async function enqueue(state, track, voiceChannel, panelChannel, insertNext = false) {
     await connect(state, voiceChannel);
     state.panelChannel = panelChannel;
-    state.queue.push(track);
+    if (insertNext) state.queue.unshift(track);
+    else state.queue.push(track);
     persistState(state);
-    const position = state.current ? state.queue.length + 1 : state.queue.length;
+    const position = insertNext ? (state.current ? 2 : 1) : (state.current ? state.queue.length + 1 : state.queue.length);
     if (!state.current && !state.starting) await playNext(state);
     else await state.hooks.updatePanel?.(state);
     return position;
