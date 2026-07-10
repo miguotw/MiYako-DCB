@@ -151,7 +151,7 @@ function createQueuePayload(state, requestedPage) {
     const description = items.length
         ? items.map((track, index) => `${String(offset + index + 1).padStart(2, '0')}. [${truncateTitle(track.title)}](${track.url}) \`${formatDuration(track.duration)}\` · ${track.requestedBy ? `<@${track.requestedBy}>` : '未知點播者'}`).join('\n')
         : '目前序列為空。';
-    const embed = new EmbedBuilder().setColor(COLOR).setTitle(`${EMOJI} ┃ 完整播放序列`).setDescription(description).setFooter({ text: `第 ${page + 1} / ${totalPages} 頁` });
+    const embed = new EmbedBuilder().setColor(COLOR).setTitle(`${EMOJI} ┃ 音樂 - 完整播放序列`).setDescription(description).setFooter({ text: `第 ${page + 1} / ${totalPages} 頁` });
     const components = totalPages > 1 ? [new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`music_queue_page:${page - 1}`).setLabel('上一頁').setStyle(ButtonStyle.Secondary).setDisabled(page === 0),
         new ButtonBuilder().setCustomId(`music_queue_page:${page + 1}`).setLabel('下一頁').setStyle(ButtonStyle.Secondary).setDisabled(page === totalPages - 1)
@@ -186,7 +186,7 @@ function formatElapsedTime(seconds) {
 function createDownloadEmbed(track, index, total, percent = 0) {
     const safePercent = Math.min(Math.max(Number(percent) || 0, 0), 100);
     return new EmbedBuilder().setColor(SUCCESS_COLOR).setTitle(`${LOADING_EMOJI} ┃ 正在下載音樂`)
-        .setDescription(`**${track?.title || '正在解析點播內容…'}**`)
+        .setDescription(`**${track?.title || '正在解析內容…'}**`)
         .addFields(
             { name: '下載項目', value: `${index} / ${total}`, inline: true },
             { name: '進度', value: `${safePercent.toFixed(1)}%`, inline: true }
@@ -364,8 +364,8 @@ module.exports = {
                 const first = downloadedTracks[0];
                 sendLog(interaction.client, `🎵 ${interaction.user.tag} ${insertNext ? '插播' : '點播'}：${first.title}${downloadedTracks.length > 1 ? ` 等 ${downloadedTracks.length} 首` : ''}`, 'INFO');
                 const description = downloadedTracks.length === 1
-                    ? `<@${interaction.user.id}> ${insertNext ? '插播' : '點播'}了 **[${first.title}](${first.url})**。\n目前位於序列第 **${insertAhead ? 2 : firstPosition}** 首。`
-                    : `<@${interaction.user.id}> 從播放清單${insertNext ? '插播' : '加入'}了 **${downloadedTracks.length}** 首歌曲。\n第一首目前位於序列第 **${insertAhead ? 2 : firstPosition}** 首。`;
+                    ? `**[${first.title}](${first.url})** · <@${interaction.user.id}>\n-# 目前位於序列第 ${insertAhead ? 2 : firstPosition} 首`
+                    : `**從播放清單${insertNext ? '插播' : '加入'}了 ${downloadedTracks.length} 首歌曲** · <@${interaction.user.id}>\n-# 第一首目前位於序列第 ${insertAhead ? 2 : firstPosition} 首`;
                 await interaction.editReply({ embeds: [createActionEmbed(`${SUCCESS_EMOJI} ┃ ${insertNext ? '插播' : '點播'}成功`, description, SUCCESS_COLOR)] });
             } catch (error) {
                 for (const track of downloadedTracks) if (!enqueuedTracks.has(track)) deleteTrackFile(track);
