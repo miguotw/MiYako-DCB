@@ -7,6 +7,8 @@ const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const EMBED_COLOR = config.embed.color.default;
 const STREAM_CONFIG = configCommands.admin.stream || {};
 const TOKEN_REFRESH_MARGIN_MS = 60 * 1000;
+const DEFAULT_CHECK_INTERVAL_MINUTES = 2;
+const MS_PER_MINUTE = 60000;
 
 let accessToken = null;
 let tokenExpiresAt = 0;
@@ -24,7 +26,7 @@ function getStreamConfig() {
         twitchUserLogins: [...new Set(twitchUserLogins.map(login => String(login || '').trim()).filter(isFilled))],
         twitchClientID: String(STREAM_CONFIG.twitchClientID || '').trim(),
         twitchClientSecret: String(STREAM_CONFIG.twitchClientSecret || '').trim(),
-        checkInterval: Math.max(Number(STREAM_CONFIG.checkInterval) || 120000, 60000),
+        checkInterval: Math.max((Number(STREAM_CONFIG.checkInterval) || DEFAULT_CHECK_INTERVAL_MINUTES) * MS_PER_MINUTE, MS_PER_MINUTE),
         notifyOnStartupLive: STREAM_CONFIG.notifyOnStartupLive === true,
         messages: Array.isArray(STREAM_CONFIG.message) ? STREAM_CONFIG.message : [],
         targets: Array.isArray(STREAM_CONFIG.targets) ? STREAM_CONFIG.targets : []
