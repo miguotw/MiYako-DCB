@@ -39,6 +39,9 @@ admin:
     # 檢查直播狀態的間隔，單位為分鐘。
     checkInterval: 1
 
+    # 更新已發送直播通知的間隔，單位為分鐘。建議配合 Twitch 縮圖更新頻率設為 5 分鐘。
+    editInterval: 5
+
     # 若 Bot 啟動時主播已經在直播，是否立即發送一次通知。
     notifyOnStartupLive: true
 

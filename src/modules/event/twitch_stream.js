@@ -8,12 +8,14 @@ const EMBED_COLOR = config.embed.color.default;
 const STREAM_CONFIG = configCommands.admin.stream || {};
 const TOKEN_REFRESH_MARGIN_MS = 60 * 1000;
 const DEFAULT_CHECK_INTERVAL_MINUTES = 2;
+const DEFAULT_EDIT_INTERVAL_MINUTES = 5;
 const MS_PER_MINUTE = 60000;
 
 let accessToken = null;
 let tokenExpiresAt = 0;
 const streamStates = new Map();
 let isChecking = false;
+let isEditing = false;
 
 function getStreamConfig() {
     const twitchUserLoginConfig = STREAM_CONFIG.twitchUserLogin;
@@ -27,6 +29,7 @@ function getStreamConfig() {
         twitchClientID: String(STREAM_CONFIG.twitchClientID || '').trim(),
         twitchClientSecret: String(STREAM_CONFIG.twitchClientSecret || '').trim(),
         checkInterval: Math.max((Number(STREAM_CONFIG.checkInterval) || DEFAULT_CHECK_INTERVAL_MINUTES) * MS_PER_MINUTE, MS_PER_MINUTE),
+        editInterval: Math.max((Number(STREAM_CONFIG.editInterval) || DEFAULT_EDIT_INTERVAL_MINUTES) * MS_PER_MINUTE, MS_PER_MINUTE),
         notifyOnStartupLive: STREAM_CONFIG.notifyOnStartupLive === true,
         messages: Array.isArray(STREAM_CONFIG.message) ? STREAM_CONFIG.message : [],
         targets: Array.isArray(STREAM_CONFIG.targets) ? STREAM_CONFIG.targets : []
@@ -214,34 +217,34 @@ async function notifyTargets(client, stream, user, streamConfig) {
     return notificationMessages;
 }
 
-function createLiveState(stream, notificationMessages = []) {
+function createLiveState(stream, user, twitchUserLogin, notificationMessages = []) {
     return {
         initialized: true,
         isLive: true,
         notificationMessages,
-        title: stream.title || '',
-        gameName: stream.game_name || '',
         viewerCount: Number(stream.viewer_count) || 0,
-        lastStream: { ...stream }
+        lastStream: { ...stream },
+        user,
+        twitchUserLogin
     };
 }
 
-async function updateNotifications(client, state, stream, user, twitchUserLogin) {
-    const title = stream.title || '';
-    const gameName = stream.game_name || '';
+function updateLiveState(state, stream, user) {
     const viewerCount = Number(stream.viewer_count) || 0;
     const highestViewerCount = Math.max(state.viewerCount, viewerCount);
 
-    state.title = title;
-    state.gameName = gameName;
     state.viewerCount = highestViewerCount;
     state.lastStream = { ...stream, viewer_count: highestViewerCount };
+    state.user = user;
+}
 
-    if (!state.notificationMessages.length) return;
+async function updateNotifications(client, state) {
+    const { lastStream, user, twitchUserLogin } = state;
 
-    // 每次檢查都重新建立 Embed，讓帶有 cache-busting 參數的直播縮圖同步刷新。
-    const updatedStream = { ...stream, viewer_count: highestViewerCount };
-    const embed = buildStreamEmbed(updatedStream, user, twitchUserLogin);
+    if (!state.notificationMessages.length || !lastStream) return;
+
+    // 每次編輯都重新建立 Embed，讓帶有 cache-busting 參數的直播縮圖同步刷新。
+    const embed = buildStreamEmbed(lastStream, user, twitchUserLogin);
     const editResults = await Promise.allSettled(
         state.notificationMessages.map(message => message.edit({ embeds: [embed] }))
     );
@@ -250,6 +253,20 @@ async function updateNotifications(client, state, stream, user, twitchUserLogin)
         if (result.status === 'rejected') {
             sendLog(client, `❌ 更新 Twitch 直播通知時發生錯誤：${twitchUserLogin}`, 'ERROR', result.reason);
         }
+    }
+}
+
+async function editLiveNotifications(client) {
+    if (isEditing) return;
+    isEditing = true;
+
+    try {
+        const liveStates = [...streamStates.values()].filter(state => state.isLive);
+        await Promise.all(liveStates.map(state => updateNotifications(client, state)));
+    } catch (error) {
+        sendLog(client, '❌ 定時更新 Twitch 直播通知時發生錯誤：', 'ERROR', error);
+    } finally {
+        isEditing = false;
     }
 }
 
@@ -292,9 +309,9 @@ async function checkStreamStatus(client, streamConfig) {
 
                 if (currentlyLive && streamConfig.notifyOnStartupLive) {
                     const notificationMessages = await notifyTargets(client, stream, user, streamConfig);
-                    streamStates.set(stateKey, createLiveState(stream, notificationMessages));
+                    streamStates.set(stateKey, createLiveState(stream, user, twitchUserLogin, notificationMessages));
                 } else if (currentlyLive) {
-                    streamStates.set(stateKey, createLiveState(stream));
+                    streamStates.set(stateKey, createLiveState(stream, user, twitchUserLogin));
                 } else {
                     streamStates.set(stateKey, { initialized: true, isLive: false });
                 }
@@ -303,12 +320,12 @@ async function checkStreamStatus(client, streamConfig) {
 
             if (!state.isLive && currentlyLive) {
                 const notificationMessages = await notifyTargets(client, stream, user, streamConfig);
-                streamStates.set(stateKey, createLiveState(stream, notificationMessages));
+                streamStates.set(stateKey, createLiveState(stream, user, twitchUserLogin, notificationMessages));
                 continue;
             }
 
             if (state.isLive && currentlyLive) {
-                await updateNotifications(client, state, stream, user, twitchUserLogin);
+                updateLiveState(state, stream, user);
                 continue;
             }
 
@@ -340,5 +357,8 @@ module.exports = (client) => {
         setInterval(() => {
             checkStreamStatus(client, streamConfig);
         }, streamConfig.checkInterval);
+        setInterval(() => {
+            editLiveNotifications(client);
+        }, streamConfig.editInterval);
     });
 };
