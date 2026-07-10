@@ -28,6 +28,10 @@ const sendLog = (client, message, level = 'INFO', error = null) => {
         
         if (level === 'ERROR' && error) {
             logMessage += `\n${error.stack || error}`;
+
+            if (error.debugDetails) {
+                logMessage += `\nDebug details:\n${JSON.stringify(error.debugDetails, null, 2)}`;
+            }
         }
         
         console.log(logMessage);

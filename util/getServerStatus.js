@@ -12,23 +12,39 @@ function createSafeIconPath(serverIP) {
     return path.join(process.cwd(), `${safeName}_${Date.now()}_icon.png`);
 }
 
+function createServerStatusError(message, publicMessage, debugDetails, cause) {
+    const error = new Error(message, cause ? { cause } : undefined);
+    error.publicMessage = publicMessage;
+    error.debugDetails = debugDetails;
+    return error;
+}
+
+function sanitizeApiResponse(data) {
+    if (!data || typeof data !== 'object') return data;
+
+    return {
+        ...data,
+        // 圖示可能包含很長的 Base64；日誌只需知道 API 是否有回傳。
+        icon: data.icon ? `[omitted: ${data.icon.length} characters]` : data.icon
+    };
+}
+
 // 查詢伺服器狀態
 const getServerStatus = async (serverIP) => {
-    try {
-        const normalizedServerIP = normalizeServerAddress(serverIP);
-        const response = await axios.get(`https://api.mcsrvstat.us/2/${encodeURIComponent(normalizedServerIP)}`);
-        const data = response.data;
+    const normalizedServerIP = normalizeServerAddress(serverIP);
+    const requestURL = `https://api.mcsrvstat.us/2/${encodeURIComponent(normalizedServerIP)}`;
 
-        // 伺服器離線時的回應
-        if (data.online === false || data.debug?.ping === false) {
-            throw new Error("伺服器離線或位址格式不正確。");
-        }
+    try {
+        const response = await axios.get(requestURL, { timeout: 15000 });
+        const data = response.data;
 
         // 處理玩家列表
         const players = data.players?.list?.map(p => p.replace(/_/g, '\\_')) || []; // 轉義 _ 避免 Markdown 格式
         let ServerStatusPlayersList;
 
-        if (players.length === 0) {
+        if (!data.players) {
+            ServerStatusPlayersList = 'N/A';
+        } else if (players.length === 0) {
             ServerStatusPlayersList = '無法取得線上玩家，或目前無玩家在線。';
         } else {
             ServerStatusPlayersList = players.join('、') + `\n-# 一次僅顯示最多 12 位玩家`;
@@ -45,17 +61,40 @@ const getServerStatus = async (serverIP) => {
         }
 
         // 抓取其他資訊
-        const ServerStatusMOTD = data.motd?.clean?.join('\n') || "N/A";
-        const ServerStatusPlayersOnline = `${data.players?.online ?? 0} / ${data.players?.max ?? 0}`;
+        const ServerStatusMOTD = data.motd?.clean?.join('\n') || '無法取得 MOTD。';
+        const ServerStatusPlayersOnline = data.players
+            ? `${data.players.online ?? 'N/A'} / ${data.players.max ?? 'N/A'}`
+            : 'N/A';
         const ServerStatusOnline = data.online ? '是' : '否';
         const ServerStatusVersionName = data.version || "N/A";
         const ServerStatusVersionProtocol = data.protocol?.toString() || "N/A";
-        const ServerStatusHostname = data.hostname || "N/A";
-        const ServerStatusIP = `${data.ip}:${data.port}` || "N/A";
+        const ServerStatusHostname = data.hostname || normalizedServerIP;
+        const ServerStatusIP = data.ip
+            ? `${data.ip}${data.port ? `:${data.port}` : ''}`
+            : 'N/A';
+        const ServerStatusDiagnostic = data.online
+            ? null
+            : data.debug?.error?.ping || '伺服器未回應狀態查詢。';
 
-        return { ServerStatusMOTD, ServerStatusPlayersOnline, ServerStatusOnline, ServerStatusVersionName, ServerStatusVersionProtocol, ServerStatusHostname, ServerStatusIP, ServerStatusPlayersList, ServerStatusIcon };
+        return { ServerStatusMOTD, ServerStatusPlayersOnline, ServerStatusOnline, ServerStatusVersionName, ServerStatusVersionProtocol, ServerStatusHostname, ServerStatusIP, ServerStatusPlayersList, ServerStatusIcon, ServerStatusDiagnostic };
     } catch (error) {
-        throw new Error(error.message);
+        // 保留程式主動建立的診斷資訊，不要重新建立 Error 而遺失堆疊與內容。
+        if (error.debugDetails) throw error;
+
+        throw createServerStatusError(
+            `Minecraft status API request failed: ${error.message}`,
+            '伺服器狀態查詢服務暫時無法使用，或伺服器位址格式不正確。',
+            {
+                serverInput: serverIP,
+                normalizedServerAddress: normalizedServerIP,
+                requestURL,
+                axiosCode: error.code,
+                httpStatus: error.response?.status,
+                httpStatusText: error.response?.statusText,
+                apiResponse: sanitizeApiResponse(error.response?.data)
+            },
+            error
+        );
     }
 };
 
