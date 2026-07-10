@@ -108,6 +108,16 @@ client.on('interactionCreate', async interaction => {
                 await handler(interaction);
             }
         }
+        // 處理選單選擇
+        else if (interaction.isStringSelectMenu()) {
+            const command = client.commands.find(cmd =>
+                cmd.componentHandlers && cmd.componentHandlers[interaction.customId]
+            );
+            if (command) {
+                const handler = command.componentHandlers[interaction.customId];
+                await handler(interaction);
+            }
+        }
     } catch (error) {
         console.error(error);
         errorReply(interaction, '**執行指令時發生錯誤**');

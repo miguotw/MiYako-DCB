@@ -13,3 +13,4 @@ config/config.yml
 config/configCommands.yml
 config/configModules.yml
 assets/miyakoChat/*
+assets/packageTracking/*

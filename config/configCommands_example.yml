@@ -37,7 +37,7 @@ admin:
     twitchClientSecret: " "
 
     # 檢查直播狀態的間隔，單位為分鐘。
-    checkInterval: 2
+    checkInterval: 1
 
     # 若 Bot 啟動時主播已經在直播，是否立即發送一次通知。
     notifyOnStartupLive: true
