@@ -101,8 +101,16 @@ module.exports = {
                 
                 // 使用 mcstatus.io API 獲取伺服器狀態
                 const serverStatus = await getServerStatus(serverIP);
-                const { ServerStatusMOTD, ServerStatusPlayersOnline, ServerStatusOnline, ServerStatusVersionName, ServerStatusVersionProtocol, ServerStatusHostname, ServerStatusIP, ServerStatusPlayersList } = serverStatus;
+                const { ServerStatusMOTD, ServerStatusPlayersOnline, ServerStatusOnline, ServerStatusVersionName, ServerStatusVersionProtocol, ServerStatusHostname, ServerStatusIP, ServerStatusPlayersList, ServerStatusDiagnostic } = serverStatus;
                 ServerStatusIcon = serverStatus.ServerStatusIcon;
+
+                if (ServerStatusDiagnostic) {
+                    sendLog(
+                        interaction.client,
+                        `⚠️ Minecraft 伺服器未回應，但已回傳可取得的資訊：${serverIP}（${ServerStatusDiagnostic}）`,
+                        'WARN'
+                    );
+                }
         
                 // 創建嵌入訊息
                 const embed = new EmbedBuilder()

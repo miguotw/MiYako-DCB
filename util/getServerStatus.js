@@ -38,26 +38,13 @@ const getServerStatus = async (serverIP) => {
         const response = await axios.get(requestURL, { timeout: 15000 });
         const data = response.data;
 
-        // 伺服器離線時保留 API 回應，方便從日誌判斷 DNS、SRV 與連線原因。
-        if (data.online === false || data.debug?.ping === false) {
-            throw createServerStatusError(
-                `Minecraft status API reported the server as offline (online=${data.online}, ping=${data.debug?.ping}).`,
-                '伺服器離線或位址格式不正確。',
-                {
-                    serverInput: serverIP,
-                    normalizedServerAddress: normalizedServerIP,
-                    requestURL,
-                    httpStatus: response.status,
-                    apiResponse: sanitizeApiResponse(data)
-                }
-            );
-        }
-
         // 處理玩家列表
         const players = data.players?.list?.map(p => p.replace(/_/g, '\\_')) || []; // 轉義 _ 避免 Markdown 格式
         let ServerStatusPlayersList;
 
-        if (players.length === 0) {
+        if (!data.players) {
+            ServerStatusPlayersList = 'N/A';
+        } else if (players.length === 0) {
             ServerStatusPlayersList = '無法取得線上玩家，或目前無玩家在線。';
         } else {
             ServerStatusPlayersList = players.join('、') + `\n-# 一次僅顯示最多 12 位玩家`;
@@ -74,15 +61,22 @@ const getServerStatus = async (serverIP) => {
         }
 
         // 抓取其他資訊
-        const ServerStatusMOTD = data.motd?.clean?.join('\n') || "N/A";
-        const ServerStatusPlayersOnline = `${data.players?.online ?? 0} / ${data.players?.max ?? 0}`;
+        const ServerStatusMOTD = data.motd?.clean?.join('\n') || '無法取得 MOTD。';
+        const ServerStatusPlayersOnline = data.players
+            ? `${data.players.online ?? 'N/A'} / ${data.players.max ?? 'N/A'}`
+            : 'N/A';
         const ServerStatusOnline = data.online ? '是' : '否';
         const ServerStatusVersionName = data.version || "N/A";
         const ServerStatusVersionProtocol = data.protocol?.toString() || "N/A";
-        const ServerStatusHostname = data.hostname || "N/A";
-        const ServerStatusIP = `${data.ip}:${data.port}` || "N/A";
+        const ServerStatusHostname = data.hostname || normalizedServerIP;
+        const ServerStatusIP = data.ip
+            ? `${data.ip}${data.port ? `:${data.port}` : ''}`
+            : 'N/A';
+        const ServerStatusDiagnostic = data.online
+            ? null
+            : data.debug?.error?.ping || '伺服器未回應狀態查詢。';
 
-        return { ServerStatusMOTD, ServerStatusPlayersOnline, ServerStatusOnline, ServerStatusVersionName, ServerStatusVersionProtocol, ServerStatusHostname, ServerStatusIP, ServerStatusPlayersList, ServerStatusIcon };
+        return { ServerStatusMOTD, ServerStatusPlayersOnline, ServerStatusOnline, ServerStatusVersionName, ServerStatusVersionProtocol, ServerStatusHostname, ServerStatusIP, ServerStatusPlayersList, ServerStatusIcon, ServerStatusDiagnostic };
     } catch (error) {
         // 保留程式主動建立的診斷資訊，不要重新建立 Error 而遺失堆疊與內容。
         if (error.debugDetails) throw error;
