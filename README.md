@@ -87,7 +87,7 @@ MiYako-DCB/
 ├── config_example/             # 可提交的完整設定範本
 ├── config/                     # 實際設定（不納入版本控制）
 └── assets/
-    ├── images/                 # 靜態圖片
+    ├── minecraft/              # Minecraft 預設圖示與執行期暫存檔
     ├── music/                  # yt-dlp、音訊快取與最新面板狀態（不納入版本控制）
     ├── packageTracking/        # 每位使用者的物流 JSON（不納入版本控制）
     └── temporaryVoice/         # 每個伺服器的入口與受管頻道 JSON（不納入版本控制）
@@ -153,7 +153,7 @@ module.exports = client => {
 | --- | --- | --- |
 | 活動狀態、一言 | `https://v1.hitokoto.cn` | 啟動時無法取得只會記錄錯誤 |
 | IP 查詢 | `http://ip-api.com` | 第三方服務限制與隱私政策由服務方決定 |
-| Minecraft 狀態 | `https://api.mcsrvstat.us` | 伺服器圖示會短暫寫入專案根目錄，指令完成後清理 |
+| Minecraft 狀態 | `https://api.mcsrvstat.us` | 伺服器圖示會短暫寫入 `assets/minecraft/temp/`，指令完成後清理 |
 | Minecraft 外觀 | Minotar | 由指令組合遠端圖片網址 |
 | 物流追蹤 | `https://track.tw/api/v1` | Token 存於 YAML；本機狀態存於 `assets/packageTracking/<userID>.json` |
 | Twitch 通知 | Twitch OAuth／Helix API | 憑證存於 YAML；模組以記憶體維護當次執行狀態 |

@@ -3,13 +3,16 @@ const fs = require('fs');
 const path = require('path');
 const { Buffer } = require('buffer');
 
+const MINECRAFT_TEMP_DIR = path.join(process.cwd(), 'assets', 'minecraft', 'temp');
+
 function normalizeServerAddress(serverIP) {
     return serverIP.trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
 }
 
 function createSafeIconPath(serverIP) {
     const safeName = serverIP.replace(/[^a-zA-Z0-9.-]/g, '_');
-    return path.join(process.cwd(), `${safeName}_${Date.now()}_icon.png`);
+    fs.mkdirSync(MINECRAFT_TEMP_DIR, { recursive: true });
+    return path.join(MINECRAFT_TEMP_DIR, `${safeName}_${Date.now()}_icon.png`);
 }
 
 function createServerStatusError(message, publicMessage, debugDetails, cause) {

@@ -131,7 +131,7 @@ module.exports = {
                 let iconPath = ServerStatusIcon;
                 if (!iconPath || !fs.existsSync(iconPath)) {
                     // 使用預設圖標
-                    iconPath = path.join(process.cwd(), 'assets/images/default_icon.png');
+                    iconPath = path.join(process.cwd(), 'assets', 'minecraft', 'default_icon.png');
                     if (!fs.existsSync(iconPath)) {
                         throw new Error('預設圖標文件不存在！');
                     }
