@@ -15,7 +15,9 @@ function createGuildState(guildID, options, hooks) {
     const state = {
         guildID, options, hooks, player, connection: null, voiceChannelID: null,
         current: null, queue: [], resource: null, panelMessage: null, panelChannel: null,
-        progressTimer: null, recoveryTimer: null, starting: false, paused: false, resumeOffsetSeconds: 0
+        progressTimer: null, recoveryTimer: null, inactivityTimer: null,
+        voiceChannel: null, starting: false, preparingTracks: 0,
+        paused: false, resumeAfterRecovery: false, resumeOffsetSeconds: 0
     };
     player.on(AudioPlayerStatus.Idle, () => finishCurrent(state));
     player.on('error', error => failCurrent(state, error));
@@ -54,30 +56,95 @@ function persistState(state) {
 async function connect(state, voiceChannel) {
     if (state.connection && state.voiceChannelID === voiceChannel.id) return state.connection;
     if (state.connection) state.connection.destroy();
+    // 閒置退出後若先前已開啟的點播流程才完成下載，重新連線時要把狀態放回索引。
+    guildStates.set(state.guildID, state);
     state.connection = joinVoiceChannel({ channelId: voiceChannel.id, guildId: voiceChannel.guild.id, adapterCreator: voiceChannel.guild.voiceAdapterCreator, selfDeaf: true });
     state.voiceChannelID = voiceChannel.id;
+    state.voiceChannel = voiceChannel;
     state.connection.subscribe(state.player);
     state.connection.on(VoiceConnectionStatus.Disconnected, async () => {
-        pauseForReason(state, '語音連線意外中斷，已自動暫停播放並嘗試重新連線。');
+        const disconnectedConnection = state.connection;
+        pauseForRecovery(state);
         try {
             await Promise.race([
-                entersState(state.connection, VoiceConnectionStatus.Signalling, 5000),
-                entersState(state.connection, VoiceConnectionStatus.Connecting, 5000)
+                entersState(disconnectedConnection, VoiceConnectionStatus.Signalling, 5000),
+                entersState(disconnectedConnection, VoiceConnectionStatus.Connecting, 5000)
             ]);
+            await entersState(disconnectedConnection, VoiceConnectionStatus.Ready, 20000);
+            const resumed = resumeRecoveredPlayback(state);
+            await state.hooks.notifyPlaybackStatus?.(
+                state,
+                'success',
+                resumed ? '語音連線已恢復，已自動繼續播放。' : '語音連線已恢復。'
+            );
         } catch {
-            try { state.connection.destroy(); } catch {}
-            state.connection = null;
+            try { disconnectedConnection.destroy(); } catch {}
+            if (state.connection === disconnectedConnection) state.connection = null;
             scheduleRecovery(state);
         }
     });
     await entersState(state.connection, VoiceConnectionStatus.Ready, 20000);
     persistState(state);
+    refreshInactivityTimer(state);
     return state.connection;
+}
+
+function hasHumanListener(state) {
+    if (!state.voiceChannel || !state.voiceChannelID) return false;
+    return state.voiceChannel.guild.voiceStates.cache.some(voiceState =>
+        voiceState.channelId === state.voiceChannelID && !voiceState.member?.user.bot
+    );
+}
+
+function isInactive(state) {
+    if (!state.connection) return false;
+    const queueIsEmpty = !state.current && !state.starting && state.preparingTracks === 0 && state.queue.length === 0;
+    return queueIsEmpty || !hasHumanListener(state);
+}
+
+function clearInactivityTimer(state) {
+    if (state.inactivityTimer) clearTimeout(state.inactivityTimer);
+    state.inactivityTimer = null;
+}
+
+function refreshInactivityTimer(state) {
+    if (!isInactive(state)) {
+        clearInactivityTimer(state);
+        return;
+    }
+    if (state.inactivityTimer) return;
+
+    const timeoutMinutes = Number(state.options.inactivityTimeoutMinutes) > 0
+        ? Number(state.options.inactivityTimeoutMinutes)
+        : 5;
+    state.inactivityTimer = setTimeout(async () => {
+        state.inactivityTimer = null;
+        if (!isInactive(state)) return;
+
+        cleanupState(state, true);
+        await state.hooks.updatePanel?.(state);
+        await state.hooks.notifyPlaybackStatus?.(
+            state,
+            'disconnect',
+            '頻道內沒有使用者或撥放序列為空'
+        );
+    }, timeoutMinutes * 60 * 1000);
+    state.inactivityTimer.unref?.();
+}
+
+function beginTrackPreparation(state) {
+    state.preparingTracks += 1;
+    refreshInactivityTimer(state);
+}
+
+function endTrackPreparation(state) {
+    state.preparingTracks = Math.max(state.preparingTracks - 1, 0);
+    refreshInactivityTimer(state);
 }
 
 function scheduleRecovery(state) {
     if (state.recoveryTimer) return;
-    pauseForReason(state, '語音連線意外中斷，已自動暫停播放並嘗試重新連線。');
+    pauseForRecovery(state);
     persistState(state);
     state.recoveryTimer = setTimeout(async () => {
         state.recoveryTimer = null;
@@ -85,7 +152,12 @@ function scheduleRecovery(state) {
             const channel = await state.hooks.getVoiceChannel?.(state);
             if (!channel) return;
             await connect(state, channel);
-            await state.hooks.notifyPlaybackStatus?.(state, 'success', '語音連線已恢復，播放維持暫停；請按「繼續」恢復播放。');
+            const resumed = resumeRecoveredPlayback(state);
+            await state.hooks.notifyPlaybackStatus?.(
+                state,
+                'success',
+                resumed ? '語音連線已恢復，已自動繼續播放。' : '語音連線已恢復。'
+            );
             persistState(state);
         } catch { scheduleRecovery(state); }
     }, 5000);
@@ -97,6 +169,7 @@ async function enqueue(state, track, voiceChannel, panelChannel, insertNext = fa
     state.panelChannel = panelChannel;
     if (insertNext) state.queue.unshift(track);
     else state.queue.push(track);
+    refreshInactivityTimer(state);
     persistState(state);
     const position = insertNext ? (state.current ? 2 : 1) : (state.current ? state.queue.length + 1 : state.queue.length);
     if (!state.current && !state.starting) await playNext(state);
@@ -110,6 +183,7 @@ async function playNext(state) {
     if (!track) {
         persistState(state);
         await state.hooks.replacePanel?.(state);
+        refreshInactivityTimer(state);
         return;
     }
     state.starting = true;
@@ -170,15 +244,31 @@ function pauseForReason(state, reason) {
     persistState(state);
     return true;
 }
+function pauseForRecovery(state) {
+    const pausedByRecovery = pauseForReason(state, '語音連線意外中斷，已自動暫停播放並嘗試重新連線。');
+    if (pausedByRecovery) state.resumeAfterRecovery = true;
+    return pausedByRecovery;
+}
+function resumeRecoveredPlayback(state) {
+    if (!state.resumeAfterRecovery) return false;
+    state.resumeAfterRecovery = false;
+    if (!state.current) return false;
+    state.paused = false;
+    state.player.unpause();
+    state.hooks.updatePanel?.(state);
+    persistState(state);
+    return true;
+}
 function handleVoiceStateUpdate(oldState, newState) {
     const state = guildStates.get(oldState.guild.id);
-    if (!state?.current || !state.voiceChannelID) return;
+    if (!state?.voiceChannelID) return;
     if (oldState.channelId !== state.voiceChannelID && newState.channelId !== state.voiceChannelID) return;
     setTimeout(() => {
         const humanCount = oldState.guild.voiceStates.cache.filter(voiceState =>
             voiceState.channelId === state.voiceChannelID && !voiceState.member?.user.bot
         ).size;
         if (humanCount === 0) pauseForReason(state, '語音頻道內已沒有使用者，已自動暫停播放。');
+        refreshInactivityTimer(state);
     }, 250).unref?.();
 }
 function removeQueuedTracks(state, identifiers) {
@@ -231,10 +321,13 @@ async function restoreGuildState(snapshot, voiceChannel, panelChannel, panelMess
 function cleanupState(state, remove = false) {
     stopProgressUpdates(state);
     if (state.recoveryTimer) clearTimeout(state.recoveryTimer);
+    state.recoveryTimer = null;
+    clearInactivityTimer(state);
     state.player.stop(true); state.connection?.destroy(); state.connection = null;
+    state.voiceChannel = null; state.voiceChannelID = null;
     deleteTrackFile(state.current); for (const track of state.queue) deleteTrackFile(track);
-    state.current = null; state.queue = []; deleteGuildQueue(state.guildID);
+    state.current = null; state.queue = []; state.resumeAfterRecovery = false; deleteGuildQueue(state.guildID);
     if (remove) guildStates.delete(state.guildID);
 }
 function isCurrentPanel(state, messageID) { return Boolean(state.panelMessage?.id && state.panelMessage.id === messageID); }
-module.exports = { guildStates, getGuildState, enqueue, togglePause, skipCurrent, cleanupState, isCurrentPanel, elapsedSeconds, restoreGuildState, handleVoiceStateUpdate, removeQueuedTracks, clearQueue };
+module.exports = { guildStates, getGuildState, enqueue, togglePause, skipCurrent, cleanupState, isCurrentPanel, elapsedSeconds, restoreGuildState, handleVoiceStateUpdate, removeQueuedTracks, clearQueue, beginTrackPreparation, endTrackPreparation };

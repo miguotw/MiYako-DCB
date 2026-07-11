@@ -142,6 +142,9 @@ music:
   emoji: "🎵"
   panelUpdateSeconds: 10
 
+  # 語音頻道沒有使用者，或播放序列為空達指定時間後，Bot 會自動退出語音頻道。
+  inactivityTimeoutMinutes: 5
+
   # 播放音量百分比，可設定 0～100，預設 20。
   volumePercent: 20
 

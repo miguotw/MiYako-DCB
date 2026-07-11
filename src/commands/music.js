@@ -6,7 +6,7 @@ const {
 const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { extractTracks, downloadTrack, deleteTrackFile } = require(path.join(process.cwd(), 'util/ytDlpManager'));
-const { getGuildState, enqueue, togglePause, skipCurrent, isCurrentPanel, elapsedSeconds, restoreGuildState, removeQueuedTracks, clearQueue } = require(path.join(process.cwd(), 'util/musicPlayer'));
+const { getGuildState, enqueue, togglePause, skipCurrent, isCurrentPanel, elapsedSeconds, restoreGuildState, removeQueuedTracks, clearQueue, beginTrackPreparation, endTrackPreparation } = require(path.join(process.cwd(), 'util/musicPlayer'));
 const { loadAllGuildQueues } = require(path.join(process.cwd(), 'util/musicQueueStore'));
 const { formatDuration, getUploadYear, createProgressBar, paginateQueue } = require(path.join(process.cwd(), 'util/musicHelpers'));
 const { getLatestMusicPanel, getAllLatestMusicPanels, saveLatestMusicPanel } = require(path.join(process.cwd(), 'util/musicPanelStore'));
@@ -23,6 +23,7 @@ const OPTIONS = {
     allowPlaylists: MUSIC_CONFIG.allowPlaylists === true,
     maxPlaylistTracks: Math.min(Math.max(Number(MUSIC_CONFIG.maxPlaylistTracks) || 25, 1), 100),
     panelUpdateSeconds: Number(MUSIC_CONFIG.panelUpdateSeconds) || 10,
+    inactivityTimeoutMinutes: Number(MUSIC_CONFIG.inactivityTimeoutMinutes) > 0 ? Number(MUSIC_CONFIG.inactivityTimeoutMinutes) : 5,
     volumePercent: Number.isFinite(configuredVolumePercent) ? Math.min(Math.max(configuredVolumePercent, 0), 100) : 50
 };
 const COLOR = config.embed.color.default;
@@ -46,7 +47,7 @@ function createButtons(state, disabled = false) {
 
 function createPanelEmbed(state) {
     const embed = new EmbedBuilder().setColor(COLOR).setTitle(`${EMOJI} ┃ 音樂 - 管理面板`);
-    if (!state.current) return embed.setDescription('目前沒有播放中的音樂。使用下方「點播」按鈕加入歌曲。');
+    if (!state.current) return embed.setDescription('目前沒有播放中的音樂。使用下方按鈕加入歌曲。');
     const track = state.current;
     const elapsed = Math.min(elapsedSeconds(state), track.duration);
     const upcoming = state.queue.slice(0, 5).map((item, index) => `${String(index + 1).padStart(2, '0')}. [${truncateTitle(item.title)}](${item.url}) \`${formatDuration(item.duration)}\` · ${item.requestedBy ? `<@${item.requestedBy}>` : '未知點播者'}`).join('\n');
@@ -79,8 +80,12 @@ function createHooks(client) {
         },
         async notifyPlaybackStatus(state, type, message) {
             if (!state.panelChannel?.send) return;
-            const colors = { success: SUCCESS_COLOR, warning: ERROR_COLOR };
-            const titles = { success: `${SUCCESS_EMOJI} ┃ 語音連線已恢復`, warning: `${ERROR_EMOJI} ┃ 音樂播放已暫停` };
+            const colors = { success: SUCCESS_COLOR, warning: ERROR_COLOR, disconnect: SUCCESS_COLOR };
+            const titles = {
+                success: `${SUCCESS_EMOJI} ┃ 語音連線已恢復`,
+                warning: `${ERROR_EMOJI} ┃ 音樂播放已暫停`,
+                disconnect: '🚧 ┃ 已退出語音頻道'
+            };
             await state.panelChannel.send({ embeds: [new EmbedBuilder().setColor(colors[type] || COLOR).setTitle(titles[type] || `${EMOJI} ┃ 音樂狀態`).setDescription(message)] }).catch(() => {});
         },
         async getVoiceChannel(state) {
@@ -136,7 +141,7 @@ function requireCurrentPanel(interaction, state) {
     const messageID = interaction.message?.id;
     const persisted = getLatestMusicPanel(interaction.guildId);
     const isPersistedCurrent = persisted?.messageID === messageID;
-    if (!isCurrentPanel(state, messageID) && !isPersistedCurrent) throw new Error('此面板已過期，請使用最新的音樂面板。');
+    if (!isCurrentPanel(state, messageID) && !isPersistedCurrent) throw new Error('此面板已過期，請創建一個新的音樂面板。');
     // Bot 重啟後，從持久化 ID 與本次互動重新綁定最新面板。
     if (!state.panelMessage && isPersistedCurrent) {
         state.panelMessage = interaction.message;
@@ -328,12 +333,18 @@ module.exports = {
             } catch (error) { return replyError(interaction, error); }
         },
         music_request_modal: async interaction => {
-            await interaction.deferReply();
+            // 點播／插播包含搜尋、下載進度與結果，僅讓操作使用者看見；
+            // 暫停、跳過與序列等其他 handler 仍維持公開回覆。
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
             const downloadedTracks = [];
             const enqueuedTracks = new Set();
+            let state = null;
+            let preparationStarted = false;
             try {
-                const state = getState(interaction.guildId, interaction.client);
+                state = getState(interaction.guildId, interaction.client);
                 const voiceChannel = requireGuildVoice(interaction, state);
+                beginTrackPreparation(state);
+                preparationStarted = true;
                 const insertNext = interaction.customId.endsWith(':next');
                 const query = interaction.fields.getTextInputValue('query');
                 await interaction.editReply({ embeds: [createDownloadEmbed(null, 0, 1, 0)] });
@@ -371,6 +382,8 @@ module.exports = {
                 for (const track of downloadedTracks) if (!enqueuedTracks.has(track)) deleteTrackFile(track);
                 sendLog(interaction.client, `${ERROR_EMOJI} 點播音樂失敗`, 'ERROR', error);
                 await replyError(interaction, error);
+            } finally {
+                if (preparationStarted) endTrackPreparation(state);
             }
         }
     },
