@@ -1,4 +1,11 @@
 const fs = require('fs');
+/**
+ * 每個 Discord guild 的音樂播放狀態機。
+ *
+ * 本模組擁有 VoiceConnection、AudioPlayer、目前歌曲、待播序列與所有計時器；
+ * 指令層只能透過公開函式操作狀態，UI 更新則由 hooks 反向通知 `commands/music.js`。
+ * 播放序列與目前進度會寫入 musicQueueStore，讓 Bot 重啟後能從本機音訊續播。
+ */
 const path = require('path');
 const prism = require('prism-media');
 const {
@@ -10,6 +17,7 @@ const { saveGuildQueue, deleteGuildQueue } = require('./musicQueueStore');
 
 const guildStates = new Map();
 
+/** 建立 guild 專屬 AudioPlayer，並把 Idle/Error 事件接回換曲狀態機。 */
 function createGuildState(guildID, options, hooks) {
     const player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
     const state = {
@@ -30,6 +38,7 @@ function createGuildState(guildID, options, hooks) {
 }
 
 function getGuildState(guildID, options = {}, hooks = {}) {
+    // options/hooks 每次取用都更新，讓重新載入設定或面板後不沿用舊閉包。
     const state = guildStates.get(guildID) || createGuildState(guildID, options, hooks);
     state.options = options;
     state.hooks = hooks;
@@ -40,6 +49,10 @@ function elapsedSeconds(state) {
     return state.resumeOffsetSeconds + (state.resource?.playbackDuration || 0) / 1000;
 }
 
+/**
+ * 保存足以重建播放的最小快照；序列完全為空時刪除舊檔，避免下次啟動誤恢復。
+ * localPath 也會落盤，恢復時仍會再次確認檔案確實存在。
+ */
 function persistState(state) {
     if (!state.current && !state.queue.length) return deleteGuildQueue(state.guildID);
     saveGuildQueue(state.guildID, {
@@ -53,6 +66,10 @@ function persistState(state) {
     });
 }
 
+/**
+ * 連入指定語音頻道並訂閱 player。斷線先嘗試 Discord 自身重連狀態，失敗後才進入
+ * 五秒一次的應用層 recovery；播放會先暫停，防止連線恢復後進度已經漂移。
+ */
 async function connect(state, voiceChannel) {
     if (state.connection && state.voiceChannelID === voiceChannel.id) return state.connection;
     if (state.connection) state.connection.destroy();
@@ -89,6 +106,7 @@ async function connect(state, voiceChannel) {
     return state.connection;
 }
 
+/** Bot 不計入聽眾；頻道內至少一位真人才視為有人使用。 */
 function hasHumanListener(state) {
     if (!state.voiceChannel || !state.voiceChannelID) return false;
     return state.voiceChannel.guild.voiceStates.cache.some(voiceState =>
@@ -107,6 +125,10 @@ function clearInactivityTimer(state) {
     state.inactivityTimer = null;
 }
 
+/**
+ * 空序列或無真人時啟動單一退出倒數；狀態恢復活躍便取消。
+ * preparingTracks 可防止下載尚未完成時被當作空序列退出。
+ */
 function refreshInactivityTimer(state) {
     if (!isInactive(state)) {
         clearInactivityTimer(state);
@@ -132,6 +154,7 @@ function refreshInactivityTimer(state) {
     state.inactivityTimer.unref?.();
 }
 
+// 下載/解析可能比閒置期限久，command 必須用這對函式包住準備流程。
 function beginTrackPreparation(state) {
     state.preparingTracks += 1;
     refreshInactivityTimer(state);
@@ -142,6 +165,7 @@ function endTrackPreparation(state) {
     refreshInactivityTimer(state);
 }
 
+/** 應用層重連採固定五秒重試；同一 guild 同時間只允許一個 recovery timer。 */
 function scheduleRecovery(state) {
     if (state.recoveryTimer) return;
     pauseForRecovery(state);
@@ -164,6 +188,7 @@ function scheduleRecovery(state) {
     state.recoveryTimer.unref?.();
 }
 
+/** 加入已下載歌曲；insertNext 只插到待播首位，不會中斷目前歌曲。 */
 async function enqueue(state, track, voiceChannel, panelChannel, insertNext = false) {
     await connect(state, voiceChannel);
     state.panelChannel = panelChannel;
@@ -177,6 +202,10 @@ async function enqueue(state, track, voiceChannel, panelChannel, insertNext = fa
     return position;
 }
 
+/**
+ * 待播序列的唯一消費入口。starting 與 current 是防重入鎖，避免 Idle、enqueue 和
+ * error handler 同時啟動兩首歌曲；恢復播放時以 ffmpeg `-ss` 從快照秒數開始。
+ */
 async function playNext(state) {
     if (state.starting || state.current) return;
     const track = state.queue.shift();
@@ -209,6 +238,7 @@ async function playNext(state) {
     state.starting = false;
 }
 
+/** 正常 Idle：清理音訊檔、重設 current，再消費下一首。 */
 async function finishCurrent(state) {
     if (!state.current || state.starting) return;
     stopProgressUpdates(state);
@@ -218,6 +248,7 @@ async function finishCurrent(state) {
     await playNext(state);
 }
 
+/** 播放失敗不阻塞序列：通知面板、刪除失敗曲目後繼續下一首。 */
 async function failCurrent(state, error) {
     if (!state.current) return;
     const failed = state.current;
@@ -244,6 +275,7 @@ function pauseForReason(state, reason) {
     persistState(state);
     return true;
 }
+/** 記錄「由斷線自動暫停」，只有這種暫停會在重連後自動恢復。 */
 function pauseForRecovery(state) {
     const pausedByRecovery = pauseForReason(state, '語音連線意外中斷，已自動暫停播放並嘗試重新連線。');
     if (pausedByRecovery) state.resumeAfterRecovery = true;
@@ -259,6 +291,10 @@ function resumeRecoveredPlayback(state) {
     persistState(state);
     return true;
 }
+/**
+ * 語音事件 cache 需要短時間才穩定，因此延後 250ms 重算真人數量。
+ * 無人時立即暫停，真正斷線與清理仍由 inactivity timer 處理。
+ */
 function handleVoiceStateUpdate(oldState, newState) {
     const state = guildStates.get(oldState.guild.id);
     if (!state?.voiceChannelID) return;
@@ -271,6 +307,7 @@ function handleVoiceStateUpdate(oldState, newState) {
         refreshInactivityTimer(state);
     }, 250).unref?.();
 }
+/** 以不會因翻頁而改變的 queueID 移除歌曲，並同步刪除其 cache 音訊。 */
 function removeQueuedTracks(state, identifiers) {
     const wanted = new Set(identifiers);
     const removed = [];
@@ -294,6 +331,7 @@ function clearQueue(state) {
     return removed;
 }
 function skipCurrent(state) { if (!state.current) return false; state.player.stop(true); return true; }
+/** 定期保存播放秒數並更新面板；最短五秒以控制磁碟與 Discord API 負載。 */
 function startProgressUpdates(state) {
     stopProgressUpdates(state);
     const delay = Math.max(Number(state.options.panelUpdateSeconds) || 10, 5) * 1000;
@@ -302,6 +340,10 @@ function startProgressUpdates(state) {
 }
 function stopProgressUpdates(state) { if (state.progressTimer) clearInterval(state.progressTimer); state.progressTimer = null; }
 
+/**
+ * 將快照 current 放回序列首位並附加 resumeSeconds；缺少本機檔案的歌曲直接略過。
+ * 只有成功連線且真正開始播放後才算恢復完成。
+ */
 async function restoreGuildState(snapshot, voiceChannel, panelChannel, panelMessage, options, hooks) {
     const state = getGuildState(snapshot.guildID, options, hooks);
     state.panelChannel = panelChannel; state.panelMessage = panelMessage; state.voiceChannelID = null;
@@ -318,6 +360,10 @@ async function restoreGuildState(snapshot, voiceChannel, panelChannel, panelMess
     return state;
 }
 
+/**
+ * 終止所有 timer/連線並刪除 current、queue 的暫存音訊與快照。
+ * remove=true 也會移出 guildStates，供閒置退出後完整釋放狀態。
+ */
 function cleanupState(state, remove = false) {
     stopProgressUpdates(state);
     if (state.recoveryTimer) clearTimeout(state.recoveryTimer);

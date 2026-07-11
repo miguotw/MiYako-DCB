@@ -1,4 +1,9 @@
 const path = require('path');
+/**
+ * 物流追蹤背景排程。
+ * 比較「貨態歷史簽章」而非整份 API 回應，只有新貨態才通知；長期無變化的
+ * 包裹會在 Track.TW 與本機一起封存。
+ */
 const { Events } = require('discord.js');
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const {
@@ -15,6 +20,7 @@ const {
 
 let isChecking = false;
 
+/** 優先通知原頻道，無法使用時退回 DM；成功後只保留最新一則通知。 */
 async function sendPackageUpdate(client, record, packageData) {
     const embed = createPackageEmbed(record, packageData, '物流貨態更新');
     // 主動推送的狀態訊息也帶完整操作按鈕，且新增包裹按鈕使用 detached 模式保留原訊息。
@@ -73,6 +79,7 @@ async function archiveStalePackage(client, record) {
 }
 
 async function checkPackages(client) {
+    // setInterval 不等待上一輪完成，旗標可避免慢速 API 造成重疊檢查。
     if (isChecking) return;
     isChecking = true;
 

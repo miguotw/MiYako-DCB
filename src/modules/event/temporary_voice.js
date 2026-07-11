@@ -1,4 +1,9 @@
 const path = require('path');
+/**
+ * 臨時語音頻道生命週期管理器。
+ * 加入入口時複製分類與權限建立頻道，空置後延遲刪除；設定與 emptySince 皆
+ * 落盤，因此 Bot 重啟後可對照 Discord 現況並恢復倒數。
+ */
 const { ChannelType, Events } = require('discord.js');
 const { configModules } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
@@ -16,6 +21,7 @@ const UNKNOWN_CHANNEL_ERROR_CODE = 10003;
 const MINUTE = 60 * 1000;
 const MAX_TIMEOUT = 2 ** 31 - 1;
 
+// timers 只保存本程序 handle；真正的倒數起點 emptySince 會寫入 store。
 function getDeleteDelay() {
     const minutes = Number(configModules.temporaryVoice?.deleteAfterMinutes);
     return Math.max(Number.isFinite(minutes) ? minutes : 5, 1) * MINUTE;
@@ -58,6 +64,7 @@ async function fetchGuildChannel(guild, channelID) {
     }
 }
 
+/** 到期時重新讀取 Discord 與 store，避免等待期間有人返回卻被誤刪。 */
 async function deleteIfStillEmpty(client, guildID, channelID) {
     clearDeleteTimer(guildID, channelID);
     const guild = client.guilds.cache.get(guildID);
@@ -97,6 +104,7 @@ function scheduleDelete(client, guildID, channelID, emptySince) {
     const delay = Math.min(remaining, MAX_TIMEOUT);
     const key = getTimerKey(guildID, channelID);
 
+    // Node setTimeout 有 32-bit 上限，過長等待會分段重新排程。
     timers.set(key, setTimeout(() => {
         if (remaining > MAX_TIMEOUT) {
             scheduleDelete(client, guildID, channelID, emptySince);
@@ -153,6 +161,7 @@ async function reconcileGuild(client, guild) {
     }
 }
 
+/** 建立後才登記並移動成員；中途失敗會清掉空的半成品頻道。 */
 async function createTemporaryChannel(client, entrance, member, prefix) {
     let temporaryChannel = null;
     try {
@@ -189,6 +198,7 @@ async function createTemporaryChannel(client, entrance, member, prefix) {
 }
 
 async function handleVoiceStateUpdate(client, oldState, newState) {
+    // 先處理離開舊頻道，再取消新頻道倒數，最後判斷是否進入入口。
     const guild = newState.guild || oldState.guild;
     const store = loadGuildStore(guild.id);
 

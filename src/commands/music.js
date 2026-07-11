@@ -1,4 +1,11 @@
 const path = require('path');
+/**
+ * 音樂功能的 Discord 互動層。
+ *
+ * 本檔負責面板、互動驗證與下載流程；實際語音狀態由 `util/musicPlayer` 管理，
+ * yt-dlp/ffmpeg 工作集中在 `util/ytDlpManager`。每個 guild 只有一個有效面板，
+ * 舊面板會被停用，避免兩組按鈕同時修改同一播放序列。
+ */
 const {
     SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
     ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, StringSelectMenuBuilder
@@ -35,6 +42,9 @@ const LOADING_EMOJI = config.emoji.loading;
 const EMOJI = MUSIC_CONFIG.emoji || '🎵';
 const QUEUE_TITLE_MAX_LENGTH = Math.min(Math.max(Number(MUSIC_CONFIG.queueTitleMaxLength) || 25, 1), 97);
 
+// Discord 元件與主面板建構 --------------------------------------------------
+
+/** 根據播放狀態建立主面板按鈕；disabled 用於讓被取代的舊面板失效。 */
 function createButtons(state, disabled = false) {
     return [new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('music_request').setLabel('點播').setStyle(ButtonStyle.Success).setDisabled(disabled),
@@ -62,6 +72,7 @@ function createPanelEmbed(state) {
     return embed;
 }
 
+/** 建立 player 反向更新 UI 的 hooks，避免底層播放器直接依賴指令模組。 */
 function createHooks(client) {
     return {
         async replacePanel(state) {
@@ -98,6 +109,7 @@ function getState(guildID, client) {
     return getGuildState(guildID, OPTIONS, createHooks(client));
 }
 
+/** Bot ready 後逐一恢復落盤序列；單一 guild 失敗不影響其他 guild。 */
 async function restorePersistedPlayback(client) {
     for (const snapshot of loadAllGuildQueues()) {
         try {
@@ -129,6 +141,7 @@ async function restorePersistedPlayback(client) {
     }
 }
 
+// 互動前置條件：操作人必須在語音頻道，且舊面板不得再改動狀態。
 function requireGuildVoice(interaction, state = null) {
     if (!interaction.inGuild()) throw new Error('音樂功能僅能在伺服器中使用。');
     const channel = interaction.member?.voice?.channel;
@@ -149,6 +162,7 @@ function requireCurrentPanel(interaction, state) {
     }
 }
 
+/** 建立指定頁面的序列、翻頁按鈕與多選移除選單。 */
 function createQueuePayload(state, requestedPage) {
     const tracks = [...state.queue];
     const { items, page, totalPages } = paginateQueue(tracks, requestedPage);
@@ -241,6 +255,7 @@ async function handleQueuePage(interaction) {
     } catch (error) { return replyError(interaction, error); }
 }
 
+// `index.js` 依下列 handler map 的 customId（冒號前綴）分派互動。
 module.exports = {
     data: new SlashCommandBuilder().setName('音樂').setDescription('音樂播放相關功能')
         .setDMPermission(false)

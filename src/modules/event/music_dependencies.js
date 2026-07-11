@@ -1,4 +1,9 @@
 const path = require('path');
+/**
+ * 音樂子系統的啟動橋接器。
+ * VoiceStateUpdate 交給 player 維護連線；ClientReady 才檢查外部執行檔，
+ * 讓依賴失敗只停用音樂功能，不阻止 Discord Client 啟動。
+ */
 const { Events } = require('discord.js');
 const { configCommands } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
@@ -15,6 +20,7 @@ module.exports = client => {
             binaryPath: music.ytDlpPath || 'assets/music/yt-dlp',
             updateHours: Number(music.ytDlpUpdateHours) || 24
         };
+        // yt-dlp 可自行下載/更新；ffmpeg-static 必須已由 npm 正確安裝。
         try {
             await checkFfmpeg();
             sendLog(client, `✅ ffmpeg-static 音樂播放依賴檢查完成：${ffmpegPath}`);

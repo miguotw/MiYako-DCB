@@ -1,4 +1,11 @@
 const path = require('path');
+/**
+ * Track.TW API adapter、物流 record repository 與共用 Embed builder。
+ *
+ * 每位 Discord 使用者各有一個 `assets/packageTracking/<userID>.json`，避免不同使用者
+ * 的面板互相看見資料。遠端 user_package_id 是 record 的主鍵；tracking number 只用於
+ * 顯示與重複檢查。此模組使用同步檔案 I/O，呼叫端應避免高頻並行寫入同一使用者檔案。
+ */
 const fs = require('fs');
 const axios = require('axios');
 const {
@@ -20,6 +27,8 @@ const DEFAULT_CHECK_INTERVAL_MINUTES = 30;
 const MS_PER_DAY = 86400000;
 const MS_PER_MINUTE = 60000;
 
+// 共用 Discord 元件 ---------------------------------------------------------
+
 function createAddPackageButton(customId = 'package_panel_add') {
     return new ButtonBuilder()
         .setCustomId(customId)
@@ -38,6 +47,7 @@ function createPackageActionButton(customId, label, style) {
         .setStyle(style);
 }
 
+/** 將包裹 ID 放入通知按鈕，使操作不依賴管理面板內的記憶體選取狀態。 */
 function createScopedPackageCustomId(customId, record) {
     // 狀態訊息上的操作按鈕需要帶上包裹 ID，避免依賴管理面板的暫存選取狀態。
     return record?.userPackageID ? `${customId}:${record.userPackageID}` : customId;
@@ -83,12 +93,15 @@ function withAddPackageRow(rows = [], addPackageCustomId = 'package_panel_add') 
     return [...outputRows, createAddPackageRow(addPackageCustomId)];
 }
 
+// 本機 repository -----------------------------------------------------------
+
 function ensureDataDir() {
     if (!fs.existsSync(DATA_DIR)) {
         fs.mkdirSync(DATA_DIR, { recursive: true });
     }
 }
 
+/** 損壞或不存在的使用者檔視為空資料，讓單一檔案不阻止整個 Bot 啟動。 */
 function readPackageFile(filePath) {
     try {
         const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -103,6 +116,7 @@ function writePackageFile(filePath, store) {
     fs.writeFileSync(filePath, JSON.stringify({ packages: store.packages || [] }, null, 2), 'utf8');
 }
 
+/** 僅接受 Discord snowflake 的數字字串，防止路徑穿越。 */
 function getUserPackageFile(userID) {
     const normalizedUserID = String(userID || '').trim();
     if (!/^\d+$/.test(normalizedUserID)) {
@@ -142,6 +156,8 @@ function getUserPackageStores() {
             };
         });
 }
+
+// 設定與 Track.TW HTTP adapter ---------------------------------------------
 
 function getTrackTwToken() {
     const token = String(PACKAGE_CONFIG.trackTwToken || '').trim();
@@ -247,6 +263,10 @@ function getLatestHistory(packageData) {
         })[0];
 }
 
+/**
+ * 將排序後的貨態歷史轉成穩定簽章，排程用它判斷是否真的出現新進度；
+ * 不直接比較 API 回應，避免觀看數或非貨態欄位造成假更新。
+ */
 function createHistorySignature(packageData) {
     const latestHistory = getLatestHistory(packageData);
     if (!latestHistory) return 'no-history';
@@ -313,6 +333,8 @@ function getArchiveHintFooter() {
     return `${formatArchiveAfterDays(getArchiveAfterDays())} 天沒有更新將自動封存`;
 }
 
+// 顯示格式 ------------------------------------------------------------------
+
 function createPackageEmbed(record, packageData, title = '包裹貨態') {
     const latestHistory = getLatestHistory(packageData);
     const historyLines = getSortedHistories(packageData)
@@ -365,6 +387,8 @@ function createStoredPackageEmbed(record, title = '包裹貨態') {
         .setTimestamp();
 }
 
+// Record 查詢與異動 ---------------------------------------------------------
+
 function findPackageRecord(userID, trackingNumber) {
     const store = loadUserPackageStore(userID);
     return store.packages.find(record =>
@@ -383,6 +407,7 @@ function findDuplicatePackage(userID, carrierID, trackingNumber) {
     );
 }
 
+/** 以 userPackageID upsert；新資料插在前方，讓面板優先顯示最近操作項目。 */
 function upsertPackageRecord(record) {
     const store = loadUserPackageStore(record.userID);
     const index = store.packages.findIndex(item => item.userPackageID === record.userPackageID);
@@ -397,6 +422,9 @@ function upsertPackageRecord(record) {
     return record;
 }
 
+/**
+ * 由遠端 ID 反查 owner。這會掃描所有使用者檔案，適合背景排程但不應放入高頻熱路徑。
+ */
 function findPackageStoreByID(userPackageID) {
     for (const { userID, store } of getUserPackageStores()) {
         const index = store.packages.findIndex(record => record.userPackageID === userPackageID);
@@ -444,6 +472,7 @@ function getPackageRecords(filter = {}) {
     });
 }
 
+/** 將 Discord interaction、carrier 與首份 API 快照正規化成可落盤 record。 */
 function createPackageRecord({ interaction, carrier, trackingNumber, note, userPackageID, packageData }) {
     const now = new Date().toISOString();
     return {

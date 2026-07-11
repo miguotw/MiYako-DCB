@@ -1,4 +1,9 @@
 const fs = require('fs');
+/**
+ * 臨時語音頻道的 per-guild JSON repository。
+ * entrances 是「加入即建立」的入口；channels 是本功能建立並負責清理的頻道。
+ * 所有公開異動都經 updateGuildStore，以免呼叫端忘記將記憶體修改寫回磁碟。
+ */
 const path = require('path');
 
 const DATA_DIR = path.join(process.cwd(), 'assets', 'temporaryVoice');
@@ -12,12 +17,14 @@ function ensureDataDir() {
     fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
+/** 僅接受 Discord snowflake 數字，避免 guildID 被利用來跳脫資料目錄。 */
 function getGuildFile(guildID) {
     const normalizedGuildID = String(guildID || '').trim();
     if (!/^\d+$/.test(normalizedGuildID)) throw new Error('無效的伺服器 ID。');
     return path.join(DATA_DIR, `${normalizedGuildID}.json`);
 }
 
+/** 容忍缺欄或舊版檔案，但不接受 array 等錯誤容器型別。 */
 function normalizeStore(value) {
     return {
         entrances: value?.entrances && typeof value.entrances === 'object' && !Array.isArray(value.entrances)
@@ -42,6 +49,7 @@ function loadGuildStore(guildID) {
     }
 }
 
+/** 使用同目錄暫存檔原子替換，降低 crash 時留下損壞 JSON 的機率。 */
 function saveGuildStore(guildID, store) {
     ensureDataDir();
     const filePath = getGuildFile(guildID);
@@ -53,6 +61,7 @@ function saveGuildStore(guildID, store) {
     return normalizedStore;
 }
 
+/** read-modify-write 共用入口；updater 的回傳值會原樣傳給呼叫端。 */
 function updateGuildStore(guildID, updater) {
     const store = loadGuildStore(guildID);
     const result = updater(store);

@@ -1,4 +1,11 @@
 const path = require('path');
+/**
+ * Track.TW 物流功能的 Discord 互動層。
+ *
+ * 新增流程可能跨越 Modal、物流商選單與額外欄位表單，因此 Map 保存本次程序的
+ * 暫態選擇；正式包裹資料由 `util/getPackageTracking` 依使用者寫入 JSON。
+ * 暫態資料不跨重啟，遺失時使用者只需重新執行新增或選取流程。
+ */
 const {
     SlashCommandBuilder,
     EmbedBuilder,
@@ -44,6 +51,8 @@ const pendingExtraFields = new Map();
 const pendingCarrierChoices = new Map();
 const selectedActivePackageRecords = new Map();
 const selectedArchivedPackageRecords = new Map();
+
+// 面板元件與跨互動狀態 ------------------------------------------------------
 
 async function deferMessageUpdate(interaction) {
     await interaction.deferUpdate();
@@ -234,6 +243,9 @@ function createManageEmbed(record, packageData = null) {
         .setTimestamp();
 }
 
+// Track.TW 新增流程 ---------------------------------------------------------
+
+/** 相容 Track.TW 不同回應形狀，找出新增後的 user_package_id。 */
 function getImportResultID(importResult, trackingNumber) {
     return importResult[trackingNumber] || Object.values(importResult)[0];
 }
@@ -258,6 +270,7 @@ async function resolveCarrier(trackingNumber) {
     return { carrier, carrierIDs, carriers };
 }
 
+/** 遠端匯入成功並取得首份貨態後才寫入本機；這是新增流程的 commit 點。 */
 async function importAndStorePackage(interaction, pending, extraFields = null) {
     const duplicate = findDuplicatePackage(interaction.user.id, pending.carrier.id, pending.trackingNumber);
     if (duplicate) {
@@ -316,6 +329,8 @@ async function continuePackageImport(interaction, pending) {
 
     await importAndStorePackage(interaction, pending);
 }
+
+// 面板導覽與包裹操作 --------------------------------------------------------
 
 async function handlePanel(interaction) {
     await interaction.reply({
@@ -453,6 +468,7 @@ async function handleArchivedPackageSelected(interaction) {
     });
 }
 
+// Map 僅提供操作便利；取回 record 時仍再次核對擁有者與狀態。
 function getSelectedActiveRecord(interaction) {
     const userPackageID = selectedActivePackageRecords.get(interaction.user.id);
     const record = userPackageID ? getUserRecordByID(interaction.user.id, userPackageID) : null;
@@ -620,6 +636,7 @@ async function handleCarrierSelected(interaction) {
     }
 }
 
+// Handler key 必須與按鈕、選單及 Modal 的 customId 冒號前綴一致。
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('物流')

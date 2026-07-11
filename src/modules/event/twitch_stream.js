@@ -1,4 +1,9 @@
 const path = require('path');
+/**
+ * Twitch Helix 輪詢與 Discord 通知生命週期。
+ * streamStates 只保存本次程序觀察到的直播與已發訊息；notifyOnStartupLive 決定
+ * 重啟時遇到既有直播是否補發通知。
+ */
 const axios = require('axios');
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, Events } = require('discord.js');
 const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
@@ -17,6 +22,7 @@ const streamStates = new Map();
 let isChecking = false;
 let isEditing = false;
 
+/** 正規化寬鬆 YAML 輸入，並統一套用輪詢間隔下限。 */
 function getStreamConfig() {
     const twitchUserLoginConfig = STREAM_CONFIG.twitchUserLogin;
     const twitchUserLogins = Array.isArray(twitchUserLoginConfig)
@@ -46,6 +52,7 @@ function getRandomMessage(messages) {
 }
 
 function buildPreviewUrl(stream) {
+    // 加時間戳避免 Discord/CDN 沿用上一輪的直播縮圖快取。
     const thumbnailUrl = stream.thumbnail_url || `https://static-cdn.jtvnw.net/previews-ttv/live_user_${stream.user_login}-1280x720.jpg`;
     const sizedUrl = thumbnailUrl.replace('{width}', '1280').replace('{height}', '720');
     const separator = sizedUrl.includes('?') ? '&' : '?';
@@ -100,6 +107,7 @@ function buildWatchButton(twitchUserLogin) {
 }
 
 async function getTwitchAccessToken(streamConfig) {
+    // 提前一分鐘視為過期，避免 API 請求途中 token 剛好失效。
     if (accessToken && Date.now() < tokenExpiresAt - TOKEN_REFRESH_MARGIN_MS) {
         return accessToken;
     }
@@ -162,6 +170,7 @@ function getMentionForTarget(guild, target) {
         };
     }
 
+    // role 未設定或不存在時，依既有通知規則退回 @everyone。
     return {
         content: '@everyone',
         allowedMentions: { parse: ['everyone'] }
@@ -231,6 +240,7 @@ function createLiveState(stream, user, twitchUserLogin, notificationMessages = [
 
 function updateLiveState(state, stream, user) {
     const viewerCount = Number(stream.viewer_count) || 0;
+    // 保留本場最高觀看數，避免離線摘要因定期刷新而顯示較低數字。
     const highestViewerCount = Math.max(state.viewerCount, viewerCount);
 
     state.viewerCount = highestViewerCount;
@@ -286,6 +296,7 @@ async function markNotificationsOffline(client, state, user, twitchUserLogin) {
 }
 
 async function checkStreamStatus(client, streamConfig) {
+    // 防止 API 回應慢於 checkInterval 時兩輪並行並重複通知。
     if (isChecking) return;
     isChecking = true;
 

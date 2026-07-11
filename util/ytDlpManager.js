@@ -1,4 +1,9 @@
 const fs = require('fs');
+/**
+ * yt-dlp/ffmpeg 外部程序管理器。
+ * 負責二進位下載與更新、metadata 抽取、播放清單展開、音訊下載及暫存清理。
+ * extractor 類錯誤會強制更新 yt-dlp 後重試一次；私人影片、網路或輸入錯誤不重試。
+ */
 const path = require('path');
 const https = require('https');
 const { spawn } = require('child_process');
@@ -13,6 +18,10 @@ function resolveBinaryPath(value = 'assets/music/yt-dlp') {
     return path.resolve(process.cwd(), value);
 }
 
+/**
+ * 將 spawn 包成 Promise，完整保留 stdout/stderr 供診斷，並以 timeout 強制終止
+ * 不回應的子程序。args 必須是陣列，刻意不經 shell 以避免輸入注入。
+ */
 function runProcess(command, args, options = {}) {
     return new Promise((resolve, reject) => {
         const { timeout = 30000, onStdout, onStderr, ...spawnOptions } = options;
@@ -32,6 +41,7 @@ function runProcess(command, args, options = {}) {
     });
 }
 
+/** 下載到 `.download` 後才原子 rename，避免未完成檔案被當成可執行檔。 */
 function downloadBinary(destination) {
     fs.mkdirSync(path.dirname(destination), { recursive: true });
     const temporary = `${destination}.download`;
@@ -64,6 +74,10 @@ function shouldCheckUpdate(binaryPath, intervalHours, now = Date.now()) {
     } catch { return true; }
 }
 
+/**
+ * 確保 yt-dlp 存在且未超過更新檢查間隔；updatePromise 合併同時發生的檢查，
+ * 防止多個 guild 在啟動時一起下載或更新同一檔案。
+ */
 async function ensureYtDlp(options = {}, force = false) {
     if (updatePromise) return updatePromise;
     updatePromise = (async () => {
@@ -85,6 +99,7 @@ async function ensureYtDlp(options = {}, force = false) {
     return updatePromise;
 }
 
+/** 只辨識「更新 extractor 可能解決」的錯誤，避免對永久錯誤做無效重試。 */
 function isExtractorFailure(error) {
     const message = `${error?.message || ''}\n${error?.stderr || ''}`.toLowerCase();
     if (/private video|video unavailable|members-only|sign in to confirm|unsupported url|timed out|network/.test(message)) return false;
@@ -122,6 +137,7 @@ function getPlaylistEntryURL(entry) {
     return `https://www.youtube.com/watch?v=${encodeURIComponent(value)}`;
 }
 
+/** 單曲直接抽取；播放清單先 flat 展開，再逐曲取得完整 metadata 與驗證。 */
 async function extractTracks(input, requestedBy, options = {}, retried = false) {
     const playlistInput = isPlaylistInput(input);
     if (playlistInput && !options.allowPlaylists) throw new Error('目前設定不允許點播 YouTube 播放清單。');
@@ -151,6 +167,10 @@ async function extractTracks(input, requestedBy, options = {}, retried = false) 
     }
 }
 
+/**
+ * 下載最佳音訊到唯一 cache 路徑；進度從 stderr 解析。
+ * 失敗時會清除同 UUID 的殘檔，成功後由播放器在不再需要時呼叫 deleteTrackFile。
+ */
 async function downloadTrack(track, options = {}, onProgress = null, retried = false) {
     const binaryPath = await ensureYtDlp(options);
     const cacheDirectory = path.join(process.cwd(), 'assets', 'music', 'cache');
