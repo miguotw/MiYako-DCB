@@ -162,7 +162,7 @@ module.exports = client => {
 
 部署物流功能時，`assets/packageTracking/` 必須可寫且需納入獨立備份；該目錄不會進入 Git。多個 Bot 程序共用同一目錄也沒有檔案鎖定機制，不建議以多程序模式執行。
 
-`/臨時語音頻道 新增` 可設定多個語音入口及個別前綴；省略前綴會清除該入口原有前綴。真人成員加入入口後，Bot 會在相同分類建立繼承入口權限的 `前綴 暱稱` 頻道並移動成員。`/臨時語音頻道 移除` 只停止入口建立新頻道，既有頻道仍會繼續管理。空頻道經 `configModules.yml` 的 `temporaryVoice.deleteAfterMinutes`（預設 5 分鐘）後刪除；入口與受管頻道資料會在 Bot 重啟後恢復。`assets/temporaryVoice/` 必須可寫並應獨立備份。
+`/臨時語音頻道 新增` 可設定多個語音入口及個別前綴；省略前綴會清除該入口原有前綴。真人成員加入入口後，Bot 會在相同分類建立繼承入口權限的 `前綴暱稱` 頻道（前綴與暱稱直接相連）並移動成員。`/臨時語音頻道 移除` 只停止入口建立新頻道，既有頻道仍會繼續管理。空頻道經 `configModules.yml` 的 `temporaryVoice.deleteAfterMinutes`（預設 5 分鐘）後刪除；入口與受管頻道資料會在 Bot 重啟後恢復。`assets/temporaryVoice/` 必須可寫並應獨立備份。
 
 ## 開發與驗證現況
 
