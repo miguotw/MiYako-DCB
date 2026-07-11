@@ -34,7 +34,7 @@ function clearDeleteTimer(guildID, channelID) {
 
 function buildChannelName(member, prefix) {
     const memberName = member.nickname || member.user.displayName || member.id;
-    return `${prefix ? `${prefix} ` : ''}${memberName}`.slice(0, 100);
+    return `${prefix || ''}${memberName}`.slice(0, 100);
 }
 
 function serializePermissionOverwrites(channel) {
