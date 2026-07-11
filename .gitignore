@@ -13,3 +13,4 @@ config/*
 assets/miyakoChat/*
 assets/packageTracking/*
 assets/music/*
+assets/temporaryVoice/*
