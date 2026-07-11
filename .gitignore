@@ -12,4 +12,6 @@ package-lock.json
 config/*
 assets/miyakoChat/*
 assets/packageTracking/*
+assets/minecraft/temp/*
 assets/music/*
+assets/temporaryVoice/*

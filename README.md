@@ -18,6 +18,7 @@ MiYako-DCB（みやこ機器人第三代）是以 [discord.js](https://discord.j
 | `/麥塊` | 查詢 Minecraft 玩家外觀或伺服器狀態 | 使用 Minotar、mcsrvstat.us |
 | `/物流 管理面板` | 新增、更新、封存與追蹤包裹 | 需要 Track.TW Token；資料依使用者存於本機 |
 | `/音樂 管理面板` | YouTube 點播、暫停、跳過及查看播放序列 | 使用 yt-dlp、ffmpeg-static 與 Discord 語音 |
+| `/臨時語音頻道 新增／移除` | 管理加入後自動建立專屬頻道的語音入口 | 僅限伺服器管理員 |
 | `/公告` | 將既有訊息製成公告並傳至指定頻道 | 僅限伺服器管理員 |
 | `/刪除訊息` | 批次或逐筆刪除訊息 | 伺服器內僅限管理員；支援清除 Bot 私訊 |
 | `/用戶資料` | 以 ID、提及或 Username 查詢用戶 |  |
@@ -29,6 +30,7 @@ MiYako-DCB（みやこ機器人第三代）是以 [discord.js](https://discord.j
 - 將成員、訊息、身分組及語音活動寫入指定 Discord 日誌頻道。
 - 定時檢查 Twitch 直播、發送或更新直播通知。
 - 定時檢查包裹貨態，通知使用者並自動封存長期無更新的包裹。
+- 由管理員設定臨時語音入口，成員加入後建立專屬頻道，空置逾時自動刪除。
 
 ## 執行環境
 
@@ -37,7 +39,7 @@ MiYako-DCB（みやこ機器人第三代）是以 [discord.js](https://discord.j
 - Discord Bot Token 與 Application ID
 - 視功能需要：Twitch Developer 憑證、Track.TW API Token
 
-Bot 建立時會要求下列 Gateway Intents：`Guilds`、`GuildMessages`、`MessageContent`、`GuildMembers`、`GuildVoiceStates`、`DirectMessages`。請在 Discord Developer Portal 的 Bot 頁面啟用 **Server Members Intent** 與 **Message Content Intent**；邀請 Bot 時也需授予其實際功能所需的檢視頻道、讀取歷史、發送訊息、嵌入連結、管理訊息等權限。
+Bot 建立時會要求下列 Gateway Intents：`Guilds`、`GuildMessages`、`MessageContent`、`GuildMembers`、`GuildVoiceStates`、`DirectMessages`。請在 Discord Developer Portal 的 Bot 頁面啟用 **Server Members Intent** 與 **Message Content Intent**；邀請 Bot 時也需授予其實際功能所需的檢視頻道、讀取歷史、發送訊息、嵌入連結、管理訊息等權限。臨時語音頻道功能另需檢視頻道、連線、管理頻道及移動成員權限。
 
 ## 安裝與啟動
 
@@ -54,7 +56,7 @@ cp -r config_example config
 
 - `config.yml`：Token、Application ID、狀態、日誌頻道、Embed 顏色與共用 Emoji。
 - `configCommands.yml`：各 Slash Command、Twitch 通知及第三方 API 的設定。
-- `configModules.yml`：成員事件、訊息／身分組／語音紀錄及關鍵字規則。
+- `configModules.yml`：成員事件、訊息／身分組／語音紀錄、關鍵字規則，以及臨時語音頻道的空置刪除分鐘數。
 
 設定完成後，務必在專案根目錄啟動：
 
@@ -85,9 +87,10 @@ MiYako-DCB/
 ├── config_example/             # 可提交的完整設定範本
 ├── config/                     # 實際設定（不納入版本控制）
 └── assets/
-    ├── images/                 # 靜態圖片
+    ├── minecraft/              # Minecraft 預設圖示與執行期暫存檔
     ├── music/                  # yt-dlp、音訊快取與最新面板狀態（不納入版本控制）
-    └── packageTracking/        # 每位使用者的物流 JSON（不納入版本控制）
+    ├── packageTracking/        # 每位使用者的物流 JSON（不納入版本控制）
+    └── temporaryVoice/         # 每個伺服器的入口與受管頻道 JSON（不納入版本控制）
 ```
 
 ## 架構與載入流程
@@ -150,13 +153,16 @@ module.exports = client => {
 | --- | --- | --- |
 | 活動狀態、一言 | `https://v1.hitokoto.cn` | 啟動時無法取得只會記錄錯誤 |
 | IP 查詢 | `http://ip-api.com` | 第三方服務限制與隱私政策由服務方決定 |
-| Minecraft 狀態 | `https://api.mcsrvstat.us` | 伺服器圖示會短暫寫入專案根目錄，指令完成後清理 |
+| Minecraft 狀態 | `https://api.mcsrvstat.us` | 伺服器圖示會短暫寫入 `assets/minecraft/temp/`，指令完成後清理 |
 | Minecraft 外觀 | Minotar | 由指令組合遠端圖片網址 |
 | 物流追蹤 | `https://track.tw/api/v1` | Token 存於 YAML；本機狀態存於 `assets/packageTracking/<userID>.json` |
 | Twitch 通知 | Twitch OAuth／Helix API | 憑證存於 YAML；模組以記憶體維護當次執行狀態 |
 | YouTube 音樂 | yt-dlp、ffmpeg-static | FFmpeg 隨 npm 依賴安裝；yt-dlp 每 24 小時節流檢查 stable 更新，抽取失效時更新並重試一次 |
+| 臨時語音頻道 | `assets/temporaryVoice/<guildID>.json` | 保存入口、受管頻道及空置起始時間，重啟後恢復管理 |
 
 部署物流功能時，`assets/packageTracking/` 必須可寫且需納入獨立備份；該目錄不會進入 Git。多個 Bot 程序共用同一目錄也沒有檔案鎖定機制，不建議以多程序模式執行。
+
+`/臨時語音頻道 新增` 可設定多個語音入口及個別前綴；省略前綴會清除該入口原有前綴。真人成員加入入口後，Bot 會在相同分類建立繼承入口權限的 `前綴 暱稱` 頻道並移動成員。`/臨時語音頻道 移除` 只停止入口建立新頻道，既有頻道仍會繼續管理。空頻道經 `configModules.yml` 的 `temporaryVoice.deleteAfterMinutes`（預設 5 分鐘）後刪除；入口與受管頻道資料會在 Bot 重啟後恢復。`assets/temporaryVoice/` 必須可寫並應獨立備份。
 
 ## 開發與驗證現況
 
