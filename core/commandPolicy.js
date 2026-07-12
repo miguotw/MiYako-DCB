@@ -121,7 +121,10 @@ function createAdminCommand(commands) {
             return command.execute(interaction);
         },
         modalSubmitHandlers: mergeHandlers(commands, 'modalSubmitHandlers'),
-        buttonHandlers: mergeHandlers(commands, 'buttonHandlers'),
+        buttonHandlers: {
+            ...mergeHandlers(commands, 'buttonHandlers'),
+            ...mergeHandlers(commands, 'publicButtonHandlers')
+        },
         componentHandlers: mergeHandlers(commands, 'componentHandlers')
     };
 }

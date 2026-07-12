@@ -51,7 +51,7 @@ async function errorReply(interaction, errorMessage, files = [], ephemeral = fal
  * @param {string} successMessage - 成功訊息內容
  * @param {Array<Attachment>} [files] - 附加的檔案（可選）
  */
-async function infoReply(interaction, successMessage, files = []) {
+async function infoReply(interaction, successMessage, files = [], ephemeral = false) {
     const embed = createInfoEmbed(successMessage);
 
     const replyOptions = { embeds: [embed], files: files };
@@ -59,7 +59,7 @@ async function infoReply(interaction, successMessage, files = []) {
     if (interaction.deferred || interaction.replied) {
         await interaction.editReply(replyOptions).catch(() => {});
     } else {
-        await interaction.reply(replyOptions).catch(() => {});
+        await interaction.reply({ ...replyOptions, ephemeral }).catch(() => {});
     }
 }
 
