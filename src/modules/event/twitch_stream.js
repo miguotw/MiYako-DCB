@@ -21,6 +21,7 @@ let tokenExpiresAt = 0;
 const streamStates = new Map();
 let isChecking = false;
 let isEditing = false;
+let pendingForcedCheck = false;
 
 /** 正規化寬鬆 YAML 輸入，並統一套用輪詢間隔下限。 */
 function getStreamConfig() {
@@ -397,9 +398,12 @@ async function restoreNotificationStates(client, streamConfig) {
     if (restoredCount) sendLog(client, `✅ 已恢復 ${restoredCount} 則 Twitch 直播通知，將接續更新。`);
 }
 
-async function checkStreamStatus(client, streamConfig) {
+async function checkStreamStatus(client, streamConfig, forceNotifyCurrentLive = false) {
     // 防止 API 回應慢於 checkInterval 時兩輪並行並重複通知。
-    if (isChecking) return;
+    if (isChecking) {
+        if (forceNotifyCurrentLive) pendingForcedCheck = true;
+        return;
+    }
     isChecking = true;
 
     try {
@@ -431,7 +435,7 @@ async function checkStreamStatus(client, streamConfig) {
             if (!state.initialized) {
                 sendLog(client, `✅ Twitch 直播監聽已啟動：${twitchUserLogin} 目前${currentlyLive ? '正在直播' : '未直播'}`);
 
-                if (currentlyLive && streamConfig.notifyOnStartupLive) {
+                if (currentlyLive && (streamConfig.notifyOnStartupLive || forceNotifyCurrentLive)) {
                     const notificationMessages = await notifyTargets(client, stream, user, streamConfig);
                     streamStates.set(stateKey, createLiveState(stream, user, twitchUserLogin, notificationMessages));
                 } else if (currentlyLive) {
@@ -484,6 +488,10 @@ async function checkStreamStatus(client, streamConfig) {
         sendLog(client, '❌ 檢查 Twitch 直播狀態時發生錯誤：', 'ERROR', error);
     } finally {
         isChecking = false;
+        if (pendingForcedCheck) {
+            pendingForcedCheck = false;
+            setImmediate(() => checkStreamStatus(client, streamConfig, true));
+        }
     }
 }
 
@@ -496,6 +504,8 @@ module.exports = (client) => {
         sendLog(client, '⚠️ Twitch 直播監聽設定不完整，請檢查 twitchClientID、twitchClientSecret。', 'WARN');
         return;
     }
+
+    client.checkTwitchStreamStatus = () => checkStreamStatus(client, streamConfig, true);
 
     client.once(Events.ClientReady, async () => {
         try {

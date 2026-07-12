@@ -117,10 +117,14 @@ module.exports = {
             else store.subscriptions[index] = subscription;
             writeGuildStore(interaction.guildId, store);
             sendLog(interaction.client, `💾 ${interaction.user.tag} 新增 Twitch 直播通知：${twitchUserLogin} -> ${channel.id}`);
-            return interaction.reply({
+            await interaction.reply({
                 content: `已設定追蹤 **${twitchUserLogin}**，通知將發送至 ${channel}${role ? `，並提及 ${role}` : '，未指定身分組時將提及 @everyone'}。`,
                 ephemeral: true
             });
+            interaction.client.checkTwitchStreamStatus?.().catch(error => {
+                sendLog(interaction.client, '❌ 新增設定後立即檢查 Twitch 直播狀態時發生錯誤：', 'ERROR', error);
+            });
+            return;
         }
 
     },
