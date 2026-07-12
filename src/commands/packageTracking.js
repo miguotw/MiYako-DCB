@@ -102,7 +102,7 @@ function isDetachedAddFlow(interaction) {
 function createPackageAddModal(detached = false) {
     return new ModalBuilder()
         .setCustomId(detached ? 'package_panel_add_modal:detached' : 'package_panel_add_modal')
-        .setTitle('新增包裹追蹤')
+        .setTitle('新增物流追蹤')
         .addComponents(
             new ActionRowBuilder().addComponents(
                 new TextInputBuilder()
@@ -297,7 +297,7 @@ async function importAndStorePackage(interaction, pending, extraFields = null) {
 
     const embed = createPackageEmbed(record, packageData, '物流追蹤 - 新增完成');
     await interaction.editReply({ embeds: [embed], components: createPackageActionsRows(record) });
-    sendLog(interaction.client, `📦 ${interaction.user.tag} 新增了包裹追蹤：${pending.trackingNumber}`, 'INFO');
+    sendLog(interaction.client, `📦 ${interaction.user.tag} 新增了物流追蹤：${pending.trackingNumber}`, 'INFO');
 }
 
 async function continuePackageImport(interaction, pending) {
@@ -366,8 +366,8 @@ async function handleAddModalSubmit(interaction) {
         await continuePackageImport(interaction, pending);
     } catch (error) {
         if (error.isCarrierDetectionError) return errorReply(interaction, error.message);
-        sendLog(interaction.client, '❌ 新增包裹追蹤時發生錯誤：', 'ERROR', error);
-        return errorReply(interaction, `**新增包裹追蹤失敗，原因：${error.message || '未知錯誤'}**`);
+        sendLog(interaction.client, '❌ 新增物流追蹤時發生錯誤：', 'ERROR', error);
+        return errorReply(interaction, `**新增物流追蹤失敗，原因：${error.message || '未知錯誤'}**`);
     }
 }
 
@@ -631,24 +631,19 @@ async function handleCarrierSelected(interaction) {
             carrier
         });
     } catch (error) {
-        sendLog(interaction.client, '❌ 選擇物流商新增包裹追蹤時發生錯誤：', 'ERROR', error);
-        return errorReply(interaction, `**新增包裹追蹤失敗，原因：${error.message || '未知錯誤'}**`);
+        sendLog(interaction.client, '❌ 選擇物流商新增物流追蹤時發生錯誤：', 'ERROR', error);
+        return errorReply(interaction, `**新增物流追蹤失敗，原因：${error.message || '未知錯誤'}**`);
     }
 }
 
 // Handler key 必須與按鈕、選單及 Modal 的 customId 冒號前綴一致。
 module.exports = {
     data: new SlashCommandBuilder()
-        .setName('物流')
-        .setDescription('包裹追蹤相關功能')
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('管理面板')
-                .setDescription('開啟包裹追蹤管理面板')),
+        .setName('物流追蹤')
+        .setDescription('開啟物流追蹤管理面板'),
 
     async execute(interaction) {
-        const subcommand = interaction.options.getSubcommand();
-        if (subcommand === '管理面板') return handlePanel(interaction);
+        return handlePanel(interaction);
     },
 
     buttonHandlers: {
@@ -736,10 +731,10 @@ module.exports = {
             try {
                 await importAndStorePackage(interaction, pending, extraFields);
                 pendingExtraFields.delete(interaction.user.id);
-                sendLog(interaction.client, `📦 ${interaction.user.tag} 補填資料並新增了包裹追蹤：${pending.trackingNumber}`, 'INFO');
+                sendLog(interaction.client, `📦 ${interaction.user.tag} 補填資料並新增了物流追蹤：${pending.trackingNumber}`, 'INFO');
             } catch (error) {
-                sendLog(interaction.client, '❌ 補填資料新增包裹追蹤時發生錯誤：', 'ERROR', error);
-                return errorReply(interaction, `**新增包裹追蹤失敗，原因：${error.message || '未知錯誤'}**`);
+                sendLog(interaction.client, '❌ 補填資料新增物流追蹤時發生錯誤：', 'ERROR', error);
+                return errorReply(interaction, `**新增物流追蹤失敗，原因：${error.message || '未知錯誤'}**`);
             }
         },
 

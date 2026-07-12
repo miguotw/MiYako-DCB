@@ -120,7 +120,7 @@ module.exports = (client) => {
     const packageConfig = getPackageTrackingConfig();
 
     if (!hasTrackTwToken()) {
-        sendLog(client, '⚠️ 包裹追蹤未設定 Track.TW API Token，監聽未啟動。', 'WARN');
+        sendLog(client, '⚠️ 物流追蹤未設定 Track.TW API Token，監聽未啟動。', 'WARN');
         return;
     }
 
@@ -128,6 +128,6 @@ module.exports = (client) => {
         setInterval(() => {
             checkPackages(client);
         }, packageConfig.checkInterval);
-        sendLog(client, `✅ 包裹追蹤監聽已啟動，每 ${Math.round(packageConfig.checkInterval / 60000)} 分鐘檢查一次。`);
+        sendLog(client, `✅ 物流追蹤監聽已啟動，每 ${Math.round(packageConfig.checkInterval / 60000)} 分鐘檢查一次。`);
     });
 };

@@ -16,7 +16,7 @@ MiYako-DCB（みやこ機器人第三代）是以 [discord.js](https://discord.j
 | `/時間戳` | 產生目前或指定時間的 Discord 時間戳 | 使用 Modal |
 | `/網際協定位址資訊` | 查詢 IPv4／IPv6 資訊 | 使用 ip-api.com |
 | `/麥塊` | 查詢 Minecraft 玩家外觀或伺服器狀態 | 使用 Minotar、mcsrvstat.us |
-| `/物流 管理面板` | 新增、更新、封存與追蹤包裹 | 需要 Track.TW Token；資料依使用者存於本機 |
+| `/物流追蹤` | 新增、更新、封存與追蹤包裹 | 需要 Track.TW Token；資料依使用者存於本機 |
 | `/音樂 管理面板` | YouTube 點播、暫停、跳過及查看播放序列 | 使用 yt-dlp、ffmpeg-static 與 Discord 語音 |
 | `/臨時語音頻道 新增／移除` | 管理加入後自動建立專屬頻道的語音入口 | 僅限伺服器管理員 |
 | `/公告` | 將既有訊息製成公告並傳至指定頻道 | 僅限伺服器管理員 |
