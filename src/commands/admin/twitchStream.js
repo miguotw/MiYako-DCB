@@ -110,15 +110,16 @@ module.exports = {
                 channelID: channel.id,
                 roleID: role?.id || ''
             };
-            const index = store.subscriptions.findIndex(item =>
-                item.twitchUserLogin === twitchUserLogin && item.channelID === channel.id
+            const isOverwrite = store.subscriptions.some(item => item.twitchUserLogin === twitchUserLogin);
+            store.subscriptions = store.subscriptions.filter(item => item.twitchUserLogin !== twitchUserLogin);
+            store.subscriptions.push(subscription);
+            store.notifications = store.notifications.filter(item =>
+                item.twitchUserLogin !== twitchUserLogin || item.channelID === channel.id
             );
-            if (index === -1) store.subscriptions.push(subscription);
-            else store.subscriptions[index] = subscription;
             writeGuildStore(interaction.guildId, store);
-            sendLog(interaction.client, `💾 ${interaction.user.tag} 新增 Twitch 直播通知：${twitchUserLogin} -> ${channel.id}`);
+            sendLog(interaction.client, `💾 ${interaction.user.tag} ${isOverwrite ? '覆寫' : '新增'} Twitch 直播通知：${twitchUserLogin} -> ${channel.id}`);
             await interaction.reply({
-                content: `已設定追蹤 **${twitchUserLogin}**，通知將發送至 ${channel}${role ? `，並提及 ${role}` : '，未指定身分組時將提及 @everyone'}。`,
+                content: `已${isOverwrite ? '覆寫' : '新增'}追蹤 **${twitchUserLogin}**，通知將發送至 ${channel}${role ? `，並提及 ${role}` : '，未指定身分組時將提及 @everyone'}。`,
                 ephemeral: true
             });
             interaction.client.checkTwitchStreamStatus?.().catch(error => {
