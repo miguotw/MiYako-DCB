@@ -23,8 +23,6 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('臨時語音頻道')
         .setDescription('管理自動建立的臨時語音頻道入口')
-        .setDMPermission(false)
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addSubcommand(subcommand =>
             subcommand
                 .setName('新增')
@@ -55,16 +53,9 @@ module.exports = {
     async execute(interaction) {
         await interaction.deferReply({ ephemeral: true });
 
-        if (!interaction.inGuild()) {
-            return errorReply(interaction, '**此指令僅能在伺服器中使用！**');
-        }
-        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-            return errorReply(interaction, '**你必須是伺服器的管理員才能使用此指令！**');
-        }
-
         const subcommand = interaction.options.getSubcommand();
         const channel = interaction.options.getChannel('語音頻道', true);
-        sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/臨時語音頻道 ${subcommand} 語音頻道(${channel.id})`);
+        sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/管理 臨時語音頻道 ${subcommand} 語音頻道(${channel.id})`);
 
         try {
             if (channel.guildId !== interaction.guildId || channel.type !== ChannelType.GuildVoice) {

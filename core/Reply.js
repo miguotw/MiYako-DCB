@@ -10,26 +10,38 @@ const EMBED_EMOJI_SUCCESS = config.emoji.success;
 const REPOSITORY = configCommands.about.repository;
 const PROVIDER = configCommands.about.provider;
 
-/**
-// 回覆錯誤訊息給使用者
- * @param {Interaction} interaction - Discord 的 interaction 物件
- * @param {string} errorMessage - 錯誤訊息內容
- * @param {Array<Attachment>} [files] - 附加的檔案（可選）
- */
-async function errorReply(interaction, errorMessage, files = []) {
-    const embed = new EmbedBuilder()
+function createErrorEmbed(errorMessage) {
+    return new EmbedBuilder()
         .setTitle(`${EMBED_EMOJI_ERROR} ┃ 執行時失敗`)
         .setColor(EMBED_COLOR_ERROR)
         .setDescription(
             `${errorMessage}\n-# 如果您認為這是機器人本身的問題，請至 [GitHub 儲存庫](${REPOSITORY}) 建立一個 Issue，或與 <@${PROVIDER}> 聯繫，來報告該問題。`
         );
+}
+
+function createInfoEmbed(successMessage) {
+    return new EmbedBuilder()
+        .setTitle(`${EMBED_EMOJI_SUCCESS} ┃ 操作成功`)
+        .setColor(EMBED_COLOR_SUCCESS)
+        .setDescription(successMessage);
+}
+
+/**
+// 回覆錯誤訊息給使用者
+ * @param {Interaction} interaction - Discord 的 interaction 物件
+ * @param {string} errorMessage - 錯誤訊息內容
+ * @param {Array<Attachment>} [files] - 附加的檔案（可選）
+ * @param {boolean} [ephemeral] - 是否僅讓觸發互動的使用者看見
+ */
+async function errorReply(interaction, errorMessage, files = [], ephemeral = false) {
+    const embed = createErrorEmbed(errorMessage);
 
     const replyOptions = { embeds: [embed], files: files };
 
     if (interaction.deferred || interaction.replied) {
         await interaction.editReply(replyOptions).catch(() => {});
     } else {
-        await interaction.reply(replyOptions).catch(() => {});
+        await interaction.reply({ ...replyOptions, ephemeral }).catch(() => {});
     }
 }
 
@@ -40,10 +52,7 @@ async function errorReply(interaction, errorMessage, files = []) {
  * @param {Array<Attachment>} [files] - 附加的檔案（可選）
  */
 async function infoReply(interaction, successMessage, files = []) {
-    const embed = new EmbedBuilder()
-        .setTitle(`${EMBED_EMOJI_SUCCESS} ┃ 操作成功`)
-        .setColor(EMBED_COLOR_SUCCESS)
-        .setDescription(successMessage);
+    const embed = createInfoEmbed(successMessage);
 
     const replyOptions = { embeds: [embed], files: files };
 
@@ -54,4 +63,4 @@ async function infoReply(interaction, successMessage, files = []) {
     }
 }
 
-module.exports = { errorReply, infoReply };
+module.exports = { createErrorEmbed, createInfoEmbed, errorReply, infoReply };

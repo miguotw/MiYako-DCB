@@ -1,5 +1,5 @@
 const path = require('path');
-const { SlashCommandBuilder, EmbedBuilder, PermissionsBitField } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
@@ -57,15 +57,10 @@ module.exports = {
         try {
             const isGuildCommand = interaction.inGuild();
 
-            // 檢查使用者是否具有管理者權限，私訊中不需要伺服器權限。
-            if (isGuildCommand && !interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-                return errorReply(interaction, '**你必須是伺服器的管理者才能使用此指令！**');
-            }
-
             const amount = interaction.options.getInteger('數量');
             
             // 發送執行指令的摘要到 sendLog
-            sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/刪除訊息 數量(${amount})`, "INFO");
+            sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/管理 刪除訊息 數量(${amount})`, "INFO");
 
             // 確保刪除的訊息數量在合理範圍內 (1-DELETE_LIMIT)
             if (amount < 1 || amount > DELETE_LIMIT) {

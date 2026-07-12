@@ -18,10 +18,11 @@ MiYako-DCB（みやこ機器人第三代）是以 [discord.js](https://discord.j
 | `/麥塊` | 查詢 Minecraft 玩家外觀或伺服器狀態 | 使用 Minotar、mcsrvstat.us |
 | `/物流追蹤` | 新增、更新、封存與追蹤包裹 | 需要 Track.TW Token；資料依使用者存於本機 |
 | `/音樂 管理面板` | YouTube 點播、暫停、跳過及查看播放序列 | 使用 yt-dlp、ffmpeg-static 與 Discord 語音 |
-| `/臨時語音頻道 新增／移除` | 管理加入後自動建立專屬頻道的語音入口 | 僅限伺服器管理員 |
-| `/公告` | 將既有訊息製成公告並傳至指定頻道 | 僅限伺服器管理員 |
-| `/刪除訊息` | 批次或逐筆刪除訊息 | 伺服器內僅限管理員；支援清除 Bot 私訊 |
-| `/用戶資料` | 以 ID、提及或 Username 查詢用戶 |  |
+| `/管理 發送公告` | 將既有訊息製成公告並傳至指定頻道 | 僅限伺服器管理員 |
+| `/管理 擷取用戶資料` | 以 ID、提及或 Username 查詢用戶 | 僅限伺服器管理員 |
+| `/管理 刪除訊息` | 批次或逐筆刪除訊息 | 僅限伺服器管理員 |
+| `/管理 直播通知 新增／移除` | 管理 Twitch 直播通知 | 僅限伺服器管理員 |
+| `/管理 臨時語音頻道 新增／移除` | 管理加入後自動建立專屬頻道的語音入口 | 僅限伺服器管理員 |
 
 ### 自動事件與紀錄
 
@@ -79,7 +80,7 @@ MiYako-DCB/
 │   └── sendLog.js              # 終端與 Discord 頻道日誌
 ├── src/
 │   ├── commands/               # Slash Commands
-│   │   └── admin/              # 管理用途指令（權限仍由各指令自行檢查）
+│   │   └── admin/              # 自動限制為僅限伺服器管理員使用的指令
 │   └── modules/
 │       ├── event/              # 歡迎訊息、關鍵字、Twitch、物流排程
 │       └── logger/             # 成員、訊息、身分組、語音紀錄
@@ -103,6 +104,10 @@ MiYako-DCB/
 6. Client ready 後設定 Hitokoto 活動狀態；Twitch 與物流模組也在 ready 後啟動各自的輪詢排程。
 
 程式大量使用 `process.cwd()` 與相對路徑，因此工作目錄必須是儲存庫根目錄。載入器沒有功能開關：放進 `src/modules/` 或 `src/commands/` 的每個 `.js` 都會被執行；個別模組是否啟用應由設定與模組本身控制。
+
+`src/commands/admin/` 是管理指令聚合與權限政策目錄。載入器不會個別註冊其中的頂層指令，而會自動組合成 `/管理`：一般指令成為 `/管理 <指令>`，原本已有子指令的模組成為 `/管理 <指令群組> <子指令>`。聚合後的名稱直接沿用模組 `data.name`，不套用額外別名。
+
+聚合後會自動禁止私訊、將 Discord 預設成員權限設為 Administrator，並在執行 Slash Command、Modal、Button 或 String Select Menu handler 前再次驗證管理員權限。將指令檔移入此目錄即可同時套用 `/管理` 命名與權限限制，移出即可取消；指令模組本身不需重複撰寫管理員權限判斷。
 
 ## 擴充方式
 
@@ -145,7 +150,24 @@ module.exports = client => {
 };
 ```
 
-需要設定時，將可公開的預設欄位同步加入 `config_example/`，並由 `core/config.js` 匯出的 `config`、`configCommands` 或 `configModules` 讀取。共用 Discord 回覆優先使用 `core/Reply.js`，操作與錯誤紀錄使用 `core/sendLog.js`。
+需要設定時，將可公開的預設欄位同步加入 `config_example/`，並由 `core/config.js` 匯出的 `config`、`configCommands` 或 `configModules` 讀取。操作與錯誤紀錄使用 `core/sendLog.js`。
+
+### 使用者回覆規範
+
+除指令功能本身需要呈現的 Embed 外，所有向使用者表示**成功、失敗或錯誤**的訊息，都必須使用 `core/Reply.js` 提供的共用函式包裝成 Embed：
+
+```js
+const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
+
+await infoReply(interaction, '**操作已完成！**');
+await errorReply(interaction, '**操作失敗，請稍後再試！**');
+```
+
+- 成功訊息使用 `infoReply(interaction, message, files?)`。
+- 失敗、驗證不通過及執行錯誤使用 `errorReply(interaction, message, files?)`。
+- 不要在個別指令中為這類狀態回覆自行建立 `EmbedBuilder`，也不要硬編碼其顏色或 Emoji。
+- 共用樣式的顏色與 Emoji 由 `config.yml` 的 `embed.color.success`、`embed.color.error`、`emoji.success`、`emoji.error` 定義；新增或調整預設值時，必須同步更新 `config_example/config.yml`。
+- `infoReply` 與 `errorReply` 已兼容尚未回覆、已 `deferReply()` 及已回覆的 Interaction，呼叫端不需自行切換 `reply()`／`editReply()`。
 
 ## 資料與外部服務
 
@@ -162,7 +184,7 @@ module.exports = client => {
 
 部署物流功能時，`assets/packageTracking/` 必須可寫且需納入獨立備份；該目錄不會進入 Git。多個 Bot 程序共用同一目錄也沒有檔案鎖定機制，不建議以多程序模式執行。
 
-`/臨時語音頻道 新增` 可設定多個語音入口及個別前綴；省略前綴會清除該入口原有前綴。真人成員加入入口後，Bot 會在相同分類建立繼承入口權限的 `前綴暱稱` 頻道（前綴與暱稱直接相連）並移動成員。`/臨時語音頻道 移除` 只停止入口建立新頻道，既有頻道仍會繼續管理。空頻道經 `configModules.yml` 的 `temporaryVoice.deleteAfterMinutes`（預設 5 分鐘）後刪除；入口與受管頻道資料會在 Bot 重啟後恢復。`assets/temporaryVoice/` 必須可寫並應獨立備份。
+`/管理 臨時語音頻道 新增` 可設定多個語音入口及個別前綴；省略前綴會清除該入口原有前綴。真人成員加入入口後，Bot 會在相同分類建立繼承入口權限的 `前綴暱稱` 頻道（前綴與暱稱直接相連）並移動成員。`/管理 臨時語音頻道 移除` 只停止入口建立新頻道，既有頻道仍會繼續管理。空頻道經 `configModules.yml` 的 `temporaryVoice.deleteAfterMinutes`（預設 5 分鐘）後刪除；入口與受管頻道資料會在 Bot 重啟後恢復。`assets/temporaryVoice/` 必須可寫並應獨立備份。
 
 ## 開發與驗證現況
 

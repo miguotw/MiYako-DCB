@@ -1,5 +1,5 @@
 const path = require('path');
-const { SlashCommandBuilder, EmbedBuilder, PermissionsBitField, escapeMarkdown } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, escapeMarkdown } = require('discord.js');
 const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { errorReply } = require(path.join(process.cwd(), 'core/Reply'));
@@ -63,10 +63,8 @@ async function resolveUser(interaction, rawQuery) {
 
 module.exports = {
     data: new SlashCommandBuilder()
-        .setName('用戶資料')
+        .setName('擷取用戶資料')
         .setDescription('透過 Discord 數字 ID 或英文 Username 查詢用戶基本資料')
-        .setDMPermission(false)
-        .setDefaultMemberPermissions(PermissionsBitField.Flags.Administrator)
         .addStringOption(option =>
             option.setName('用戶')
                 .setDescription('輸入數字 ID、@提及或英文 Username（不含 @ 亦可）')
@@ -76,18 +74,9 @@ module.exports = {
         await interaction.deferReply();
 
         const rawQuery = interaction.options.getString('用戶', true);
-        sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/用戶資料 用戶(${rawQuery})`, 'INFO');
+        sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/管理 擷取用戶資料 用戶(${rawQuery})`, 'INFO');
 
         try {
-            if (!interaction.inGuild()) {
-                return errorReply(interaction, '**此指令不支援在私訊中使用！**');
-            }
-
-            // 檢查使用者是否具有管理者權限
-            if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-                return errorReply(interaction, '**你必須是伺服器的管理者才能使用此指令！**');
-            }
-
             const { user, member } = await resolveUser(interaction, rawQuery);
             const avatarURL = user.displayAvatarURL({ extension: 'png', size: 1024, forceStatic: false });
             const bannerURL = user.bannerURL({ extension: 'png', size: 1024, forceStatic: false });

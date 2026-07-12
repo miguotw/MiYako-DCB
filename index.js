@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { Client, GatewayIntentBits, REST, Routes, Collection } = require('discord.js');
 const { config } = require(path.join(process.cwd(), 'core/config'));
+const { applyAdminCommandPolicy, createAdminCommand, isAdminCommandPath } = require(path.join(process.cwd(), 'core/commandPolicy'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
 const { getHitokoto } = require(path.join(process.cwd(), 'util/getHitokoto'));
@@ -46,6 +47,18 @@ loadModules('./src/modules');
 client.commands = new Collection();
 client.modalSubmitHandlers = {};
 const commands = [];
+const COMMANDS_ROOT = path.resolve('./src/commands');
+const adminCommands = [];
+
+function registerCommand(command, fileName) {
+    client.commands.set(command.data.name, command);
+    commands.push(command.data.toJSON());
+    sendLog(client, `✅ 已載入指令：${fileName}`);
+
+    if (command.modalSubmitHandlers) {
+        Object.assign(client.modalSubmitHandlers, command.modalSubmitHandlers);
+    }
+}
 
 function loadCommands(dir) {
     const files = fs.readdirSync(dir, { withFileTypes: true });
@@ -55,19 +68,19 @@ function loadCommands(dir) {
             loadCommands(fullPath);
         } else if (file.isFile() && file.name.endsWith('.js')) {
             const command = require(path.resolve(fullPath));
-            client.commands.set(command.data.name, command);
-            commands.push(command.data.toJSON());
-            sendLog(client, `✅ 已載入指令：${file.name}`);
-
-            // 收集 modalSubmitHandlers
-            if (command.modalSubmitHandlers) {
-                Object.assign(client.modalSubmitHandlers, command.modalSubmitHandlers);
+            if (isAdminCommandPath(fullPath, COMMANDS_ROOT)) {
+                adminCommands.push(applyAdminCommandPolicy(command));
+                sendLog(client, `✅ 已載入管理指令模組：${file.name}`);
+            } else {
+                registerCommand(command, file.name);
             }
         }
     }
 }
 
 loadCommands('./src/commands');
+const adminCommand = createAdminCommand(adminCommands);
+if (adminCommand) registerCommand(adminCommand, 'admin/');
 
 function getInteractionHandler(handlers, customId) {
     if (!handlers) return null;
