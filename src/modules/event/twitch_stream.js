@@ -91,6 +91,10 @@ function getDisplayName(stream, user) {
     return user?.display_name || stream.user_name || stream.user_login;
 }
 
+function getEmbedColor(user) {
+    return /^#[0-9a-f]{6}$/i.test(user?.twitchColor || '') ? user.twitchColor : EMBED_COLOR;
+}
+
 function buildStreamEmbed(stream, user, twitchUserLogin, isOffline = false) {
     const streamUrl = `https://www.twitch.tv/${twitchUserLogin}`;
     const displayName = getDisplayName(stream, user);
@@ -105,7 +109,7 @@ function buildStreamEmbed(stream, user, twitchUserLogin, isOffline = false) {
         : `未知${isOffline ? ' (已離線)' : ''}`;
     const embed = new EmbedBuilder()
         .setAuthor({ name: `🍘 ┃ ${displayName} 開始直播了` })
-        .setColor(EMBED_COLOR)
+        .setColor(getEmbedColor(user))
         .setTitle(stream.title || `${displayName} 開始直播了！`)
         .setURL(streamUrl)
         .addFields(
@@ -188,9 +192,34 @@ async function fetchUsers(streamConfig) {
     return response.data.data || [];
 }
 
+async function fetchUserColors(streamConfig, users) {
+    if (!users.length) return new Map();
+
+    const token = await getTwitchAccessToken(streamConfig);
+    const params = new URLSearchParams();
+    for (const user of users) params.append('user_id', user.id);
+
+    const response = await axios.get(`https://api.twitch.tv/helix/chat/color?${params.toString()}`, {
+        headers: {
+            'Client-Id': streamConfig.twitchClientID,
+            Authorization: `Bearer ${token}`
+        }
+    });
+
+    return new Map((response.data.data || []).map(item => [item.user_id, item.color]));
+}
+
 function getMentionForTarget(guild, target) {
     const roleID = String(target.roleID || '').trim();
     const role = isFilled(roleID) ? guild.roles.cache.get(roleID) : null;
+
+    // @everyone 的身分組 ID 等同伺服器 ID，不能套用一般身分組 mention 格式。
+    if (!roleID || roleID === guild.id) {
+        return {
+            content: '@everyone',
+            allowedMentions: { parse: ['everyone'] }
+        };
+    }
 
     if (role) {
         return {
@@ -199,7 +228,7 @@ function getMentionForTarget(guild, target) {
         };
     }
 
-    // role 未設定或不存在時，依既有通知規則退回 @everyone。
+    // role 不存在時，依既有通知規則退回 @everyone。
     return {
         content: '@everyone',
         allowedMentions: { parse: ['everyone'] }
@@ -384,6 +413,11 @@ async function checkStreamStatus(client, streamConfig) {
             fetchStreams(streamConfig),
             fetchUsers(streamConfig)
         ]);
+        const userColors = await fetchUserColors(streamConfig, users).catch(error => {
+            sendLog(client, '⚠️ 無法取得 Twitch 使用者色彩，Embed 將使用預設顏色。', 'WARN', error);
+            return new Map();
+        });
+        for (const user of users) user.twitchColor = userColors.get(user.id) || '';
         const liveStreams = new Map(streams.map(stream => [stream.user_login.toLowerCase(), stream]));
         const userProfiles = new Map(users.map(user => [user.login.toLowerCase(), user]));
 
