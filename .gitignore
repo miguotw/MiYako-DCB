@@ -15,3 +15,5 @@ assets/packageTracking/*
 assets/minecraft/temp/*
 assets/music/*
 assets/temporaryVoice/*
+assets/twitch_stream/*.json
+assets/twitch_stream/*.tmp

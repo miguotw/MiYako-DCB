@@ -1,13 +1,13 @@
 const path = require('path');
 /**
  * Twitch Helix 輪詢與 Discord 通知生命週期。
- * streamStates 只保存本次程序觀察到的直播與已發訊息；notifyOnStartupLive 決定
- * 重啟時遇到既有直播是否補發通知。
+ * 直播中的通知會依伺服器持久化，讓程序重啟後能接續編輯原訊息。
  */
 const axios = require('axios');
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, Events } = require('discord.js');
 const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
+const { getAllSubscriptions, readGuildStore, saveNotificationState, writeGuildStore } = require(path.join(process.cwd(), 'util/twitchStreamStore'));
 
 const EMBED_COLOR = config.embed.color.default;
 const STREAM_CONFIG = configCommands.admin.stream || {};
@@ -24,26 +24,48 @@ let isEditing = false;
 
 /** 正規化寬鬆 YAML 輸入，並統一套用輪詢間隔下限。 */
 function getStreamConfig() {
-    const twitchUserLoginConfig = STREAM_CONFIG.twitchUserLogin;
-    const twitchUserLogins = Array.isArray(twitchUserLoginConfig)
-        ? twitchUserLoginConfig
-        : [twitchUserLoginConfig];
-
     return {
         enable: STREAM_CONFIG.enable === true,
-        twitchUserLogins: [...new Set(twitchUserLogins.map(login => String(login || '').trim()).filter(isFilled))],
         twitchClientID: String(STREAM_CONFIG.twitchClientID || '').trim(),
         twitchClientSecret: String(STREAM_CONFIG.twitchClientSecret || '').trim(),
         checkInterval: Math.max((Number(STREAM_CONFIG.checkInterval) || DEFAULT_CHECK_INTERVAL_MINUTES) * MS_PER_MINUTE, MS_PER_MINUTE),
         editInterval: Math.max((Number(STREAM_CONFIG.editInterval) || DEFAULT_EDIT_INTERVAL_MINUTES) * MS_PER_MINUTE, MS_PER_MINUTE),
         notifyOnStartupLive: STREAM_CONFIG.notifyOnStartupLive === true,
-        messages: Array.isArray(STREAM_CONFIG.message) ? STREAM_CONFIG.message : [],
-        targets: Array.isArray(STREAM_CONFIG.targets) ? STREAM_CONFIG.targets : []
+        messages: Array.isArray(STREAM_CONFIG.message) ? STREAM_CONFIG.message : []
+    };
+}
+
+function getRuntimeStreamConfig(client, streamConfig) {
+    const subscriptions = getAllSubscriptions([...client.guilds.cache.keys()])
+        .filter(item => isFilled(item.twitchUserLogin) && isFilled(item.channelID));
+    return {
+        ...streamConfig,
+        twitchUserLogins: [...new Set(subscriptions.map(item => item.twitchUserLogin))],
+        targets: subscriptions
     };
 }
 
 function isFilled(value) {
     return typeof value === 'string' && value.trim() !== '';
+}
+
+function persistLiveState(state) {
+    for (const message of state.notificationMessages) {
+        saveNotificationState(state.twitchUserLogin, message, state.lastStream);
+    }
+}
+
+function removePersistedState(twitchUserLogin, notificationMessages) {
+    const stateKey = twitchUserLogin.toLowerCase();
+    const guildIDs = new Set(notificationMessages
+        .map(message => String(message.guildId || message.guild?.id || ''))
+        .filter(isFilled));
+
+    for (const guildID of guildIDs) {
+        const store = readGuildStore(guildID);
+        store.notifications = store.notifications.filter(item => item.twitchUserLogin !== stateKey);
+        writeGuildStore(guildID, store);
+    }
 }
 
 function getRandomMessage(messages) {
@@ -72,6 +94,12 @@ function getDisplayName(stream, user) {
 function buildStreamEmbed(stream, user, twitchUserLogin, isOffline = false) {
     const streamUrl = `https://www.twitch.tv/${twitchUserLogin}`;
     const displayName = getDisplayName(stream, user);
+    const tags = (Array.isArray(stream.tags) ? stream.tags : [])
+        .map(tag => String(tag || '').trim())
+        .filter(isFilled);
+    const tagFields = tags.length
+        ? [{ name: '標籤', value: tags.map(tag => `\`${tag.replace(/`/g, "'")}\``).join('  '), inline: false }]
+        : [];
     const startedAt = stream.started_at
         ? `<t:${Math.floor(new Date(stream.started_at).getTime() / 1000)}:R>${isOffline ? ' (已離線)' : ''}`
         : `未知${isOffline ? ' (已離線)' : ''}`;
@@ -83,7 +111,8 @@ function buildStreamEmbed(stream, user, twitchUserLogin, isOffline = false) {
         .addFields(
             { name: '直播分類', value: stream.game_name || '未設定', inline: true },
             { name: '觀看人數', value: `${stream.viewer_count ?? 0}`, inline: true },
-            { name: '開播時間', value: startedAt, inline: true }
+            { name: '開播時間', value: startedAt, inline: true },
+            ...tagFields
         )
         .setTimestamp();
 
@@ -183,7 +212,10 @@ async function getNotificationChannel(guild, channelID) {
 
 async function notifyTargets(client, stream, user, streamConfig) {
     const notificationMessages = [];
-    const targets = streamConfig.targets.filter(target => isFilled(target.guildID) && isFilled(target.channelID));
+    const stateKey = String(stream.user_login || '').toLowerCase();
+    const targets = streamConfig.targets.filter(target =>
+        target.twitchUserLogin === stateKey && isFilled(target.guildID) && isFilled(target.channelID)
+    );
     if (!targets.length) {
         sendLog(client, '⚠️ Twitch 直播通知未設定任何有效伺服器與頻道，略過通知。', 'WARN');
         return notificationMessages;
@@ -217,7 +249,8 @@ async function notifyTargets(client, stream, user, streamConfig) {
                 allowedMentions: mention.allowedMentions
             });
             notificationMessages.push(notificationMessage);
-            sendLog(client, `✅ 已發送 Twitch 開播通知至「${guild.name}」#${channel.name}`);
+            saveNotificationState(twitchUserLogin, notificationMessage, stream);
+            sendLog(client, `✅ 已發送 Twitch 開播通知至「${guild.name}」#${channel.name}：${notificationMessage.url}`);
         } catch (error) {
             sendLog(client, '❌ 發送 Twitch 開播通知時發生錯誤：', 'ERROR', error);
         }
@@ -264,6 +297,7 @@ async function updateNotifications(client, state) {
             sendLog(client, `❌ 更新 Twitch 直播通知時發生錯誤：${twitchUserLogin}`, 'ERROR', result.reason);
         }
     }
+    persistLiveState(state);
 }
 
 async function editLiveNotifications(client) {
@@ -295,12 +329,57 @@ async function markNotificationsOffline(client, state, user, twitchUserLogin) {
     }
 }
 
+async function restoreNotificationStates(client, streamConfig) {
+    const configuredLogins = new Set(streamConfig.twitchUserLogins.map(login => login.toLowerCase()));
+    const guildIDs = [...client.guilds.cache.keys()];
+
+    for (const guildID of guildIDs) {
+        const store = readGuildStore(guildID);
+        const validNotifications = [];
+        const guild = client.guilds.cache.get(guildID);
+
+        if (!guild) continue;
+
+        for (const saved of store.notifications) {
+            const stateKey = String(saved.twitchUserLogin || '').toLowerCase();
+            if (!configuredLogins.has(stateKey) || !isFilled(String(saved.channelID || '')) || !isFilled(String(saved.messageID || ''))) continue;
+
+            const channel = await getNotificationChannel(guild, String(saved.channelID));
+            const message = await channel?.messages?.fetch(String(saved.messageID)).catch(() => null);
+            if (!message || !saved.stream) continue;
+
+            validNotifications.push(saved);
+            const existingState = streamStates.get(stateKey);
+            if (existingState) {
+                existingState.notificationMessages.push(message);
+                continue;
+            }
+
+            const configuredLogin = streamConfig.twitchUserLogins.find(login => login.toLowerCase() === stateKey) || stateKey;
+            streamStates.set(stateKey, createLiveState(saved.stream, null, configuredLogin, [message]));
+        }
+
+        if (validNotifications.length !== store.notifications.length) {
+            writeGuildStore(guildID, { ...store, notifications: validNotifications });
+        }
+    }
+
+    const restoredCount = [...streamStates.values()].reduce((count, state) => count + state.notificationMessages.length, 0);
+    if (restoredCount) sendLog(client, `✅ 已恢復 ${restoredCount} 則 Twitch 直播通知，將接續更新。`);
+}
+
 async function checkStreamStatus(client, streamConfig) {
     // 防止 API 回應慢於 checkInterval 時兩輪並行並重複通知。
     if (isChecking) return;
     isChecking = true;
 
     try {
+        streamConfig = getRuntimeStreamConfig(client, streamConfig);
+        const configuredLogins = new Set(streamConfig.twitchUserLogins);
+        for (const [stateKey, savedState] of streamStates) {
+            if (!configuredLogins.has(stateKey)) savedState.isLive = false;
+        }
+        if (!streamConfig.twitchUserLogins.length) return;
         const [streams, users] = await Promise.all([
             fetchStreams(streamConfig),
             fetchUsers(streamConfig)
@@ -336,12 +415,33 @@ async function checkStreamStatus(client, streamConfig) {
             }
 
             if (state.isLive && currentlyLive) {
+                if (state.lastStream?.started_at && state.lastStream.started_at !== stream.started_at) {
+                    await markNotificationsOffline(client, state, user, twitchUserLogin);
+                    removePersistedState(twitchUserLogin, state.notificationMessages);
+                    const notificationMessages = await notifyTargets(client, stream, user, streamConfig);
+                    streamStates.set(stateKey, createLiveState(stream, user, twitchUserLogin, notificationMessages));
+                    continue;
+                }
+                const targets = streamConfig.targets.filter(target => target.twitchUserLogin === stateKey);
+                const allowedTargets = new Set(targets.map(target => `${target.guildID}:${target.channelID}`));
+                state.notificationMessages = state.notificationMessages.filter(message =>
+                    allowedTargets.has(`${message.guildId || message.guild?.id}:${message.channelId}`)
+                );
+                const existingTargets = new Set(state.notificationMessages.map(message =>
+                    `${message.guildId || message.guild?.id}:${message.channelId}`
+                ));
+                const missingTargets = targets.filter(target => !existingTargets.has(`${target.guildID}:${target.channelID}`));
+                if (missingTargets.length) {
+                    const newMessages = await notifyTargets(client, stream, user, { ...streamConfig, targets: missingTargets });
+                    state.notificationMessages.push(...newMessages);
+                }
                 updateLiveState(state, stream, user);
                 continue;
             }
 
             if (state.isLive && !currentlyLive) {
                 await markNotificationsOffline(client, state, user, twitchUserLogin);
+                removePersistedState(twitchUserLogin, state.notificationMessages);
                 streamStates.set(stateKey, { initialized: true, isLive: false });
                 sendLog(client, `ℹ️ Twitch 主播 ${twitchUserLogin} 已結束直播。`);
             }
@@ -358,13 +458,18 @@ module.exports = (client) => {
 
     if (!streamConfig.enable) return;
 
-    if (!streamConfig.twitchUserLogins.length || !isFilled(streamConfig.twitchClientID) || !isFilled(streamConfig.twitchClientSecret)) {
-        sendLog(client, '⚠️ Twitch 直播監聽設定不完整，請檢查 twitchUserLogin、twitchClientID、twitchClientSecret。', 'WARN');
+    if (!isFilled(streamConfig.twitchClientID) || !isFilled(streamConfig.twitchClientSecret)) {
+        sendLog(client, '⚠️ Twitch 直播監聽設定不完整，請檢查 twitchClientID、twitchClientSecret。', 'WARN');
         return;
     }
 
-    client.once(Events.ClientReady, () => {
-        checkStreamStatus(client, streamConfig);
+    client.once(Events.ClientReady, async () => {
+        try {
+            await restoreNotificationStates(client, getRuntimeStreamConfig(client, streamConfig));
+        } catch (error) {
+            sendLog(client, '❌ 恢復 Twitch 直播通知暫存時發生錯誤：', 'ERROR', error);
+        }
+        await checkStreamStatus(client, streamConfig);
         setInterval(() => {
             checkStreamStatus(client, streamConfig);
         }, streamConfig.checkInterval);

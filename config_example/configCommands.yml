@@ -27,14 +27,11 @@ admin:
 
   #-----------------------------
   # Twitch 直播自動通知設定：
+  # 追蹤的 Twitch 頻道與 Discord 通知目標請使用 /直播通知 管理。
   stream:
 
     # 是否啟用 Twitch 直播自動通知。
     enable: true
-
-    # 要監控的 Twitch 使用者登入名稱，可設定多個。
-    twitchUserLogin:
-      - " "
 
     # Twitch Developer Console 中的 Client ID。
     twitchClientID: " "
@@ -56,15 +53,6 @@ admin:
       - "現在正直播精彩內容，來一起加入吧！"
       - "直播現在開始！別錯過，一起觀看吧！"
       - "開播啦！一起享受這場直播！"
-
-    # 要發送通知的 Discord 伺服器、頻道與身分組。
-    # 若指定伺服器找不到 roleID，將嘗試提及 @everyone。
-    # 若沒有設定任何有效 guildID/channelID，將不執行通知。
-    targets:
-      - guildID: " "
-        channelID: " "
-        roleID: " "
-
 
 #-------------------------------
 # /關於 相關設定：
