@@ -8,6 +8,10 @@ Startup:
   # 機器人的 ID
   clientID: " "
 
+  # 管理聚合指令的前綴名稱，例如設定為 admin 時會註冊 /admin。
+  # 需符合 Discord Slash Command 名稱規則，長度為 1～32 個字元且英文必須為小寫。
+  adminCommandName: "admin"
+
   # 機器人的活動狀態，可參考：0 正在玩、1 正在直播、2 正在聽、3 正在看、5競爭
   activityType: 0
 

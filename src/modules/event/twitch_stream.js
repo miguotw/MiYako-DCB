@@ -10,7 +10,7 @@ const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { getAllSubscriptions, readGuildStore, saveNotificationState, writeGuildStore } = require(path.join(process.cwd(), 'util/twitchStreamStore'));
 
 const EMBED_COLOR = config.embed.color.default;
-const STREAM_CONFIG = configCommands.admin.stream || {};
+const STREAM_CONFIG = configCommands.stream || {};
 const TOKEN_REFRESH_MARGIN_MS = 60 * 1000;
 const DEFAULT_CHECK_INTERVAL_MINUTES = 2;
 const DEFAULT_EDIT_INTERVAL_MINUTES = 5;
@@ -26,7 +26,6 @@ let pendingForcedCheck = false;
 /** 正規化寬鬆 YAML 輸入，並統一套用輪詢間隔下限。 */
 function getStreamConfig() {
     return {
-        enable: STREAM_CONFIG.enable === true,
         twitchClientID: String(STREAM_CONFIG.twitchClientID || '').trim(),
         twitchClientSecret: String(STREAM_CONFIG.twitchClientSecret || '').trim(),
         checkInterval: Math.max((Number(STREAM_CONFIG.checkInterval) || DEFAULT_CHECK_INTERVAL_MINUTES) * MS_PER_MINUTE, MS_PER_MINUTE),
@@ -497,8 +496,6 @@ async function checkStreamStatus(client, streamConfig, forceNotifyCurrentLive = 
 
 module.exports = (client) => {
     const streamConfig = getStreamConfig();
-
-    if (!streamConfig.enable) return;
 
     if (!isFilled(streamConfig.twitchClientID) || !isFilled(streamConfig.twitchClientSecret)) {
         sendLog(client, '⚠️ Twitch 直播監聽設定不完整，請檢查 twitchClientID、twitchClientSecret。', 'WARN');

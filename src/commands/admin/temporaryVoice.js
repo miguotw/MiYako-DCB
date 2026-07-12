@@ -4,6 +4,7 @@ const {
     PermissionFlagsBits,
     SlashCommandBuilder
 } = require('discord.js');
+const { getAdminCommandPath } = require(path.join(process.cwd(), 'core/commandPolicy'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
 const {
@@ -55,7 +56,7 @@ module.exports = {
 
         const subcommand = interaction.options.getSubcommand();
         const channel = interaction.options.getChannel('語音頻道', true);
-        sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/管理 臨時語音頻道 ${subcommand} 語音頻道(${channel.id})`);
+        sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：${getAdminCommandPath('臨時語音頻道', subcommand)} 語音頻道(${channel.id})`);
 
         try {
             if (channel.guildId !== interaction.guildId || channel.type !== ChannelType.GuildVoice) {

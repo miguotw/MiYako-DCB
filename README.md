@@ -18,11 +18,11 @@ MiYako-DCB（みやこ機器人第三代）是以 [discord.js](https://discord.j
 | `/麥塊` | 查詢 Minecraft 玩家外觀或伺服器狀態 | 使用 Minotar、mcsrvstat.us |
 | `/物流追蹤` | 新增、更新、封存與追蹤包裹 | 需要 Track.TW Token；資料依使用者存於本機 |
 | `/音樂 管理面板` | YouTube 點播、暫停、跳過及查看播放序列 | 使用 yt-dlp、ffmpeg-static 與 Discord 語音 |
-| `/管理 發送公告` | 將既有訊息製成公告並傳至指定頻道 | 僅限伺服器管理員 |
-| `/管理 擷取用戶資料` | 以 ID、提及或 Username 查詢用戶 | 僅限伺服器管理員 |
-| `/管理 刪除訊息` | 批次或逐筆刪除訊息 | 僅限伺服器管理員 |
-| `/管理 直播通知 新增／移除` | 管理 Twitch 直播通知 | 僅限伺服器管理員 |
-| `/管理 臨時語音頻道 新增／移除` | 管理加入後自動建立專屬頻道的語音入口 | 僅限伺服器管理員 |
+| `/admin 發送公告` | 將既有訊息製成公告並傳至指定頻道 | 僅限伺服器管理員 |
+| `/admin 擷取用戶資料` | 以 ID、提及或 Username 查詢用戶 | 僅限伺服器管理員 |
+| `/admin 刪除訊息` | 批次或逐筆刪除訊息 | 僅限伺服器管理員 |
+| `/admin 直播通知 新增／移除` | 管理 Twitch 直播通知 | 僅限伺服器管理員 |
+| `/admin 臨時語音頻道 新增／移除` | 管理加入後自動建立專屬頻道的語音入口 | 僅限伺服器管理員 |
 
 ### 自動事件與紀錄
 
@@ -105,9 +105,9 @@ MiYako-DCB/
 
 程式大量使用 `process.cwd()` 與相對路徑，因此工作目錄必須是儲存庫根目錄。載入器沒有功能開關：放進 `src/modules/` 或 `src/commands/` 的每個 `.js` 都會被執行；個別模組是否啟用應由設定與模組本身控制。
 
-`src/commands/admin/` 是管理指令聚合與權限政策目錄。載入器不會個別註冊其中的頂層指令，而會自動組合成 `/管理`：一般指令成為 `/管理 <指令>`，原本已有子指令的模組成為 `/管理 <指令群組> <子指令>`。聚合後的名稱直接沿用模組 `data.name`，不套用額外別名。
+`src/commands/admin/` 是管理指令聚合與權限政策目錄。載入器不會個別註冊其中的頂層指令，而會自動組合成 `/admin`：一般指令成為 `/admin <指令>`，原本已有子指令的模組成為 `/admin <指令群組> <子指令>`。`admin` 是 `config.yml` 內 `Startup.adminCommandName` 的預設值，可依部署需求變更；名稱需符合 Discord Slash Command 規則。管理指令的日誌路徑應以 `core/commandPolicy.js` 的 `getAdminCommandPath()` 組合，禁止硬編碼 `/admin`，讓設定變更能同步反映在指令註冊與日誌。聚合後的子指令名稱直接沿用模組 `data.name`，不套用額外別名。
 
-聚合後會自動禁止私訊、將 Discord 預設成員權限設為 Administrator，並在執行 Slash Command、Modal、Button 或 String Select Menu handler 前再次驗證管理員權限。將指令檔移入此目錄即可同時套用 `/管理` 命名與權限限制，移出即可取消；指令模組本身不需重複撰寫管理員權限判斷。
+聚合後會自動禁止私訊、將 Discord 預設成員權限設為 Administrator，並在執行 Slash Command、Modal、Button 或 String Select Menu handler 前再次驗證管理員權限。將指令檔移入此目錄即可同時套用 `/admin` 命名與權限限制，移出即可取消；指令模組本身不需重複撰寫管理員權限判斷。
 
 ## 擴充方式
 
@@ -184,7 +184,7 @@ await errorReply(interaction, '**操作失敗，請稍後再試！**');
 
 部署物流功能時，`assets/packageTracking/` 必須可寫且需納入獨立備份；該目錄不會進入 Git。多個 Bot 程序共用同一目錄也沒有檔案鎖定機制，不建議以多程序模式執行。
 
-`/管理 臨時語音頻道 新增` 可設定多個語音入口及個別前綴；省略前綴會清除該入口原有前綴。真人成員加入入口後，Bot 會在相同分類建立繼承入口權限的 `前綴暱稱` 頻道（前綴與暱稱直接相連）並移動成員。`/管理 臨時語音頻道 移除` 只停止入口建立新頻道，既有頻道仍會繼續管理。空頻道經 `configModules.yml` 的 `temporaryVoice.deleteAfterMinutes`（預設 5 分鐘）後刪除；入口與受管頻道資料會在 Bot 重啟後恢復。`assets/temporaryVoice/` 必須可寫並應獨立備份。
+`/admin 臨時語音頻道 新增` 可設定多個語音入口及個別前綴；省略前綴會清除該入口原有前綴。真人成員加入入口後，Bot 會在相同分類建立繼承入口權限的 `前綴暱稱` 頻道（前綴與暱稱直接相連）並移動成員。`/admin 臨時語音頻道 移除` 只停止入口建立新頻道，既有頻道仍會繼續管理。空頻道經 `configModules.yml` 的 `temporaryVoice.deleteAfterMinutes`（預設 5 分鐘）後刪除；入口與受管頻道資料會在 Bot 重啟後恢復。`assets/temporaryVoice/` 必須可寫並應獨立備份。
 
 ## 開發與驗證現況
 

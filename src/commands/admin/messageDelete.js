@@ -1,14 +1,15 @@
 const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
+const { getAdminCommandPath } = require(path.join(process.cwd(), 'core/commandPolicy'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
 
 // 導入設定檔內容
 const EMBED_COLOR = config.embed.color.default;
 const LOADING_EMOJI = config.emoji.loading;
-const EMBED_EMOJI = configCommands.admin.messageDelete.emoji;
-const DELETE_LIMIT = Math.min(configCommands.admin.messageDelete.deleteLimit || 100, 100); //讀取最大刪除數量，當設定值超過 100 時，限制最大值為 100
+const EMBED_EMOJI = configCommands.messageDelete.emoji;
+const DELETE_LIMIT = Math.min(configCommands.messageDelete.deleteLimit || 100, 100); //讀取最大刪除數量，當設定值超過 100 時，限制最大值為 100
 const DISCORD_BULK_DELETE_LIMIT_MS = 14 * 24 * 60 * 60 * 1000;
 const MESSAGE_DELETE_DELAY_MS = 1000;
 
@@ -22,7 +23,7 @@ async function deleteMessagesIndividually(interaction, messages) {
 
             await new Promise(resolve => setTimeout(resolve, MESSAGE_DELETE_DELAY_MS));
         } catch (error) {
-            sendLog(interaction.client, `❌ 在執行 /刪除訊息 指令時發生錯誤，無法刪除訊息 ID: ${message.id}`, "ERROR", error);
+            sendLog(interaction.client, `❌ 在執行 ${getAdminCommandPath('刪除訊息')} 指令時發生錯誤，無法刪除訊息 ID: ${message.id}`, "ERROR", error);
             throw new Error(`無法刪除訊息 ID: ${message.id}`);
         }
     }
@@ -60,7 +61,7 @@ module.exports = {
             const amount = interaction.options.getInteger('數量');
             
             // 發送執行指令的摘要到 sendLog
-            sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/管理 刪除訊息 數量(${amount})`, "INFO");
+            sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：${getAdminCommandPath('刪除訊息')} 數量(${amount})`, "INFO");
 
             // 確保刪除的訊息數量在合理範圍內 (1-DELETE_LIMIT)
             if (amount < 1 || amount > DELETE_LIMIT) {
@@ -137,7 +138,7 @@ module.exports = {
 
         } catch (error) {
             // 錯誤處理
-            sendLog(interaction.client, `❌ 在執行 /刪除訊息 指令時發生錯誤`, "ERROR", error); // 記錄錯誤日誌
+            sendLog(interaction.client, `❌ 在執行 ${getAdminCommandPath('刪除訊息')} 指令時發生錯誤`, "ERROR", error); // 記錄錯誤日誌
             return errorReply(interaction, `**${error.message || '發生未預期的錯誤，請向開發者回報！'}**`); // 向用戶顯示錯誤訊息
         }
     }

@@ -1,58 +1,51 @@
 #-------------------------------
-# 管理員功能設定：
-admin:
+# /admin 發送公告 指令的設定：
+announcement:
 
-  #-----------------------------
-  # /公告 指令的設定：
-  announcement:
-
-    # 標題使用的 emoji。
-    emoji: "📢"
+  # 標題使用的 emoji。
+  emoji: "📢"
 
 
-  #-----------------------------
-  # /刪除訊息 指令的設定：
-  messageDelete:
-    emoji: "🗑️"
+#-------------------------------
+# /admin 刪除訊息 指令的設定：
+messageDelete:
+  emoji: "🗑️"
 
-    # 刪除訊息的最大數量，最多支援一次刪除 100 則訊息。
-    deleteLimit: 30
-
-
-  #-----------------------------
-  # /用戶資料 指令的設定：
-  userInfo:
-    emoji: "👤"
+  # 刪除訊息的最大數量，最多支援一次刪除 100 則訊息。
+  deleteLimit: 30
 
 
-  #-----------------------------
-  # Twitch 直播自動通知設定：
-  # 追蹤的 Twitch 頻道與 Discord 通知目標請使用 /直播通知 管理。
-  stream:
+#-------------------------------
+# /admin 擷取用戶資料 指令的設定：
+userInfo:
+  emoji: "👤"
 
-    # 是否啟用 Twitch 直播自動通知。
-    enable: true
 
-    # Twitch Developer Console 中的 Client ID。
-    twitchClientID: " "
+#-------------------------------
+# Twitch 直播自動通知設定：
+# 追蹤的 Twitch 頻道與 Discord 通知目標請使用 /admin 直播通知 管理。
+stream:
 
-    # Twitch Developer Console 中的 Client Secret。
-    twitchClientSecret: " "
+  # Twitch Developer Console 中的 Client ID。
+  twitchClientID: " "
 
-    # 檢查直播狀態的間隔，單位為分鐘。
-    checkInterval: 1
+  # Twitch Developer Console 中的 Client Secret。
+  twitchClientSecret: " "
 
-    # 更新已發送直播通知的間隔，單位為分鐘。建議配合 Twitch 縮圖更新頻率設為 5 分鐘。
-    editInterval: 5
+  # 檢查直播狀態的間隔，單位為分鐘。
+  checkInterval: 1
 
-    # 若 Bot 啟動時主播已經在直播，是否立即發送一次通知。
-    notifyOnStartupLive: true
+  # 更新已發送直播通知的間隔，單位為分鐘。建議配合 Twitch 縮圖更新頻率設為 5 分鐘。
+  editInterval: 5
 
-    # 發送直播公告時，附加的自定義隨機訊息，可繼續往下延伸。
-    message:
-      - "現在正直播精彩內容，來一起加入吧！"
-      - "直播現在開始！別錯過，一起觀看吧！"
-      - "開播啦！一起享受這場直播！"
+  # 若 Bot 啟動時主播已經在直播，是否立即發送一次通知。
+  notifyOnStartupLive: true
+
+  # 發送直播公告時，附加的自定義隨機訊息，可繼續往下延伸。
+  message:
+    - "現在正直播精彩內容，來一起加入吧！"
+    - "直播現在開始！別錯過，一起觀看吧！"
+    - "開播啦！一起享受這場直播！"
 
 #-------------------------------
 # /關於 相關設定：

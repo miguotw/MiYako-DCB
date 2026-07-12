@@ -1,8 +1,18 @@
 const path = require('path');
 const { PermissionFlagsBits } = require('discord.js');
+const { config } = require(path.join(process.cwd(), 'core/config'));
 const { errorReply } = require(path.join(process.cwd(), 'core/Reply'));
 
-const ADMIN_COMMAND_NAME = '管理';
+const ADMIN_COMMAND_NAME = String(config.Startup.adminCommandName || 'admin').trim();
+const COMMAND_NAME_PATTERN = /^[-_\p{L}\p{N}\p{sc=Devanagari}\p{sc=Thai}]{1,32}$/u;
+
+if (!COMMAND_NAME_PATTERN.test(ADMIN_COMMAND_NAME) || ADMIN_COMMAND_NAME !== ADMIN_COMMAND_NAME.toLocaleLowerCase()) {
+    throw new Error('Startup.adminCommandName 不符合 Discord Slash Command 名稱規則：長度須為 1～32 個字元，且英文必須為小寫。');
+}
+
+function getAdminCommandPath(...segments) {
+    return `/${[ADMIN_COMMAND_NAME, ...segments].filter(Boolean).join(' ')}`;
+}
 
 function isAdminCommandPath(filePath, commandsRoot) {
     const relativePath = path.relative(path.resolve(commandsRoot), path.resolve(filePath));
@@ -116,4 +126,4 @@ function createAdminCommand(commands) {
     };
 }
 
-module.exports = { applyAdminCommandPolicy, createAdminCommand, isAdminCommandPath };
+module.exports = { applyAdminCommandPolicy, createAdminCommand, getAdminCommandPath, isAdminCommandPath };

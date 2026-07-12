@@ -1,6 +1,7 @@
 const path = require('path');
 const { ActionRowBuilder, SlashCommandBuilder, StringSelectMenuBuilder } = require('discord.js');
 const { readGuildStore, writeGuildStore } = require(path.join(process.cwd(), 'util/twitchStreamStore'));
+const { getAdminCommandPath } = require(path.join(process.cwd(), 'core/commandPolicy'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { createErrorEmbed, createInfoEmbed } = require(path.join(process.cwd(), 'core/Reply'));
 
@@ -55,8 +56,10 @@ module.exports = {
     async execute(interaction) {
         const store = readGuildStore(interaction.guildId);
         const subcommand = interaction.options.getSubcommand();
+        const commandPath = getAdminCommandPath('直播通知', subcommand);
 
         if (subcommand === '移除') {
+            sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：${commandPath}`, 'INFO');
             const trackedChannels = [...new Set(store.subscriptions.map(item => normalizeTwitchLogin(item.twitchUserLogin)).filter(Boolean))];
             if (!trackedChannels.length) {
                 return interaction.reply({ embeds: [createErrorEmbed('此伺服器目前沒有已建立的 Twitch 追蹤頻道。')], ephemeral: true });
@@ -84,18 +87,23 @@ module.exports = {
         }
 
         const twitchUserLogin = normalizeTwitchLogin(interaction.options.getString('twitch頻道id'));
+        const channel = interaction.options.getChannel('通知頻道');
+        const role = interaction.options.getRole('提及身分組');
+        sendLog(
+            interaction.client,
+            `💾 ${interaction.user.tag} 執行了指令：${commandPath} twitch頻道id(${twitchUserLogin}) 通知頻道(${channel}) 提及身分組(${role || '未指定'})`,
+            'INFO'
+        );
+
         if (!/^[a-z0-9_]{1,25}$/.test(twitchUserLogin)) {
             return interaction.reply({ embeds: [createErrorEmbed('twitch頻道id 格式不正確。請輸入登入名稱或頻道網址。')], ephemeral: true });
         }
-
-        const channel = interaction.options.getChannel('通知頻道');
 
         if (subcommand === '新增') {
             if (!channel?.isTextBased() || typeof channel.send !== 'function') {
                 return interaction.reply({ embeds: [createErrorEmbed('請選擇可以發送訊息的文字頻道。')], ephemeral: true });
             }
 
-            const role = interaction.options.getRole('提及身分組');
             const subscription = {
                 twitchUserLogin,
                 channelID: channel.id,
@@ -108,7 +116,6 @@ module.exports = {
                 item.twitchUserLogin !== twitchUserLogin || item.channelID === channel.id
             );
             writeGuildStore(interaction.guildId, store);
-            sendLog(interaction.client, `💾 ${interaction.user.tag} ${isOverwrite ? '覆寫' : '新增'} Twitch 直播通知：${twitchUserLogin} -> ${channel.id}`);
             await interaction.reply({
                 embeds: [createInfoEmbed(`已${isOverwrite ? '覆寫' : '新增'}追蹤 **${twitchUserLogin}**，通知將發送至 ${channel}${role ? `，並提及 ${role}` : '，未指定身分組時將提及 @everyone'}。`)],
                 ephemeral: true

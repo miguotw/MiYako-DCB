@@ -1,11 +1,12 @@
 const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder, escapeMarkdown } = require('discord.js');
 const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
+const { getAdminCommandPath } = require(path.join(process.cwd(), 'core/commandPolicy'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { errorReply } = require(path.join(process.cwd(), 'core/Reply'));
 
 const EMBED_COLOR = config.embed.color.default;
-const EMBED_EMOJI = configCommands.admin.userInfo.emoji;
+const EMBED_EMOJI = configCommands.userInfo.emoji;
 const DISCORD_ID_PATTERN = /^\d{17,20}$/;
 
 function normalizeQuery(query) {
@@ -74,7 +75,7 @@ module.exports = {
         await interaction.deferReply();
 
         const rawQuery = interaction.options.getString('用戶', true);
-        sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/管理 擷取用戶資料 用戶(${rawQuery})`, 'INFO');
+        sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：${getAdminCommandPath('擷取用戶資料')} 用戶(${rawQuery})`, 'INFO');
 
         try {
             const { user, member } = await resolveUser(interaction, rawQuery);
@@ -102,7 +103,7 @@ module.exports = {
             if (bannerURL) embed.setImage(bannerURL);
             await interaction.editReply({ embeds: [embed] });
         } catch (error) {
-            sendLog(interaction.client, '❌ 在執行 /用戶資料 指令時發生錯誤：', 'ERROR', error);
+            sendLog(interaction.client, `❌ 在執行 ${getAdminCommandPath('擷取用戶資料')} 指令時發生錯誤：`, 'ERROR', error);
 
             const messages = {
                 NAME_LOOKUP_REQUIRES_GUILD: '**私訊中只能使用 Discord 數字 ID 查詢用戶。**',
