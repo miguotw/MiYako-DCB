@@ -1,8 +1,14 @@
 # MiYako-DCB
 
-MiYako-DCB（みやこ機器人第三代）是以 [discord.js](https://discord.js.org/) v14 製作的多功能 Discord Bot。專案採 CommonJS，啟動時自動探索並載入指令與事件模組，適合作為持續加入社群工具的單體 Bot 專案。
+MiYako-DCB（みやこ機器人第三代）是以 [discord.js](https://discord.js.org/) v14 製作的多功能 Discord Bot。專案使用 CommonJS、單一 Node.js 程序與本機 JSON 持久化；啟動時會自動探索指令及事件模組，並覆寫全域 Application Commands。
 
-> 專案仍在開發中。本文同時是使用說明與開發導覽；開始新需求前，建議先閱讀「架構與載入流程」及「擴充方式」。
+這份文件同時是部署說明與後續需求的專案基礎知識。開始修改前，至少先閱讀「架構與載入流程」、「強制開發規範」和「共用工具索引」。
+
+> [!IMPORTANT]
+> - 所有命令都必須從儲存庫根目錄執行，否則設定與資料路徑會失效。
+> - 除指令本身用來呈現功能內容的 Embed 外，成功、失敗、驗證不通過與執行錯誤等狀態消息，一律使用 `core/Reply.js` 的樣式，以 Embed 回覆。
+> - 新增解析器、資料存取、API adapter、view builder 或播放器邏輯前，必須先搜尋 `util/`；已有能力應直接重用或擴充，不得重複實作。
+> - 新增設定欄位時同步更新 `config_example/`；新增或改變功能時同步更新測試與本文件。
 
 ## 功能概覽
 
@@ -10,225 +16,341 @@ MiYako-DCB（みやこ機器人第三代）是以 [discord.js](https://discord.j
 
 | 指令 | 功能 | 備註 |
 | --- | --- | --- |
-| `/關於みやこ` | 顯示 Bot、維護者與伺服器資訊 | 指令名稱受 `botNickname` 設定影響 |
-| `/延遲` | 顯示 WebSocket 延遲 |  |
-| `/一言` | 取得隨機動漫短句 | 使用 Hitokoto API |
-| `/時間戳` | 產生目前或指定時間的 Discord 時間戳 | 使用 Modal |
-| `/網際協定位址資訊` | 查詢 IPv4／IPv6 資訊 | 使用 ip-api.com |
-| `/麥塊` | 查詢 Minecraft 玩家外觀或伺服器狀態 | 使用 Minotar、mcsrvstat.us |
-| `/物流追蹤` | 新增、更新、封存與追蹤包裹 | 需要 Track.TW Token；資料依使用者存於本機 |
-| `/音樂 管理面板` | YouTube 點播、暫停、跳過及查看播放序列 | 使用 yt-dlp、ffmpeg-static 與 Discord 語音 |
-| `/admin 發送公告` | 將既有訊息製成公告並傳至指定頻道 | 僅限伺服器管理員 |
-| `/admin 擷取用戶資料` | 以 ID、提及或 Username 查詢用戶 | 僅限伺服器管理員 |
-| `/admin 刪除訊息` | 批次或逐筆刪除訊息 | 僅限伺服器管理員 |
-| `/admin 直播通知 新增／移除` | 管理 Twitch 直播通知 | 僅限伺服器管理員 |
-| `/admin 臨時語音頻道 新增／移除` | 管理加入後自動建立專屬頻道的語音入口 | 僅限伺服器管理員 |
-| `/admin 抽選系統` | 建立到期後自動開獎的抽選公告 | 僅限伺服器管理員建立 |
-| `/admin 資料收集` | 建立白名單限定、可覆寫提交的資料收集面板 | 僅限伺服器管理員建立 |
+| `/關於みやこ` | 顯示 Bot、維護者與伺服器資訊 | 名稱中的暱稱來自 `about.botNickname` |
+| `/延遲` | 顯示 Discord WebSocket 延遲 |  |
+| `/一言` | 取得隨機動漫短句 | Hitokoto API，並轉為台灣繁體用語 |
+| `/時間戳` | 產生現在或指定時間的 Discord 時間戳 | 指定時間透過 Modal 輸入 |
+| `/網際協定位址資訊` | 查詢 IPv4／IPv6 資訊 | ip-api.com |
+| `/麥塊` | 查詢 Minecraft 玩家外觀或伺服器狀態 | Minotar、mcsrvstat.us |
+| `/物流追蹤` | 新增、更新、封存與追蹤包裹 | 需要 Track.TW API Token |
+| `/音樂 管理面板` | YouTube 點播、插播、暫停、跳過與序列管理 | 使用 yt-dlp、FFmpeg 與 Discord 語音 |
+| `/admin 發送公告` | 將既有訊息製成公告並發至指定頻道 | 管理員功能 |
+| `/admin 擷取用戶資料` | 依 ID、提及或 Username 查詢用戶 | 管理員功能 |
+| `/admin 刪除訊息` | 批次或逐筆刪除訊息 | 管理員功能 |
+| `/admin 直播通知 新增／移除` | 管理 Twitch 直播通知 | 管理員功能 |
+| `/admin 臨時語音頻道 新增／移除` | 管理加入後自動建立專屬頻道的語音入口 | 管理員功能 |
+| `/admin 抽選系統` | 建立到期後可自動開獎的抽選公告 | 管理員建立，一般用戶操作公開按鈕 |
+| `/admin 資料收集` | 建立白名單限定、可覆寫提交的資料收集面板 | 管理員建立，一般用戶操作公開按鈕 |
 
-### 自動事件與紀錄
+`/admin` 是 `config.yml` 的 `Startup.adminCommandName` 預設值，可依部署環境更名，因此程式不得硬編碼管理指令路徑。
 
-- 在伺服器系統頻道發送成員加入／離開訊息。
-- 依關鍵字回覆訊息或加入 Reaction，支援頻道白名單／黑名單語意與冷卻時間。
-- 將成員、訊息、身分組及語音活動寫入指定 Discord 日誌頻道。
-- 定時檢查 Twitch 直播、發送或更新直播通知。
-- 定時檢查包裹貨態，通知使用者並自動封存長期無更新的包裹。
-- 由管理員設定臨時語音入口，成員加入後建立專屬頻道，空置逾時自動刪除。
+### 自動事件與日誌
 
-## 執行環境
+- 在伺服器系統頻道發送成員加入／離開 Embed。
+- 依設定的關鍵字回覆訊息或加入 Reaction，支援頻道白名單／黑名單語意與冷卻時間。
+- 將成員、訊息、身分組與語音活動寫入終端及指定 Discord 日誌頻道。
+- 定時檢查 Twitch 直播與包裹貨態，發送或更新通知。
+- 定時關閉到期抽選、資料收集面板，並處理重啟期間錯過的項目。
+- 建立及回復臨時語音頻道管理，空置逾時後自動刪除受管頻道。
+- 檢查音樂依賴、維護語音狀態，並從本機快照恢復未完成的播放序列。
 
-- Node.js 22.12 或更新版本
-- npm
-- Discord Bot Token 與 Application ID
-- 視功能需要：Twitch Developer 憑證、Track.TW API Token
+## 執行環境與安裝
 
-Bot 建立時會要求下列 Gateway Intents：`Guilds`、`GuildMessages`、`MessageContent`、`GuildMembers`、`GuildVoiceStates`、`DirectMessages`。請在 Discord Developer Portal 的 Bot 頁面啟用 **Server Members Intent** 與 **Message Content Intent**；邀請 Bot 時也需授予其實際功能所需的檢視頻道、讀取歷史、發送訊息、嵌入連結、管理訊息等權限。臨時語音頻道功能另需檢視頻道、連線、管理頻道及移動成員權限。
+### 必要環境
 
-## 安裝與啟動
+- Node.js `>=22.12.0`；`.nvmrc` 固定為 `22.12.0`。
+- npm。
+- Discord Bot Token 與 Application ID。
+- 視啟用功能需要：Twitch Developer 憑證、Track.TW API Token。
+
+Bot 使用下列 Gateway Intents：`Guilds`、`GuildMessages`、`MessageContent`、`GuildMembers`、`GuildVoiceStates`、`DirectMessages`。請在 Discord Developer Portal 啟用 **Server Members Intent** 與 **Message Content Intent**。
+
+邀請 Bot 時需依功能授予檢視頻道、讀取歷史訊息、發送訊息、嵌入連結、附加檔案、加入／發言於語音頻道、管理訊息等權限。臨時語音功能另需管理頻道與移動成員權限。
+
+### 安裝
 
 ```bash
 git clone https://github.com/miguotw/MiYako-DCB.git
 cd MiYako-DCB
+nvm use
 npm install
-cp -r config_example config
+cp -R config_example config
 ```
 
-`npm install` 會透過 `ffmpeg-static` 下載目前作業系統與 CPU 架構適用的 FFmpeg；不需要另外安裝系統 FFmpeg。首次啟動會將官方 stable yt-dlp binary 下載到 `assets/music/yt-dlp`，該目錄必須可寫。請勿將 `node_modules` 跨平台複製，改在部署目標上重新執行 `npm install`。
-
-編輯 `config/` 中的三份 YAML：
-
-- `config.yml`：Token、Application ID、狀態、日誌頻道、Embed 顏色與共用 Emoji。
-- `configCommands.yml`：各 Slash Command、Twitch 通知及第三方 API 的設定。
-- `configModules.yml`：成員事件、訊息／身分組／語音紀錄、關鍵字規則，以及臨時語音頻道的空置刪除分鐘數。
-
-設定完成後，務必在專案根目錄啟動：
+接著編輯 `config/` 內三份 YAML，再從專案根目錄啟動：
 
 ```bash
 node index.js
 ```
 
-啟動過程會向 Discord 註冊**全域** Application Commands，接著登入 Bot。全域指令的新增或變更可能不會立刻出現在所有伺服器。三份設定檔會在模組載入時一次讀取，修改設定後需要重新啟動。
+專案目前沒有 `npm start` 或開發伺服器腳本。`npm install` 會由 `ffmpeg-static` 安裝符合平台與架構的 FFmpeg；請勿跨平台複製 `node_modules`。
 
-`config/` 含敏感資料且已被 `.gitignore` 排除；請勿提交 Token 或 API Secret。
+音樂模組首次啟動會下載 yt-dlp 至 `assets/music/yt-dlp`，並定期執行更新檢查。內建下載網址目前是 Linux binary；非 Linux 部署應先準備相容的 yt-dlp 執行檔，並以 `configCommands.yml` 的 `music.ytDlpPath` 指向它。`assets/music/` 必須可寫。
+
+啟動會對 `Routes.applicationCommands(clientID)` PUT 完整指令清單，也就是覆寫全域指令；更新可能不會立即出現在所有伺服器。不要把 `node index.js` 當成無副作用的本機檢查命令。
+
+## 設定檔
+
+實際設定位於被 `.gitignore` 排除的 `config/`，可提交的預設範本位於 `config_example/`：
+
+| 檔案 | 內容 |
+| --- | --- |
+| `config.yml` | Token、Application ID、管理指令名稱、Bot 狀態、日誌、共用 Embed 顏色與 Emoji |
+| `configCommands.yml` | 各 Slash Command、音樂、Twitch、Track.TW 與其他第三方服務設定 |
+| `configModules.yml` | 成員事件、訊息／身分組／語音日誌、關鍵字規則、臨時語音清理時間 |
+
+`core/config.js` 會在模組載入時同步讀取 `./config/*.yml`，因此：
+
+- 工作目錄必須是儲存庫根目錄。
+- 修改設定後必須重新啟動程序。
+- 新增設定時必須同時提供安全、可理解的 `config_example/` 預設值與註解。
+- `config/`、Token、API Token 與 Secret 不得提交；專案目前沒有從 `.env` 載入設定。
 
 ## 專案結構
 
 ```text
 MiYako-DCB/
-├── index.js                    # 程式入口、模組／指令載入、互動分派、指令註冊
+├── .nvmrc                         # 開發用 Node.js 版本
+├── index.js                       # Client、載入器、全域指令註冊、互動分派、登入
 ├── core/
-│   ├── config.js               # 同步讀取並解析三份 YAML 設定
-│   ├── Reply.js                # 統一成功／錯誤 Embed 回覆
-│   └── sendLog.js              # 終端與 Discord 頻道日誌
+│   ├── config.js                  # 同步解析三份 YAML
+│   ├── Reply.js                   # 統一成功／失敗／錯誤狀態 Embed
+│   ├── commandPolicy.js           # 管理指令聚合、權限政策與動態路徑
+│   └── sendLog.js                 # 終端與 Discord 頻道日誌
 ├── src/
-│   ├── commands/               # Slash Commands
-│   │   └── admin/              # 自動限制為僅限伺服器管理員使用的指令
+│   ├── commands/                  # 一般 Slash Commands
+│   │   └── admin/                 # 聚合到可設定的 /admin 根指令
 │   └── modules/
-│       ├── event/              # 歡迎訊息、關鍵字、Twitch、物流排程
-│       └── logger/             # 成員、訊息、身分組、語音紀錄
-├── util/                       # 外部 API、Minecraft 與物流資料邏輯
-├── config_example/             # 可提交的完整設定範本
-├── config/                     # 實際設定（不納入版本控制）
+│       ├── event/                 # 業務事件、ready 初始化與排程
+│       └── logger/                # 成員、訊息、身分組與語音紀錄
+├── util/                          # 共用解析、API、Store、View 與狀態機
+├── test/                          # Node 內建 test runner 測試
+├── config_example/                # 可提交的完整設定範本
+├── config/                        # 實際設定，不納入版本控制
 └── assets/
-    ├── minecraft/              # Minecraft 預設圖示與執行期暫存檔
-    ├── music/                  # yt-dlp、音訊快取與最新面板狀態（不納入版本控制）
-    ├── packageTracking/        # 每位使用者的物流 JSON（不納入版本控制）
-    ├── raffle/                 # 每個伺服器的抽選名單與結果（不納入版本控制）
-    ├── dataCollection/         # 每個伺服器的資料收集設定與提交內容（不納入版本控制）
-    └── temporaryVoice/         # 每個伺服器的入口與受管頻道 JSON（不納入版本控制）
+    ├── minecraft/                 # 預設圖示與狀態查詢暫存圖示
+    ├── music/                     # yt-dlp、音訊 cache、序列快照、面板索引
+    ├── packageTracking/           # 每位使用者的物流資料
+    ├── twitch_stream/             # 每個伺服器的訂閱與通知狀態
+    ├── temporaryVoice/            # 每個伺服器的入口與受管頻道
+    ├── raffle/                    # 每個伺服器的抽選資料
+    └── dataCollection/            # 每個伺服器的資料收集與提交內容
 ```
+
+除 `assets/minecraft/default_icon.png` 外，上述執行期資料大多不納入 Git。`assets/music/guilds/` 目前沒有程式碼引用，不是現行資料格式。
 
 ## 架構與載入流程
 
-1. `index.js` 載入設定與共用工具，建立 Discord `Client`。
-2. `loadModules('./src/modules')` 遞迴 `require` 所有 `.js`，並以 `module(client)` 註冊事件。
-3. `loadCommands('./src/commands')` 遞迴載入指令，將 `data` 放入待註冊清單、將指令放入 `client.commands`。
-4. REST API 以 `Routes.applicationCommands(clientID)` 覆寫全域指令清單。
-5. `interactionCreate` 依序分派 Slash Command、Modal、Button 與 String Select Menu。
-6. Client ready 後設定 Hitokoto 活動狀態；Twitch 與物流模組也在 ready 後啟動各自的輪詢排程。
+1. `index.js` 設定 `global.crypto`、載入 core/util，並以必要 Intents 建立 Discord `Client`。
+2. `loadModules('./src/modules')` 遞迴 `require` 每個 `.js`，呼叫其匯出的 `module(client)` 註冊事件或 ready 排程。
+3. `loadCommands('./src/commands')` 遞迴載入指令；一般指令加入 `client.commands` 與 REST 註冊清單，Modal handlers 合併至 Client。
+4. `src/commands/admin/` 中的指令先套用管理員政策，再聚合成一個可設定名稱的根指令。
+5. 程式啟動全域指令註冊的非同步工作，安裝 `interactionCreate`／`ready` listeners，接著呼叫 `client.login()`；登入不會等待 REST 註冊先完成。
+6. `interactionCreate` 依 Slash Command、Modal、Button、String Select Menu 分派至對應 handler；最外層例外由 `errorReply` 回覆。
+7. Client ready 後設定 Hitokoto 活動狀態，各事件模組也啟動恢復工作與輪詢排程。
 
-程式大量使用 `process.cwd()` 與相對路徑，因此工作目錄必須是儲存庫根目錄。載入器沒有功能開關：放進 `src/modules/` 或 `src/commands/` 的每個 `.js` 都會被執行；個別模組是否啟用應由設定與模組本身控制。
+`src/modules/` 與 `src/commands/` 沒有集中式功能開關：放入其中的每個 `.js` 都會在啟動時載入。功能停用條件必須由設定與模組本身處理。
 
-`src/commands/admin/` 是管理指令聚合與權限政策目錄。載入器不會個別註冊其中的頂層指令，而會自動組合成 `/admin`：一般指令成為 `/admin <指令>`，原本已有子指令的模組成為 `/admin <指令群組> <子指令>`。`admin` 是 `config.yml` 內 `Startup.adminCommandName` 的預設值，可依部署需求變更；名稱需符合 Discord Slash Command 規則。管理指令的日誌路徑應以 `core/commandPolicy.js` 的 `getAdminCommandPath()` 組合，禁止硬編碼 `/admin`，讓設定變更能同步反映在指令註冊與日誌。聚合後的子指令名稱直接沿用模組 `data.name`，不套用額外別名。
+### 指令模組契約
 
-聚合後會自動禁止私訊、將 Discord 預設成員權限設為 Administrator，並在執行 Slash Command、一般 Modal、Button 或 String Select Menu handler 前再次驗證管理員權限。需要讓一般用戶操作管理功能建立的面板時，模組可明確匯出 `publicButtonHandlers`／`publicModalSubmitHandlers`；這些公開 handler 必須自行驗證資格。將指令檔移入此目錄即可同時套用 `/admin` 命名與建立／管理權限限制。
-
-## 擴充方式
-
-### 新增指令
-
-在 `src/commands/`（或其子目錄）建立 CommonJS 模組：
+一般指令至少匯出：
 
 ```js
-const { SlashCommandBuilder } = require('discord.js');
-
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('範例')
         .setDescription('範例指令'),
     async execute(interaction) {
-        await interaction.reply('Hello!');
+        // 指令處理
     }
 };
 ```
 
-若指令包含互動元件，可在同一個匯出物件加入：
+同一匯出物件可選擇加入 handler map：
 
-- `modalSubmitHandlers`
-- `buttonHandlers`
-- `componentHandlers`（String Select Menu）
+| 欄位 | 互動類型 |
+| --- | --- |
+| `modalSubmitHandlers` | Modal submit |
+| `buttonHandlers` | Button |
+| `componentHandlers` | String Select Menu |
 
-各欄位皆為 `{ [customId]: async interaction => {} }`。分派器也支援 `customId:payload`，會先找完整 ID，再退回冒號前的 handler 名稱。Modal handlers 會合併到 Client；不同指令應避免使用相同 Modal `customId`。
+每個 map 的格式為 `{ [customId]: async interaction => {} }`。分派器會先比對完整 `customId`，再退回冒號前綴，因此 `feature_action:<recordID>` 應以 `feature_action` 作為 handler key。所有指令共享互動 ID 命名空間；新功能應使用明確的功能前綴並避免碰撞。
 
-### 新增事件模組
+### 管理指令政策
 
-在 `src/modules/` 下匯出接收 Client 的函式：
+`core/commandPolicy.js` 對 `src/commands/admin/` 套用下列規則：
+
+- 沒有子指令的模組聚合成 `/<adminName> <command>`。
+- 已包含子指令的模組聚合成 `/<adminName> <group> <subcommand>`，只允許一層子指令。
+- 自動禁止私訊、設定 Discord 預設 Administrator 權限，並在執行 `execute`、Modal、Button、Select handler 前再次驗證管理員資格。
+- 管理功能建立的公開面板若要讓一般用戶操作，只能明確匯出 `publicButtonHandlers` 或 `publicModalSubmitHandlers`；公開 handler 必須自行驗證使用者資格與資料狀態。
+- 日誌或文字中的管理指令路徑使用 `getAdminCommandPath()` 組合，不得硬編碼 `/admin`。
+
+## 強制開發規範
+
+### 使用者狀態回覆一律使用 `core/Reply.js`
+
+指令本身的查詢結果、公告、管理面板、播放面板與下載進度屬功能內容，可以建立專用 Embed。除此之外，向使用者表示下列狀態時必須使用共用樣式：
+
+- 操作成功。
+- 業務失敗或找不到資料。
+- 輸入驗證不通過或權限不足。
+- 執行過程發生錯誤。
+
+標準 Interaction 回覆：
 
 ```js
-const { Events } = require('discord.js');
-
-module.exports = client => {
-    client.on(Events.MessageCreate, async message => {
-        // 處理事件
-    });
-};
-```
-
-需要設定時，將可公開的預設欄位同步加入 `config_example/`，並由 `core/config.js` 匯出的 `config`、`configCommands` 或 `configModules` 讀取。操作與錯誤紀錄使用 `core/sendLog.js`。
-
-### 使用者回覆規範
-
-除指令功能本身需要呈現的 Embed 外，所有向使用者表示**成功、失敗或錯誤**的訊息，都必須使用 `core/Reply.js` 提供的共用函式包裝成 Embed：
-
-```js
+const path = require('path');
 const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 
-await infoReply(interaction, '**操作已完成！**');
-await errorReply(interaction, '**操作失敗，請稍後再試！**');
+try {
+    // 執行操作
+    return infoReply(interaction, '**設定已儲存。**');
+} catch (error) {
+    sendLog(interaction.client, '❌ 儲存設定失敗：', 'ERROR', error);
+    return errorReply(interaction, `**設定儲存失敗：${error.message || '未知錯誤'}**`);
+}
 ```
 
-- 成功訊息使用 `infoReply(interaction, message, files?)`。
-- 失敗、驗證不通過及執行錯誤使用 `errorReply(interaction, message, files?)`。
-- 不要在個別指令中為這類狀態回覆自行建立 `EmbedBuilder`，也不要硬編碼其顏色或 Emoji。
-- 共用樣式的顏色與 Emoji 由 `config.yml` 的 `embed.color.success`、`embed.color.error`、`emoji.success`、`emoji.error` 定義；新增或調整預設值時，必須同步更新 `config_example/config.yml`。
-- `infoReply` 與 `errorReply` 已兼容尚未回覆、已 `deferReply()` 及已回覆的 Interaction，呼叫端不需自行切換 `reply()`／`editReply()`。
+共用 API：
+
+| API | 用途 |
+| --- | --- |
+| `infoReply(interaction, message, files?, ephemeral?)` | 成功狀態；標題固定為「操作成功」 |
+| `errorReply(interaction, message, files?, ephemeral?)` | 失敗、驗證與錯誤狀態 |
+| `createInfoEmbed(message)` | 需要自行組合 `components`、`interaction.update()` 或 `channel.send()` 時取得相同成功樣式 |
+| `createErrorEmbed(message)` | 需要自行組合 payload 時取得相同錯誤樣式 |
+
+需要元件的狀態回覆仍應使用 builder，而不是重新製作樣式：
+
+```js
+const { createInfoEmbed } = require(path.join(process.cwd(), 'core/Reply'));
+
+return interaction.update({
+    content: null,
+    embeds: [createInfoEmbed('**設定已移除。**')],
+    components: []
+});
+```
+
+樣式來源是執行期的 `config/config.yml`，可提交的預設值定義在 `config_example/config.yml`：
+
+| 設定鍵 | 用途 |
+| --- | --- |
+| `embed.color.default` | 指令功能本身的一般 Embed |
+| `embed.color.success` | `createInfoEmbed`／`infoReply` |
+| `embed.color.error` | `createErrorEmbed`／`errorReply` |
+| `emoji.success` | 成功標題 Emoji |
+| `emoji.error` | 錯誤標題 Emoji |
+| `emoji.loading` | 功能本身的載入／進度顯示 |
+
+不得在新程式中用純文字回覆成功／失敗／錯誤，也不得自行建立這些狀態的 `EmbedBuilder`、硬編碼顏色或 Emoji。
+
+Reply 的互動生命週期注意事項：
+
+- 尚未回覆時使用 `interaction.reply()`；已 `deferReply()` 或已回覆時自動改用 `editReply()`。
+- 私密耗時操作必須在一開始 `deferReply({ ephemeral: true })`；defer 後才傳入 `ephemeral` 無法改變可見性。
+- Interaction 已回覆時 helper 會覆寫原回覆，不會建立 `followUp()`。需要新增一則訊息時，應搭配 `createInfoEmbed`／`createErrorEmbed` 自行送出。
+- `infoReply`／`errorReply` 只接受 Embed、附件與初次回覆的 ephemeral 選項；需要 components、allowed mentions 等欄位時使用 `create*Embed` 組 payload。
+- 錯誤 Embed 會自動附上 `configCommands.about.repository` 與 `provider` 的回報資訊。
+- Reply 內部會吞掉 Discord 回覆失敗，因此需要診斷的錯誤仍必須另外呼叫 `sendLog()`。
+
+### 優先重用 `util/`，拒絕重複造輪子
+
+開始實作前先以 `rg` 搜尋 `util/` 與 `core/`。若能力已存在，直接引用；若僅缺少通用的一小部分，擴充原模組並補測試，不要在新指令內複製一份。
+
+尤其是「每個 Guild 一份 JSON」的功能，一律優先使用 `util/guildJsonStore.js` 的 `createGuildJsonStore({ directory, createEmpty, normalize })`。它已統一處理 Guild ID 驗證、資料正規化、目錄建立、讀寫、列舉，以及 temporary file + rename 的原子替換。
+
+## 共用工具索引
+
+| 模組 | 已有能力；新增功能應優先使用 |
+| --- | --- |
+| `discordCommandInput.js` | Discord API timeout、截止時間解析、用戶／身分組提及、訊息 ID／官方連結解析與抓取、將身分組展開為真人成員 |
+| `guildJsonStore.js` | 通用 per-guild JSON Store factory：`getFile`、`listGuildIDs`、`read`、`update`、`write` |
+| `dataCollectionStore.js` | 資料收集 CRUD、全域尋找／列舉、同一 collection 的程序內 Promise lock |
+| `dataCollectionViews.js` | 白名單提及分批、公開／管理 Embed、內容清理與分頁、管理面板同步／刪除 |
+| `raffleStore.js` | 抽選 CRUD、列舉、去重後使用 `crypto.randomInt` 抽出得獎者 |
+| `raffleViews.js` | 抽選公告 Embed 與參加／取消按鈕 |
+| `temporaryVoiceStore.js` | 入口與受管頻道的 per-guild 新增、更新、移除與恢復資料 |
+| `twitchStreamStore.js` | Twitch 訂閱、通知訊息與 stream 狀態的 per-guild 持久化 |
+| `getPackageTracking.js` | Track.TW adapter、per-user Store、carrier／貨態工具、物流 Embed 與元件 builder |
+| `getHitokoto.js` | Hitokoto API 與 OpenCC 簡體轉台灣繁體 |
+| `getIPInfo.js` | ip-api IP 資訊查詢 |
+| `getServerStatus.js` | Minecraft 狀態查詢、回應清理、錯誤診斷與伺服器圖示暫存 |
+| `musicHelpers.js` | yt-dlp 輸入、Track 正規化／驗證、時間、進度條與序列分頁等純函式 |
+| `ytDlpManager.js` | 安全 spawn、yt-dlp 下載／節流更新、metadata／播放清單、音訊下載清理、FFmpeg 檢查與錯誤重試 |
+| `musicPlayer.js` | Per-guild 語音連線與播放器狀態機、序列、暫停／跳過、恢復、閒置退出與 UI hooks |
+| `musicQueueStore.js` | 每個 Guild 的播放快照原子儲存、全域載入與刪除 |
+| `musicPanelStore.js` | 每個 Guild 最新音樂面板的 Discord ID 索引 |
+
+跨功能輸入應先使用 `discordCommandInput.js`；跨功能資料模式應先使用 `guildJsonStore.js`。功能專用的 Store、View 與 API adapter 也應由 command/event 層呼叫，避免讓指令檔同時承擔 UI、網路、持久化與排程邏輯。
+
+## 重要業務規則
+
+### 截止時間、提及與公開面板
+
+- `parseDeadline()` 先把 `yyyy-mm-dd hh:mm` 按 Node 程序的本機時區解析，再扣除 `config.yml` 的 `log.timezone` 小時作人工校正。程序與輸入皆為台灣時間時使用 `0`；程序是 UTC、輸入是台灣時間時使用 `+8`。
+- 抽選與資料收集的用戶／身分組資格會在建立當下展開成真人成員快照；之後的成員或身分組異動不會回溯更新。展開身分組需要 Server Members Intent。
+- 抽選和資料收集每 30 秒檢查一次；Bot 離線期間到期的現存資料會在重啟後補處理。
+- 抽選白名單用戶無須參加、黑名單用戶不可參加，兩者不得重疊。自動抽選關閉時只停止登記，不產生得獎者。
+- 資料收集允許重複提交並覆寫；資料保留至管理面板執行確認刪除。管理面板若送至伺服器頻道，該頻道的可見權限就是提交資料的可見範圍。
+
+### 音樂
+
+- 支援 YouTube URL、文字搜尋第一筆，以及依設定展開播放清單；不支援直播。
+- 音訊先下載至 `assets/music/cache/` 再播放，完成、移除、跳過或失敗後清理；播放清單中任一曲目驗證或下載失敗會取消整批操作。
+- 目前歌曲、秒數、點播者與待播序列會寫入 `assets/music/queues/<guildID>.json`。Bot 重啟或語音連線中斷後會嘗試重連，成功時自動繼續原先因斷線暫停的播放。
+- 最新控制面板索引位於 `assets/music/panels.json`；新面板建立後，舊面板視為過期。
+- 空序列或語音頻道沒有真人時會暫停／啟動閒置計時，超過 `music.inactivityTimeoutMinutes` 後退出並清理狀態。範例值為 5 分鐘。
+- `music.volumePercent` 範例值為 20；程式缺少設定時的 fallback 是 50。`queueTitleMaxLength` 需介於 1～97，播放清單單次上限程式會限制在 1～100。
+- 語音編碼優先使用 `@discordjs/opus`；原生 binary 不相容時可由 `opusscript` fallback。
+
+### 臨時語音、物流與 Twitch
+
+- 臨時語音入口可有各自前綴。真人加入後，Bot 在相同分類建立繼承入口權限的專屬頻道並移動成員；移除入口只停止建立新頻道，既有受管頻道仍會清理。
+- Track.TW Token 未設定時物流背景監聽不啟動；資料按 Discord 使用者分檔，不是按 Guild 分檔。
+- Twitch Client ID／Secret 不完整時直播監聽不啟動；訂閱、Discord 通知位置與最近 stream 狀態會持久化，排程執行旗標才只存在記憶體。
 
 ## 資料與外部服務
 
-| 功能 | 服務／位置 | 注意事項 |
+| 功能 | 服務／資料位置 | 說明 |
 | --- | --- | --- |
-| 活動狀態、一言 | `https://v1.hitokoto.cn` | 啟動時無法取得只會記錄錯誤 |
-| IP 查詢 | `http://ip-api.com` | 第三方服務限制與隱私政策由服務方決定 |
-| Minecraft 狀態 | `https://api.mcsrvstat.us` | 伺服器圖示會短暫寫入 `assets/minecraft/temp/`，指令完成後清理 |
-| Minecraft 外觀 | Minotar | 由指令組合遠端圖片網址 |
-| 物流追蹤 | `https://track.tw/api/v1` | Token 存於 YAML；本機狀態存於 `assets/packageTracking/<userID>.json` |
-| Twitch 通知 | Twitch OAuth／Helix API | 憑證存於 YAML；模組以記憶體維護當次執行狀態 |
-| YouTube 音樂 | yt-dlp、ffmpeg-static | FFmpeg 隨 npm 依賴安裝；yt-dlp 每 24 小時節流檢查 stable 更新，抽取失效時更新並重試一次 |
-| 臨時語音頻道 | `assets/temporaryVoice/<guildID>.json` | 保存入口、受管頻道及空置起始時間，重啟後恢復管理 |
-| 抽選系統 | `assets/raffle/<guildID>.json` | 保存參加名單與結果，重啟後補開 |
-| 資料收集 | `assets/dataCollection/<guildID>.json` | 保存白名單、欄位與提交內容，含可能的敏感資料 |
+| 活動狀態、一言 | `https://v1.hitokoto.cn` | API 失敗會寫日誌，不阻止 Bot 啟動 |
+| IP 查詢 | `http://ip-api.com` | 受第三方服務限制與隱私政策約束 |
+| Minecraft 狀態 | `https://api.mcsrvstat.us`、`assets/minecraft/temp/` | 查詢圖示短暫落盤後清理 |
+| Minecraft 外觀 | Minotar | 指令組合遠端圖片網址 |
+| 物流追蹤 | `https://track.tw/api/v1`、`assets/packageTracking/<userID>.json` | Token 位於 YAML |
+| Twitch | Twitch OAuth／Helix、`assets/twitch_stream/<guildID>.json` | 保存訂閱與通知狀態 |
+| 音樂 | yt-dlp、ffmpeg-static、`assets/music/` | cache、queue snapshot、panel index 與 binary |
+| 臨時語音 | `assets/temporaryVoice/<guildID>.json` | 入口、受管頻道與空置時間 |
+| 抽選 | `assets/raffle/<guildID>.json` | 參加名單、資格與結果 |
+| 資料收集 | `assets/dataCollection/<guildID>.json` | 白名單、欄位及可能含敏感資訊的提交內容 |
 
-部署物流功能時，`assets/packageTracking/` 必須可寫且需納入獨立備份；該目錄不會進入 Git。多個 Bot 程序共用同一目錄也沒有檔案鎖定機制，不建議以多程序模式執行。
+這些 JSON Store 沒有跨程序檔案鎖，部署模型應維持單一 Bot 程序。持久化目錄必須可寫，並應依資料重要性獨立備份；音樂 cache 與 Minecraft temp 則是可重建的暫存資料。
 
-`/admin 臨時語音頻道 新增` 可設定多個語音入口及個別前綴；省略前綴會清除該入口原有前綴。真人成員加入入口後，Bot 會在相同分類建立繼承入口權限的 `前綴暱稱` 頻道（前綴與暱稱直接相連）並移動成員。`/admin 臨時語音頻道 移除` 只停止入口建立新頻道，既有頻道仍會繼續管理。空頻道經 `configModules.yml` 的 `temporaryVoice.deleteAfterMinutes`（預設 5 分鐘）後刪除；入口與受管頻道資料會在 Bot 重啟後恢復。`assets/temporaryVoice/` 必須可寫並應獨立備份。
+## 新需求實作順序
 
-`/admin 抽選系統` 會從指定訊息建立公告。單一 `yyyy-mm-dd hh:mm` 截止時間先按 Node 程序的本機時區解析，再扣除 `config.yml` 的 `log.timezone` 小時作為人工校正：程序已在台灣時區時使用 `0`；程序使用 UTC、但管理員輸入台灣時間時使用 `+8`。若程序實際採用其他時區，校正量需依該程序時區與輸入時區的差值設定。公告只顯示相對倒數，footer 以「唯一 ID • 時間」呈現。一般用戶透過「參加/取消抽選」按鈕切換登記，公告會即時列出已登記用戶。白名單與黑名單只接受 `@用戶` 或 `@身分組`，建立時展開為當下的真人成員快照且不公開；使用身分組需要在 Discord Developer Portal 啟用 Server Members Intent。白名單用戶無須抽選，黑名單用戶不可參與，兩者不得重疊。截止後按鈕一律停用。啟用自動抽選時，「抽選人數」會標示「已啟用自動抽選」，每 30 秒排程會自動抽出中選者並直接更新原公告 Embed；停用時只關閉登記，不產生中選結果。Bot 離線期間逾期的活動會在重啟後補處理。公告更新成功後，該抽選 ID 會立即從 `assets/raffle/` 移除；若更新失敗則暫時保留供排程重試。若公告訊息或所在頻道已不存在，也會自動刪除該筆資料。
+1. 先用 `rg` 找出相近 command、event、core 與 util，確認資料格式、custom ID 與設定鍵。
+2. 判斷變更應放在 command、event/logger、Store/API、View 或共用 helper，避免把所有邏輯堆進指令檔。
+3. 直接重用或擴充既有 util；per-guild JSON 優先以 `createGuildJsonStore` 建立。
+4. 指令功能內容使用自己的 Embed；所有成功、失敗、驗證與錯誤狀態使用 `core/Reply.js`。
+5. 新互動 ID 加功能前綴；管理功能若開放公共按鈕／Modal，明確匯出 public handler 並自行驗證資格。
+6. 新設定同步修改 `config_example/`，新持久化資料同步修改 `.gitignore`、備份說明與本文件。
+7. 為純函式、解析、Store 正規化與重要狀態轉換補上 `node:test`，再執行完整驗證。
 
-`/admin 資料收集` 會在指定頻道以一般訊息直接提及白名單中的 `@用戶`／`@身分組`，再建立公開提交面板；不會把身分組拆成多個用戶提及，名單過長時會依 Discord 訊息限制分批。「管理面板」必選參數可將含完整回答的管理分頁送到指令目前頻道或建立者私訊；選擇目前頻道時，頻道可見權限即為資料可見範圍，請只在私密管理頻道執行。私訊管理面板的刪除按鈕只允許建立者操作；伺服器頻道內則允許建立者或管理員操作。提交資格仍在建立時將身分組展開為成員快照。截止時間使用與抽選相同的主機本機時間及人工校正量，每 30 秒停用逾期按鈕。每個 Modal 欄位為必填單行文字；`configCommands.yml` 的 `dataCollection.titleMaxLength` 可設定資料標題上限（1～45），`submissionMaxLength` 可設定每欄提交上限（1～700），預設分別為 10 與 20。重複提交會覆寫，並嘗試私訊提交者副本。資料保存於 `assets/dataCollection/`，直到管理員在管理面板按下紅色刪除按鈕並於確認 Modal 輸入 `y`。公開面板在截止前遺失時會重新提及白名單並在原頻道重建；截止後遺失時不執行任何動作。任一管理分頁被刪除時，系統會停用公開提交按鈕、刪除其餘管理分頁與本機資料。
+## 開發與驗證
 
-跨功能的 Discord 輸入解析集中於 `util/discordCommandInput.js`，包含訊息 ID／連結、提及與截止時間；每個 Guild 一份 JSON 的功能資料則優先使用 `util/guildJsonStore.js`，統一 Guild ID 驗證、資料正規化及暫存檔原子替換。新增相同類型功能時應擴充這些共用模組，避免重新複製解析或檔案讀寫流程。
-
-## 開發與驗證現況
-
-目前使用 Node 內建測試驗證音樂資料與 yt-dlp 更新策略，尚未提供 lint 腳本。變更至少應進行：
+專案唯一的 npm script 是：
 
 ```bash
-# 檢查所有 JavaScript 語法
-find . -path ./node_modules -prune -o -name '*.js' -print -exec node --check {} \;
-
-# 執行單元測試
 npm test
-
-# 使用測試 Bot／測試伺服器從根目錄啟動，驗證事件與互動
-node index.js
 ```
 
-啟動會連線 Discord、覆寫全域指令並啟動排程，不應將它當成無副作用的本機語法測試。開發新功能時，也請同步更新設定範本與本 README 的功能、資料或外部服務說明。
+目前 `test/` 有 7 個測試檔、34 個 `test()` 案例，涵蓋 Discord 輸入解析、共用 Store 重構、抽選、資料收集、音樂純函式、yt-dlp 更新判斷、FFmpeg 與播放快照。外部 API 與完整 Discord 互動仍需要測試 Bot／測試伺服器驗證。
 
-每個伺服器的目前歌曲、播放秒數、點播者與待播序列會分別保存於 `assets/music/queues/<guildID>.json`。Bot 重啟或語音連線意外中斷時，會驗證本機音訊檔、重新加入原語音頻道，並嘗試從最近保存的進度恢復；斷線後維持暫停，由使用者手動按「繼續」。斷線或語音頻道沒有真人使用者時會立即暫停並發送狀態 Embed。最新面板的位置保存於 `assets/music/panels.json`；新面板出現後，舊面板會被判定為過期。公開序列面板只顯示待播歌曲，可用僅顯示歌曲名稱的選單移除指定歌曲；清空所有待播序列時須在確認 Modal 輸入 `y`。點播時會先將音訊下載到 `assets/music/cache/` 再從本機播放，期間以 Embed 顯示目前曲目、播放清單項次及下載百分比；進度訊息最多每秒更新一次。檔案在播放完成、移除、跳過、失敗或正常清理時刪除。支援單一 YouTube 影片、文字搜尋第一筆，以及依設定決定是否展開播放清單；不支援直播。最後一首結束後會另發待命面板並保留舊面板的最終進度，Bot 會留在語音頻道；目前沒有離場或停止按鈕。
+專案沒有 lint 或 format script。變更至少執行：
 
-主面板的「插播」使用與點播相同的解析及下載流程，但會把歌曲放到待播序列最前方；插播播放清單時仍維持播放清單原有順序。
+```bash
+# 所有 JavaScript 語法檢查
+find . -path ./node_modules -prune -o -name '*.js' -print -exec node --check {} \;
 
-音樂設定可用 `minDurationMinutes`／`maxDurationMinutes` 限制單首長度（`0` 表示不限制），以 `allowPlaylists` 控制是否接受 YouTube 播放清單，並用 `maxPlaylistTracks` 限制一次最多取播放清單前幾首歌曲。播放清單內任一曲目不符合長度限制或下載失敗時，整批點播會取消。
+# 單元測試
+npm test
+```
 
-`volumePercent` 設定送入 Discord 前的播放音量，可設定 `0`～`100`，預設為 `50`；超出範圍的設定會自動限制到最近的有效值。
-
-`queueTitleMaxLength` 控制「接下來」、完整序列及移除選單中的歌曲標題最大字符數，預設為 `25`，可設定 `1`～`97`；超過時會截斷並附加 `...`。上限預留三個字符給省略號，以符合 Discord 選單標籤的 100 字符限制。
-
-`ffmpeg-static` 套件及其發佈的 FFmpeg binary 採 GPL-3.0-or-later；重新散布 Bot 或打包後的 binary 時，請確認符合其授權條款。
-
-語音編碼優先使用原生 `@discordjs/opus`；若目前 Node ABI 沒有可用的預編譯 binary，prism-media 會自動改用純 JavaScript 的 `opusscript`，避免重啟恢復播放時因原生模組不相容而中斷。
+只有在確定可以覆寫測試 Application 的全域指令、連線 Discord 並啟動排程時，才以 `node index.js` 做整合驗證。
 
 ## 授權
 
-原始碼採 [MIT License](LICENSE) 授權。
+原始碼依根目錄 [MIT License](LICENSE) 授權。`package.json` 的 `license` metadata 目前仍標示 `ISC`，後續發布套件前應與 `LICENSE` 統一。`ffmpeg-static` 及其散布的 FFmpeg binary 採 GPL-3.0-or-later；重新散布 Bot 或打包後 binary 時需另外確認授權義務。
