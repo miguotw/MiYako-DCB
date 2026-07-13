@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { fetchSourceMessage } = require('../util/discordCommandInput');
+const { fetchSourceMessage, parseDateTimeToUnix } = require('../util/discordCommandInput');
 
 /** 建立最小化 Interaction，專門驗證來源訊息解析，不依賴 Discord 網路。 */
 function createInteraction() {
@@ -65,4 +65,10 @@ test('拒絕其他伺服器的訊息連結', async () => {
         ),
         /必須屬於目前伺服器/
     );
+});
+
+test('指定時間依輸入時區換算且支援秒數', () => {
+    assert.equal(parseDateTimeToUnix('2020-03-24 23:59:59', 8, { allowSeconds: true }), 1585065599);
+    assert.equal(parseDateTimeToUnix('2020-02-30 12:00:00', 8, { allowSeconds: true }), null);
+    assert.equal(parseDateTimeToUnix('2020-03-24 12:00', Number.NaN), null);
 });

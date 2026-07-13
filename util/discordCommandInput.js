@@ -14,21 +14,30 @@ function withTimeout(promise, message, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS) {
 }
 
 /**
- * 將 yyyy-mm-dd hh:mm 解析為 Unix 秒數。
- * timezoneOffset 延續專案既有規則，以小時加到本機解析後的時間。
+ * 將指定時區的日期時間轉成 Unix 秒數，不受部署主機所在時區影響。
+ * 例如 UTC+8 的 20:00 等於 UTC 的 12:00，因此計算時要扣除 8 小時。
+ * allowSeconds 用來區分截止時間（到分鐘）與時間戳工具（到秒）。
  */
-function parseDeadline(value, timezoneOffset = 0) {
-    const match = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2}) ([01]\d|2[0-3]):([0-5]\d)$/);
+function parseDateTimeToUnix(value, timezoneOffset = 0, { allowSeconds = false } = {}) {
+    const timePattern = allowSeconds ? '([01]\\d|2[0-3]):([0-5]\\d):([0-5]\\d)' : '([01]\\d|2[0-3]):([0-5]\\d)';
+    const match = String(value || '').trim().match(new RegExp(`^(\\d{4})-(\\d{2})-(\\d{2}) ${timePattern}$`));
     if (!match) return null;
-    const [, year, month, day, hour, minute] = match.map(Number);
-    const localDate = new Date(year, month - 1, day, hour, minute, 0, 0);
-    if (localDate.getFullYear() !== year || localDate.getMonth() !== month - 1
-        || localDate.getDate() !== day || localDate.getHours() !== hour
-        || localDate.getMinutes() !== minute) return null;
+    const [, year, month, day, hour, minute, parsedSecond] = match.map(Number);
+    const second = allowSeconds ? parsedSecond : 0;
+    const utcMilliseconds = Date.UTC(year, month - 1, day, hour, minute, second);
+    const date = new Date(utcMilliseconds);
+    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1
+        || date.getUTCDate() !== day || date.getUTCHours() !== hour
+        || date.getUTCMinutes() !== minute || date.getUTCSeconds() !== second) return null;
 
     const offset = Number(timezoneOffset);
-    localDate.setHours(localDate.getHours() + (Number.isFinite(offset) ? offset : 0));
-    return Math.floor(localDate.getTime() / 1000);
+    if (!Number.isFinite(offset)) return null;
+    return Math.floor((utcMilliseconds - offset * 60 * 60 * 1000) / 1000);
+}
+
+/** 截止時間固定使用到分鐘的格式，保留原本呼叫端使用的函式名稱。 */
+function parseDeadline(value, timezoneOffset = 0) {
+    return parseDateTimeToUnix(value, timezoneOffset);
 }
 
 /**
@@ -126,5 +135,6 @@ async function resolveMentionedUsers(interaction, targets, fieldName) {
 }
 
 module.exports = {
-    fetchSourceMessage, parseDeadline, parseMentionTargets, parseMessageLink, resolveMentionedUsers, withTimeout
+    fetchSourceMessage, parseDateTimeToUnix, parseDeadline, parseMentionTargets,
+    parseMessageLink, resolveMentionedUsers, withTimeout
 };

@@ -12,16 +12,16 @@ test('抽選系統本身沒有建立抽選子指令', () => {
     assert.equal(json.options.find(option => option.name === '提及身分組').required, false);
 });
 
-test('截止日期與時間先以本機時間解讀', () => {
+test('截止日期與時間以 UTC 為基準，不受主機時區影響', () => {
     const timestamp = _test.parseDeadline('2026-08-01 20:30', 0);
-    assert.equal(timestamp, 1785587400);
-    assert.equal(new Date(timestamp * 1000).toISOString(), '2026-08-01T12:30:00.000Z');
+    assert.equal(timestamp, 1785616200);
+    assert.equal(new Date(timestamp * 1000).toISOString(), '2026-08-01T20:30:00.000Z');
 });
 
-test('log.timezone 以小時加減截止時間', () => {
+test('正時區代表當地時間領先 UTC，換算時會扣除偏移', () => {
     const base = _test.parseDeadline('2026-08-01 20:30', 0);
-    assert.equal(_test.parseDeadline('2026-08-01 20:30', 1) - base, 3600);
-    assert.equal(_test.parseDeadline('2026-08-01 20:30', -2) - base, -7200);
+    assert.equal(_test.parseDeadline('2026-08-01 20:30', 1) - base, -3600);
+    assert.equal(_test.parseDeadline('2026-08-01 20:30', -2) - base, 7200);
 });
 
 test('截止日期拒絕不存在的日期與錯誤格式', () => {

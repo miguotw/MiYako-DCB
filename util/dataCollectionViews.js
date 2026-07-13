@@ -9,6 +9,30 @@ const COLOR = config.embed.color.default;
 const EMOJI = configCommands.dataCollection?.emoji || '📝';
 const PAGE_DESCRIPTION_LIMIT = 3800;
 
+/**
+ * 將用戶與身分組提及切成 Discord 一般訊息可接受的批次。
+ * 每個批次同時保留 allowedMentions 所需的 ID，避免公開面板意外提及其他對象。
+ */
+function createMentionBatches(targets, maxLength = 1900) {
+    const batches = [];
+    for (const target of targets) {
+        const mention = target.type === 'role' ? `<@&${target.id}>` : `<@${target.id}>`;
+        const current = batches[batches.length - 1];
+        if (!current || `${current.content} ${mention}`.length > maxLength) {
+            batches.push({
+                content: mention,
+                userIDs: target.type === 'user' ? [target.id] : [],
+                roleIDs: target.type === 'role' ? [target.id] : []
+            });
+            continue;
+        }
+        current.content += ` ${mention}`;
+        if (target.type === 'user') current.userIDs.push(target.id);
+        else current.roleIDs.push(target.id);
+    }
+    return batches;
+}
+
 function submitRow(record, disabled = false) {
     return [new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`data_collection_submit:${record.id}`)
@@ -110,6 +134,6 @@ async function deleteAdminPanels(client, record) {
 }
 
 module.exports = {
-    createPublicEmbed, createSubmissionLines, deleteAdminPanels, paginateLines,
+    createMentionBatches, createPublicEmbed, createSubmissionLines, deleteAdminPanels, paginateLines,
     sanitizeCell, submitRow, syncAdminPanels
 };

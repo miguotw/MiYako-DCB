@@ -1,27 +1,15 @@
-const fs = require('fs');
 /**
  * 臨時語音頻道的 per-guild JSON repository。
  * entrances 是「加入即建立」的入口；channels 是本功能建立並負責清理的頻道。
  * 所有公開異動都經 updateGuildStore，以免呼叫端忘記將記憶體修改寫回磁碟。
  */
 const path = require('path');
+const { createGuildJsonStore } = require('./guildJsonStore');
 
 const DATA_DIR = path.join(process.cwd(), 'assets', 'temporaryVoice');
-const GUILD_FILE_PATTERN = /^\d+\.json$/;
 
 function createEmptyStore() {
     return { entrances: {}, channels: {} };
-}
-
-function ensureDataDir() {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-
-/** 僅接受 Discord snowflake 數字，避免 guildID 被利用來跳脫資料目錄。 */
-function getGuildFile(guildID) {
-    const normalizedGuildID = String(guildID || '').trim();
-    if (!/^\d+$/.test(normalizedGuildID)) throw new Error('無效的伺服器 ID。');
-    return path.join(DATA_DIR, `${normalizedGuildID}.json`);
 }
 
 /** 容忍缺欄或舊版檔案，但不接受 array 等錯誤容器型別。 */
@@ -36,29 +24,24 @@ function normalizeStore(value) {
     };
 }
 
-function loadGuildStore(guildID) {
-    ensureDataDir();
-    const filePath = getGuildFile(guildID);
-    if (!fs.existsSync(filePath)) return createEmptyStore();
+// 共用存取器負責 Guild ID 驗證、空資料、列舉及原子寫入。
+const guildStore = createGuildJsonStore({
+    directory: DATA_DIR,
+    createEmpty: createEmptyStore,
+    normalize: normalizeStore
+});
 
+function loadGuildStore(guildID) {
     try {
-        return normalizeStore(JSON.parse(fs.readFileSync(filePath, 'utf8')));
+        return guildStore.read(guildID);
     } catch (error) {
-        error.message = `無法讀取臨時語音頻道資料 ${filePath}：${error.message}`;
+        error.message = `無法讀取臨時語音頻道資料 ${guildStore.getFile(guildID)}：${error.message}`;
         throw error;
     }
 }
 
-/** 使用同目錄暫存檔原子替換，降低 crash 時留下損壞 JSON 的機率。 */
 function saveGuildStore(guildID, store) {
-    ensureDataDir();
-    const filePath = getGuildFile(guildID);
-    const temporaryPath = `${filePath}.${process.pid}.tmp`;
-    const normalizedStore = normalizeStore(store);
-
-    fs.writeFileSync(temporaryPath, JSON.stringify(normalizedStore, null, 2), 'utf8');
-    fs.renameSync(temporaryPath, filePath);
-    return normalizedStore;
+    return guildStore.write(guildID, store);
 }
 
 /** read-modify-write 共用入口；updater 的回傳值會原樣傳給呼叫端。 */
@@ -122,10 +105,7 @@ function removeManagedChannel(guildID, channelID) {
 }
 
 function listStoredGuildIDs() {
-    ensureDataDir();
-    return fs.readdirSync(DATA_DIR)
-        .filter(fileName => GUILD_FILE_PATTERN.test(fileName))
-        .map(fileName => path.basename(fileName, '.json'));
+    return guildStore.listGuildIDs();
 }
 
 module.exports = {

@@ -11,6 +11,7 @@ const {
     ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, StringSelectMenuBuilder
 } = require('discord.js');
 const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
+const { errorReply } = require(path.join(process.cwd(), 'core/Reply'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { extractTracks, downloadTrack, deleteTrackFile } = require(path.join(process.cwd(), 'util/ytDlpManager'));
 const { getGuildState, enqueue, togglePause, skipCurrent, isCurrentPanel, elapsedSeconds, restoreGuildState, removeQueuedTracks, clearQueue, beginTrackPreparation, endTrackPreparation } = require(path.join(process.cwd(), 'util/musicPlayer'));
@@ -227,12 +228,8 @@ function createMusicRequestModal(insertNext = false) {
 }
 
 async function replyError(interaction, error) {
-    const embed = new EmbedBuilder()
-        .setColor(ERROR_COLOR)
-        .setTitle(`${ERROR_EMOJI} ┃ 音樂操作失敗`)
-        .setDescription(`${ERROR_EMOJI} ${error.message || '執行音樂功能時發生錯誤。'}`);
-    if (interaction.deferred || interaction.replied) return interaction.editReply({ content: null, embeds: [embed], components: [] }).catch(() => {});
-    return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral }).catch(() => {});
+    // 互動失敗屬於狀態回覆，統一交給 core/Reply 套用共用顏色與 Emoji。
+    return errorReply(interaction, `**${error.message || '執行音樂功能時發生錯誤。'}**`, [], true);
 }
 
 async function handleQueueOpen(interaction) {

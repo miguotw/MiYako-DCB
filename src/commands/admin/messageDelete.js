@@ -92,14 +92,7 @@ module.exports = {
 
                 deletedCount = await deleteMessagesIndividually(interaction, botMessages);
 
-                const embed_done = new EmbedBuilder()
-                    .setColor(EMBED_COLOR)
-                    .setTitle('🗑️ ┃ 刪除訊息')
-                    .setDescription(`已成功刪除 ${deletedCount} 條由 Bot 發出的訊息！`)
-
-                return interaction.editReply({
-                    embeds: [embed_done],
-                });
+                return infoReply(interaction, `**已成功刪除 ${deletedCount} 條由 Bot 發出的訊息！**`);
             }
 
             // 獲取頻道中的訊息
@@ -126,15 +119,8 @@ module.exports = {
             // 逐條刪除超過 14 天的訊息
             deletedCount += await deleteMessagesIndividually(interaction, oldMessages);
 
-            // 提示刪除完成
-            const embed_done = new EmbedBuilder()
-                .setColor(EMBED_COLOR) // 設置顏色
-                .setTitle('🗑️ ┃ 刪除訊息')  // 標題
-                .setDescription(`已成功刪除 ${deletedCount} 條訊息！`)
-
-            await interaction.editReply({
-                embeds: [embed_done],
-            });
+            // 完成狀態使用全專案一致的成功回覆樣式。
+            return infoReply(interaction, `**已成功刪除 ${deletedCount} 條訊息！**`);
 
         } catch (error) {
             // 錯誤處理

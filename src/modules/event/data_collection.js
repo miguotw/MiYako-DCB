@@ -5,7 +5,7 @@ const {
     deleteDataCollection, getAllDataCollections, updateDataCollection, withCollectionLock
 } = require(path.join(process.cwd(), 'util/dataCollectionStore'));
 const {
-    createPublicEmbed, deleteAdminPanels, submitRow, syncAdminPanels
+    createMentionBatches, createPublicEmbed, deleteAdminPanels, submitRow, syncAdminPanels
 } = require(path.join(process.cwd(), 'util/dataCollectionViews'));
 
 const CHECK_INTERVAL_MS = 30000;
@@ -47,35 +47,15 @@ async function cleanDeletedAdminPanels(client, record, publicMessage) {
     sendLog(client, `⚠️ 資料收集 ${record.id} 的管理面板已不存在，已停用公開提交並刪除管理面板與本機資料。`, 'WARN');
 }
 
-function createMentionBatches(record, maxLength = 1900) {
-    const targets = record.whitelistMentionTargets?.length
-        ? record.whitelistMentionTargets
-        : (record.whitelistUserIDs || []).map(id => ({ type: 'user', id }));
-    const batches = [];
-    for (const target of targets) {
-        const mention = target.type === 'role' ? `<@&${target.id}>` : `<@${target.id}>`;
-        const current = batches[batches.length - 1];
-        if (!current || `${current.content} ${mention}`.length > maxLength) {
-            batches.push({
-                content: mention,
-                userIDs: target.type === 'user' ? [target.id] : [],
-                roleIDs: target.type === 'role' ? [target.id] : []
-            });
-        } else {
-            current.content += ` ${mention}`;
-            if (target.type === 'user') current.userIDs.push(target.id);
-            else current.roleIDs.push(target.id);
-        }
-    }
-    return batches;
-}
-
 async function restorePublicPanel(client, record) {
     const channel = await client.channels.fetch(record.publicChannelID).catch(() => null);
     if (!channel || typeof channel.send !== 'function') throw new Error('找不到可重建公開資料收集面板的頻道。');
     const sentMentionMessages = [];
     try {
-        const batches = createMentionBatches(record);
+        const mentionTargets = record.whitelistMentionTargets?.length
+            ? record.whitelistMentionTargets
+            : (record.whitelistUserIDs || []).map(id => ({ type: 'user', id }));
+        const batches = createMentionBatches(mentionTargets);
         for (const batch of batches.slice(0, -1)) {
             sentMentionMessages.push(await channel.send({
                 content: batch.content,
@@ -145,4 +125,4 @@ module.exports = client => {
     });
 };
 
-module.exports._test = { createMentionBatches, processCollection };
+module.exports._test = { processCollection };

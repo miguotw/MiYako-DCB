@@ -1,11 +1,7 @@
-const fs = require('fs');
 const path = require('path');
+const { createGuildJsonStore } = require('./guildJsonStore');
 
 const STORE_DIRECTORY = path.join(process.cwd(), 'assets', 'twitch_stream');
-
-function getStorePath(guildID) {
-    return path.join(STORE_DIRECTORY, `${guildID}.json`);
-}
 
 function normalizeStore(data = {}) {
     return {
@@ -14,25 +10,33 @@ function normalizeStore(data = {}) {
     };
 }
 
+function createEmptyStore() {
+    return normalizeStore();
+}
+
+// Twitch 設定與通知狀態沿用每個 Guild 一份 JSON，底層安全讀寫由共用存取器處理。
+const guildStore = createGuildJsonStore({
+    directory: STORE_DIRECTORY,
+    createEmpty: createEmptyStore,
+    normalize: normalizeStore
+});
+
 function readGuildStore(guildID) {
     try {
-        return normalizeStore(JSON.parse(fs.readFileSync(getStorePath(guildID), 'utf8')));
+        return guildStore.read(guildID);
     } catch {
+        // Twitch 排程不應因單一舊檔損壞而阻止其他伺服器啟動。
         return normalizeStore();
     }
 }
 
 function writeGuildStore(guildID, store) {
-    fs.mkdirSync(STORE_DIRECTORY, { recursive: true });
-    const storePath = getStorePath(guildID);
-    const temporaryPath = `${storePath}.tmp`;
     const currentStore = readGuildStore(guildID);
     const nextStore = normalizeStore({
         subscriptions: store.subscriptions ?? currentStore.subscriptions,
         notifications: store.notifications ?? currentStore.notifications
     });
-    fs.writeFileSync(temporaryPath, JSON.stringify(nextStore, null, 2), 'utf8');
-    fs.renameSync(temporaryPath, storePath);
+    guildStore.write(guildID, nextStore);
 }
 
 function getGuildSubscriptions(guildID) {

@@ -12,7 +12,7 @@ const {
     updateDataCollection, withCollectionLock
 } = require(path.join(process.cwd(), 'util/dataCollectionStore'));
 const {
-    createPublicEmbed, deleteAdminPanels, submitRow, syncAdminPanels
+    createMentionBatches, createPublicEmbed, deleteAdminPanels, submitRow, syncAdminPanels
 } = require(path.join(process.cwd(), 'util/dataCollectionViews'));
 const {
     fetchSourceMessage, parseDeadline: parseDeadlineInput,
@@ -58,26 +58,6 @@ function createSubmitModal(record, userID) {
         modal.addComponents(new ActionRowBuilder().addComponents(input));
     });
     return modal;
-}
-
-function createMentionBatches(targets, maxLength = 1900) {
-    const batches = [];
-    for (const target of targets) {
-        const mention = target.type === 'role' ? `<@&${target.id}>` : `<@${target.id}>`;
-        const current = batches[batches.length - 1];
-        if (!current || `${current.content} ${mention}`.length > maxLength) {
-            batches.push({
-                content: mention,
-                userIDs: target.type === 'user' ? [target.id] : [],
-                roleIDs: target.type === 'role' ? [target.id] : []
-            });
-        } else {
-            current.content += ` ${mention}`;
-            if (target.type === 'user') current.userIDs.push(target.id);
-            else current.roleIDs.push(target.id);
-        }
-    }
-    return batches;
 }
 
 async function disablePublicPanel(client, record) {
@@ -265,5 +245,5 @@ module.exports = {
 };
 
 module.exports._test = {
-    buildWhitelist, createMentionBatches, getDataCollectionLimits, parseDeadline, parseMentionTargets
+    buildWhitelist, getDataCollectionLimits, parseDeadline, parseMentionTargets
 };

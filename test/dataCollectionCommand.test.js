@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const command = require('../src/commands/admin/dataCollection');
-const { paginateLines, sanitizeCell } = require('../util/dataCollectionViews');
+const { createMentionBatches, paginateLines, sanitizeCell } = require('../util/dataCollectionViews');
 
 test('/admin 資料收集參數結構正確', () => {
     const json = command.data.toJSON();
@@ -32,10 +32,11 @@ test('資料標題與提交長度設定會套用安全範圍', () => {
     });
 });
 
-test('截止時間使用本機時間及小時偏移', () => {
+test('截止時間不受主機時區影響，UTC offset 依標準方向換算', () => {
     const base = command._test.parseDeadline('2026-08-01 20:30', 0);
-    assert.equal(command._test.parseDeadline('2026-08-01 20:30', 1) - base, 3600);
-    assert.equal(command._test.parseDeadline('2026-08-01 20:30', -2) - base, -7200);
+    assert.equal(base, 1785616200);
+    assert.equal(command._test.parseDeadline('2026-08-01 20:30', 1) - base, -3600);
+    assert.equal(command._test.parseDeadline('2026-08-01 20:30', -2) - base, 7200);
     assert.equal(command._test.parseDeadline('2026-02-30 20:30', 0), null);
 });
 
@@ -62,7 +63,7 @@ test('建立流程同時保留原始提及目標與展開後用戶', async () =>
 });
 
 test('白名單提及會依一般訊息長度分批', () => {
-    const batches = command._test.createMentionBatches(
+    const batches = createMentionBatches(
         [{ type: 'user', id: '12345678901234567' }, { type: 'role', id: '23456789012345678' }], 25
     );
     assert.deepEqual(batches, [
