@@ -15,7 +15,8 @@ function withTimeout(promise, message, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS) {
 
 /**
  * 將 yyyy-mm-dd hh:mm 解析為 Unix 秒數。
- * timezoneOffset 延續專案既有規則，以小時加到本機解析後的時間。
+ * 輸入值先按 Node 主機的本機時區解讀，再扣除 timezoneOffset 小時作為人工校正。
+ * 台灣時區主機使用 0；UTC 主機要接受台灣時間輸入時使用 +8。
  */
 function parseDeadline(value, timezoneOffset = 0) {
     const match = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2}) ([01]\d|2[0-3]):([0-5]\d)$/);
@@ -27,8 +28,8 @@ function parseDeadline(value, timezoneOffset = 0) {
         || localDate.getMinutes() !== minute) return null;
 
     const offset = Number(timezoneOffset);
-    localDate.setHours(localDate.getHours() + (Number.isFinite(offset) ? offset : 0));
-    return Math.floor(localDate.getTime() / 1000);
+    if (!Number.isFinite(offset)) return null;
+    return Math.floor((localDate.getTime() - offset * 60 * 60 * 1000) / 1000);
 }
 
 /**
