@@ -120,7 +120,10 @@ function createAdminCommand(commands) {
             if (!command) throw new Error(`找不到管理子指令處理器：${routeName}`);
             return command.execute(interaction);
         },
-        modalSubmitHandlers: mergeHandlers(commands, 'modalSubmitHandlers'),
+        modalSubmitHandlers: {
+            ...mergeHandlers(commands, 'modalSubmitHandlers'),
+            ...mergeHandlers(commands, 'publicModalSubmitHandlers')
+        },
         buttonHandlers: {
             ...mergeHandlers(commands, 'buttonHandlers'),
             ...mergeHandlers(commands, 'publicButtonHandlers')

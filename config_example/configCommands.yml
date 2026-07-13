@@ -13,6 +13,18 @@ raffle:
 
 
 #-------------------------------
+# /admin 資料收集 指令的設定：
+dataCollection:
+  emoji: "📝"
+
+  # 資料1～5 標題的最大字元數。Discord Modal 標籤最多 45 字元。
+  titleMaxLength: 10
+
+  # 用戶提交的每個資料欄位最大字元數；可設定 1～700。
+  submissionMaxLength: 20
+
+
+#-------------------------------
 # /admin 刪除訊息 指令的設定：
 messageDelete:
   emoji: "🗑️"

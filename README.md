@@ -24,6 +24,7 @@ MiYako-DCB（みやこ機器人第三代）是以 [discord.js](https://discord.j
 | `/admin 直播通知 新增／移除` | 管理 Twitch 直播通知 | 僅限伺服器管理員 |
 | `/admin 臨時語音頻道 新增／移除` | 管理加入後自動建立專屬頻道的語音入口 | 僅限伺服器管理員 |
 | `/admin 抽選系統` | 建立到期後自動開獎的抽選公告 | 僅限伺服器管理員建立 |
+| `/admin 資料收集` | 建立白名單限定、可覆寫提交的資料收集面板 | 僅限伺服器管理員建立 |
 
 ### 自動事件與紀錄
 
@@ -93,6 +94,7 @@ MiYako-DCB/
     ├── music/                  # yt-dlp、音訊快取與最新面板狀態（不納入版本控制）
     ├── packageTracking/        # 每位使用者的物流 JSON（不納入版本控制）
     ├── raffle/                 # 每個伺服器的抽選名單與結果（不納入版本控制）
+    ├── dataCollection/         # 每個伺服器的資料收集設定與提交內容（不納入版本控制）
     └── temporaryVoice/         # 每個伺服器的入口與受管頻道 JSON（不納入版本控制）
 ```
 
@@ -109,7 +111,7 @@ MiYako-DCB/
 
 `src/commands/admin/` 是管理指令聚合與權限政策目錄。載入器不會個別註冊其中的頂層指令，而會自動組合成 `/admin`：一般指令成為 `/admin <指令>`，原本已有子指令的模組成為 `/admin <指令群組> <子指令>`。`admin` 是 `config.yml` 內 `Startup.adminCommandName` 的預設值，可依部署需求變更；名稱需符合 Discord Slash Command 規則。管理指令的日誌路徑應以 `core/commandPolicy.js` 的 `getAdminCommandPath()` 組合，禁止硬編碼 `/admin`，讓設定變更能同步反映在指令註冊與日誌。聚合後的子指令名稱直接沿用模組 `data.name`，不套用額外別名。
 
-聚合後會自動禁止私訊、將 Discord 預設成員權限設為 Administrator，並在執行 Slash Command、Modal、Button 或 String Select Menu handler 前再次驗證管理員權限。將指令檔移入此目錄即可同時套用 `/admin` 命名與權限限制，移出即可取消；指令模組本身不需重複撰寫管理員權限判斷。
+聚合後會自動禁止私訊、將 Discord 預設成員權限設為 Administrator，並在執行 Slash Command、一般 Modal、Button 或 String Select Menu handler 前再次驗證管理員權限。需要讓一般用戶操作管理功能建立的面板時，模組可明確匯出 `publicButtonHandlers`／`publicModalSubmitHandlers`；這些公開 handler 必須自行驗證資格。將指令檔移入此目錄即可同時套用 `/admin` 命名與建立／管理權限限制。
 
 ## 擴充方式
 
@@ -184,12 +186,15 @@ await errorReply(interaction, '**操作失敗，請稍後再試！**');
 | YouTube 音樂 | yt-dlp、ffmpeg-static | FFmpeg 隨 npm 依賴安裝；yt-dlp 每 24 小時節流檢查 stable 更新，抽取失效時更新並重試一次 |
 | 臨時語音頻道 | `assets/temporaryVoice/<guildID>.json` | 保存入口、受管頻道及空置起始時間，重啟後恢復管理 |
 | 抽選系統 | `assets/raffle/<guildID>.json` | 保存參加名單與結果，重啟後補開 |
+| 資料收集 | `assets/dataCollection/<guildID>.json` | 保存白名單、欄位與提交內容，含可能的敏感資料 |
 
 部署物流功能時，`assets/packageTracking/` 必須可寫且需納入獨立備份；該目錄不會進入 Git。多個 Bot 程序共用同一目錄也沒有檔案鎖定機制，不建議以多程序模式執行。
 
 `/admin 臨時語音頻道 新增` 可設定多個語音入口及個別前綴；省略前綴會清除該入口原有前綴。真人成員加入入口後，Bot 會在相同分類建立繼承入口權限的 `前綴暱稱` 頻道（前綴與暱稱直接相連）並移動成員。`/admin 臨時語音頻道 移除` 只停止入口建立新頻道，既有頻道仍會繼續管理。空頻道經 `configModules.yml` 的 `temporaryVoice.deleteAfterMinutes`（預設 5 分鐘）後刪除；入口與受管頻道資料會在 Bot 重啟後恢復。`assets/temporaryVoice/` 必須可寫並應獨立備份。
 
 `/admin 抽選系統` 會從指定訊息建立公告。單一 `yyyy-mm-dd hh:mm` 截止時間先視為主機本機時間，再依 `config.yml` 的 `log.timezone` 做小時偏移：`0` 不調整、`1` 加一小時、`-2` 減兩小時。公告只顯示相對倒數，footer 以「唯一 ID • 時間」呈現。一般用戶透過「參加/取消抽選」按鈕切換登記，公告會即時列出已登記用戶。白名單與黑名單只接受 `@用戶` 或 `@身分組`，建立時展開為當下的真人成員快照且不公開；使用身分組需要在 Discord Developer Portal 啟用 Server Members Intent。白名單用戶無須抽選，黑名單用戶不可參與，兩者不得重疊。截止後按鈕一律停用。啟用自動抽選時，「抽選人數」會標示「已啟用自動抽選」，每 30 秒排程會自動抽出中選者並直接更新原公告 Embed；停用時只關閉登記，不產生中選結果。Bot 離線期間逾期的活動會在重啟後補處理。公告更新成功後，該抽選 ID 會立即從 `assets/raffle/` 移除；若更新失敗則暫時保留供排程重試。若公告訊息或所在頻道已不存在，也會自動刪除該筆資料。
+
+`/admin 資料收集` 會在指定頻道以一般訊息直接提及白名單中的 `@用戶`／`@身分組`，再建立公開提交面板；不會把身分組拆成多個用戶提及，名單過長時會依 Discord 訊息限制分批。「管理面板」必選參數可將含完整回答的管理分頁送到指令目前頻道或建立者私訊；選擇目前頻道時，頻道可見權限即為資料可見範圍，請只在私密管理頻道執行。私訊管理面板的刪除按鈕只允許建立者操作；伺服器頻道內則允許建立者或管理員操作。提交資格仍在建立時將身分組展開為成員快照。截止時間使用與抽選相同的主機本機時間及 `log.timezone` 偏移，每 30 秒停用逾期按鈕。每個 Modal 欄位為必填單行文字；`configCommands.yml` 的 `dataCollection.titleMaxLength` 可設定資料標題上限（1～45），`submissionMaxLength` 可設定每欄提交上限（1～700），預設分別為 10 與 20。重複提交會覆寫，並嘗試私訊提交者副本。資料保存於 `assets/dataCollection/`，直到管理員在管理面板按下紅色刪除按鈕並於確認 Modal 輸入 `y`。公開面板在截止前遺失時會重新提及白名單並在原頻道重建；截止後遺失時不執行任何動作。任一管理分頁被刪除時，系統會停用公開提交按鈕、刪除其餘管理分頁與本機資料。
 
 ## 開發與驗證現況
 
