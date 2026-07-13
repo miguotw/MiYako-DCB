@@ -1,42 +1,19 @@
 const crypto = require('crypto');
-const fs = require('fs');
 const path = require('path');
+// 共用程式以檔案自身位置載入；資料目錄仍依 process.cwd()，方便部署與測試隔離。
+const { createGuildJsonStore } = require('./guildJsonStore');
 
 const DATA_DIR = path.join(process.cwd(), 'assets', 'dataCollection');
-const FILE_PATTERN = /^\d+\.json$/;
 const locks = new Map();
 
 function emptyStore() { return { collections: [] }; }
 function normalizeStore(value) { return { collections: Array.isArray(value?.collections) ? value.collections : [] }; }
 
-function getGuildFile(guildID) {
-    const id = String(guildID || '');
-    if (!/^\d+$/.test(id)) throw new Error('無效的伺服器 ID。');
-    return path.join(DATA_DIR, `${id}.json`);
-}
-
-function readGuildCollections(guildID) {
-    try { return normalizeStore(JSON.parse(fs.readFileSync(getGuildFile(guildID), 'utf8'))); }
-    catch (error) {
-        if (error.code === 'ENOENT') return emptyStore();
-        throw error;
-    }
-}
-
-function writeGuildCollections(guildID, store) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    const file = getGuildFile(guildID);
-    const temporary = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(temporary, JSON.stringify(normalizeStore(store), null, 2), 'utf8');
-    fs.renameSync(temporary, file);
-}
-
-function updateGuildCollections(guildID, updater) {
-    const store = readGuildCollections(guildID);
-    const result = updater(store);
-    writeGuildCollections(guildID, store);
-    return result;
-}
+// 資料收集功能只描述資料內容，檔案驗證與原子寫入由共用存取器處理。
+const guildStore = createGuildJsonStore({ directory: DATA_DIR, createEmpty: emptyStore, normalize: normalizeStore });
+const readGuildCollections = guildStore.read;
+const writeGuildCollections = guildStore.write;
+const updateGuildCollections = guildStore.update;
 
 function createDataCollection(guildID, data) {
     const record = {
@@ -76,15 +53,7 @@ function deleteDataCollection(guildID, collectionID) {
 }
 
 function getAllDataCollections() {
-    try {
-        return fs.readdirSync(DATA_DIR).filter(name => FILE_PATTERN.test(name)).flatMap(name => {
-            const guildID = path.basename(name, '.json');
-            return readGuildCollections(guildID).collections;
-        });
-    } catch (error) {
-        if (error.code === 'ENOENT') return [];
-        throw error;
-    }
+    return guildStore.listGuildIDs().flatMap(guildID => readGuildCollections(guildID).collections);
 }
 
 function findDataCollection(collectionID) {

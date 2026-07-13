@@ -6,86 +6,13 @@ const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply')
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { createRaffle, deleteRaffle, getRaffle, updateRaffle } = require(path.join(process.cwd(), 'util/raffleStore'));
 const { createRaffleEmbed, participationRow } = require(path.join(process.cwd(), 'util/raffleViews'));
+const {
+    fetchSourceMessage, parseDeadline: parseDeadlineInput, parseMentionTargets, resolveMentionedUsers
+} = require(path.join(process.cwd(), 'util/discordCommandInput'));
 
-const MESSAGE_LINK = /^https?:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/channels\/(\d+)\/(\d+)\/(\d+)\/?$/i;
-const DISCORD_REQUEST_TIMEOUT_MS = 15000;
-
-function withTimeout(promise, message) {
-    let timeout;
-    return Promise.race([
-        promise,
-        new Promise((_, reject) => {
-            timeout = setTimeout(() => reject(new Error(message)), DISCORD_REQUEST_TIMEOUT_MS);
-        })
-    ]).finally(() => clearTimeout(timeout));
-}
-
+// 將專案時區預設值包在指令層，讓共用解析器不依賴全域設定。
 function parseDeadline(value, timezoneOffset = config.log.timezone) {
-    const match = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2}) ([01]\d|2[0-3]):([0-5]\d)$/);
-    if (!match) return null;
-    const [, year, month, day, hour, minute] = match.map(Number);
-    const localDate = new Date(year, month - 1, day, hour, minute, 0, 0);
-    if (localDate.getFullYear() !== year || localDate.getMonth() !== month - 1 || localDate.getDate() !== day
-        || localDate.getHours() !== hour || localDate.getMinutes() !== minute) return null;
-
-    const offset = Number(timezoneOffset);
-    localDate.setHours(localDate.getHours() + (Number.isFinite(offset) ? offset : 0));
-    return Math.floor(localDate.getTime() / 1000);
-}
-
-function parseMentionTargets(value, fieldName) {
-    if (!value?.trim()) return [];
-    const tokens = value.trim().split(/[\s,，]+/).filter(Boolean);
-    const targets = tokens.map(token => {
-        const user = token.match(/^<@!?(\d{17,20})>$/);
-        if (user) return { type: 'user', id: user[1] };
-        const role = token.match(/^<@&(\d{17,20})>$/);
-        if (role) return { type: 'role', id: role[1] };
-        throw new Error(`${fieldName}僅接受 @用戶 或 @身分組，不接受純數字 ID。`);
-    });
-    return [...new Map(targets.map(target => [`${target.type}:${target.id}`, target])).values()];
-}
-
-async function fetchSourceMessage(interaction, input) {
-    const link = String(input).trim().match(MESSAGE_LINK);
-    if (link) {
-        const [, guildID, channelID, messageID] = link;
-        if (guildID !== interaction.guildId) throw new Error('來源訊息連結必須屬於目前伺服器。');
-        const channel = await interaction.guild.channels.fetch(channelID).catch(() => null);
-        if (!channel?.messages) throw new Error('無法讀取來源訊息所在頻道。');
-        return channel.messages.fetch(messageID);
-    }
-    if (!/^\d{17,20}$/.test(String(input).trim())) throw new Error('請輸入有效的 Discord 訊息 ID 或訊息連結。');
-    if (!interaction.channel?.messages) throw new Error('目前頻道不支援讀取訊息。');
-    return interaction.channel.messages.fetch(String(input).trim());
-}
-
-async function resolveMentionedUsers(interaction, targets, fieldName) {
-    if (!targets.length) return [];
-    const userIDs = new Set();
-    if (targets.some(target => target.type === 'role')) {
-        await withTimeout(
-            interaction.guild.members.fetch(),
-            `展開${fieldName}身分組逾時。請確認 Discord Developer Portal 已啟用 Server Members Intent。`
-        );
-    }
-    for (const target of targets) {
-        if (target.type === 'user') {
-            const member = interaction.guild.members.cache.get(target.id) || await withTimeout(
-                interaction.guild.members.fetch(target.id).catch(() => null),
-                `查詢${fieldName}用戶逾時。`
-            );
-            if (!member || member.user.bot) throw new Error(`${fieldName}包含不在伺服器中的用戶或 Bot。`);
-            userIDs.add(member.id);
-            continue;
-        }
-        const role = interaction.guild.roles.cache.get(target.id);
-        if (!role) throw new Error(`${fieldName}包含不存在的身分組。`);
-        for (const member of role.members.values()) {
-            if (!member.user.bot) userIDs.add(member.id);
-        }
-    }
-    return [...userIDs];
+    return parseDeadlineInput(value, timezoneOffset);
 }
 
 module.exports = {

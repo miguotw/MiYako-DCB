@@ -1,41 +1,17 @@
 const crypto = require('crypto');
-const fs = require('fs');
 const path = require('path');
+// 共用程式以檔案自身位置載入；資料目錄仍依 process.cwd()，方便部署與測試隔離。
+const { createGuildJsonStore } = require('./guildJsonStore');
 
 const DATA_DIR = path.join(process.cwd(), 'assets', 'raffle');
-const GUILD_FILE_PATTERN = /^\d+\.json$/;
 
 function emptyStore() { return { raffles: [] }; }
 function normalizeStore(value) { return { raffles: Array.isArray(value?.raffles) ? value.raffles : [] }; }
-
-function getGuildFile(guildID) {
-    const id = String(guildID || '');
-    if (!/^\d+$/.test(id)) throw new Error('無效的伺服器 ID。');
-    return path.join(DATA_DIR, `${id}.json`);
-}
-
-function readGuildRaffles(guildID) {
-    try { return normalizeStore(JSON.parse(fs.readFileSync(getGuildFile(guildID), 'utf8'))); }
-    catch (error) {
-        if (error.code === 'ENOENT') return emptyStore();
-        throw error;
-    }
-}
-
-function writeGuildRaffles(guildID, store) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    const file = getGuildFile(guildID);
-    const temporary = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(temporary, JSON.stringify(normalizeStore(store), null, 2), 'utf8');
-    fs.renameSync(temporary, file);
-}
-
-function updateGuildRaffles(guildID, updater) {
-    const store = readGuildRaffles(guildID);
-    const result = updater(store);
-    writeGuildRaffles(guildID, store);
-    return result;
-}
+// 抽選功能只保留業務操作，通用的 JSON 安全讀寫交給共用資料存取器。
+const guildStore = createGuildJsonStore({ directory: DATA_DIR, createEmpty: emptyStore, normalize: normalizeStore });
+const readGuildRaffles = guildStore.read;
+const writeGuildRaffles = guildStore.write;
+const updateGuildRaffles = guildStore.update;
 
 function createRaffle(guildID, data) {
     const raffle = {
@@ -74,15 +50,7 @@ function deleteRaffle(guildID, raffleID) {
 }
 
 function getAllRaffles() {
-    try {
-        return fs.readdirSync(DATA_DIR).filter(name => GUILD_FILE_PATTERN.test(name)).flatMap(name => {
-            const guildID = path.basename(name, '.json');
-            return readGuildRaffles(guildID).raffles;
-        });
-    } catch (error) {
-        if (error.code === 'ENOENT') return [];
-        throw error;
-    }
+    return guildStore.listGuildIDs().flatMap(guildID => readGuildRaffles(guildID).raffles);
 }
 
 function drawWinners(participants, count, randomInt = crypto.randomInt) {

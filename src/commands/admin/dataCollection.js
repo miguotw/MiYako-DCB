@@ -14,9 +14,10 @@ const {
 const {
     createPublicEmbed, deleteAdminPanels, submitRow, syncAdminPanels
 } = require(path.join(process.cwd(), 'util/dataCollectionViews'));
-
-const MESSAGE_LINK = /^https?:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/channels\/(\d+)\/(\d+)\/(\d+)\/?$/i;
-const REQUEST_TIMEOUT_MS = 15000;
+const {
+    fetchSourceMessage, parseDeadline: parseDeadlineInput,
+    parseMentionTargets: parseMentionTargetsInput, resolveMentionedUsers
+} = require(path.join(process.cwd(), 'util/discordCommandInput'));
 
 function getDataCollectionLimits(settings = {}) {
     return {
@@ -28,78 +29,23 @@ function getDataCollectionLimits(settings = {}) {
 const { titleMaxLength: TITLE_MAX_LENGTH, submissionMaxLength: SUBMISSION_MAX_LENGTH } =
     getDataCollectionLimits(configCommands.dataCollection);
 
-function withTimeout(promise, message) {
-    let timeout;
-    return Promise.race([
-        promise,
-        new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error(message)), REQUEST_TIMEOUT_MS); })
-    ]).finally(() => clearTimeout(timeout));
-}
-
 function parseDeadline(value, timezoneOffset = config.log.timezone) {
-    const match = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2}) ([01]\d|2[0-3]):([0-5]\d)$/);
-    if (!match) return null;
-    const [, year, month, day, hour, minute] = match.map(Number);
-    const localDate = new Date(year, month - 1, day, hour, minute, 0, 0);
-    if (localDate.getFullYear() !== year || localDate.getMonth() !== month - 1 || localDate.getDate() !== day
-        || localDate.getHours() !== hour || localDate.getMinutes() !== minute) return null;
-    const offset = Number(timezoneOffset);
-    localDate.setHours(localDate.getHours() + (Number.isFinite(offset) ? offset : 0));
-    return Math.floor(localDate.getTime() / 1000);
+    return parseDeadlineInput(value, timezoneOffset);
 }
 
 function parseMentionTargets(value) {
-    const tokens = String(value || '').trim().split(/[\s,，]+/).filter(Boolean);
-    if (!tokens.length) throw new Error('白名單不可留白。');
-    const targets = tokens.map(token => {
-        const user = token.match(/^<@!?(\d{17,20})>$/);
-        if (user) return { type: 'user', id: user[1] };
-        const role = token.match(/^<@&(\d{17,20})>$/);
-        if (role) return { type: 'role', id: role[1] };
-        throw new Error('白名單僅接受 @用戶 或 @身分組，不接受純數字 ID。');
-    });
-    return [...new Map(targets.map(target => [`${target.type}:${target.id}`, target])).values()];
+    return parseMentionTargetsInput(value, '白名單', { required: true });
 }
 
 async function resolveWhitelist(interaction, targets) {
-    const userIDs = new Set();
-    if (targets.some(target => target.type === 'role')) {
-        await withTimeout(interaction.guild.members.fetch(), '展開白名單身分組逾時，請確認已啟用 Server Members Intent。');
-    }
-    for (const target of targets) {
-        if (target.type === 'user') {
-            const member = interaction.guild.members.cache.get(target.id) || await withTimeout(
-                interaction.guild.members.fetch(target.id).catch(() => null), '查詢白名單用戶逾時。'
-            );
-            if (!member || member.user.bot) throw new Error('白名單包含不在伺服器中的用戶或 Bot。');
-            userIDs.add(member.id);
-        } else {
-            const role = interaction.guild.roles.cache.get(target.id);
-            if (!role) throw new Error('白名單包含不存在的身分組。');
-            for (const member of role.members.values()) if (!member.user.bot) userIDs.add(member.id);
-        }
-    }
-    if (!userIDs.size) throw new Error('白名單沒有任何可提交資料的真人成員。');
-    return [...userIDs];
+    const userIDs = await resolveMentionedUsers(interaction, targets, '白名單');
+    if (!userIDs.length) throw new Error('白名單沒有任何可提交資料的真人成員。');
+    return userIDs;
 }
 
 async function buildWhitelist(interaction, value, resolver = resolveWhitelist) {
     const targets = parseMentionTargets(value);
     return { targets, userIDs: await resolver(interaction, targets) };
-}
-
-async function fetchSourceMessage(interaction, input) {
-    const link = String(input).trim().match(MESSAGE_LINK);
-    if (link) {
-        const [, guildID, channelID, messageID] = link;
-        if (guildID !== interaction.guildId) throw new Error('來源訊息連結必須屬於目前伺服器。');
-        const channel = await interaction.guild.channels.fetch(channelID).catch(() => null);
-        if (!channel?.messages) throw new Error('無法讀取來源訊息所在頻道。');
-        return channel.messages.fetch(messageID);
-    }
-    if (!/^\d{17,20}$/.test(String(input).trim())) throw new Error('請輸入有效的 Discord 訊息 ID 或訊息連結。');
-    if (!interaction.channel?.messages) throw new Error('目前頻道不支援讀取訊息。');
-    return interaction.channel.messages.fetch(String(input).trim());
 }
 
 function createSubmitModal(record, userID) {

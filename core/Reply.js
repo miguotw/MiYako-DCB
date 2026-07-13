@@ -34,15 +34,7 @@ function createInfoEmbed(successMessage) {
  * @param {boolean} [ephemeral] - 是否僅讓觸發互動的使用者看見
  */
 async function errorReply(interaction, errorMessage, files = [], ephemeral = false) {
-    const embed = createErrorEmbed(errorMessage);
-
-    const replyOptions = { embeds: [embed], files: files };
-
-    if (interaction.deferred || interaction.replied) {
-        await interaction.editReply(replyOptions).catch(() => {});
-    } else {
-        await interaction.reply({ ...replyOptions, ephemeral }).catch(() => {});
-    }
+    return sendEmbedReply(interaction, createErrorEmbed(errorMessage), files, ephemeral);
 }
 
 /**
@@ -52,15 +44,19 @@ async function errorReply(interaction, errorMessage, files = [], ephemeral = fal
  * @param {Array<Attachment>} [files] - 附加的檔案（可選）
  */
 async function infoReply(interaction, successMessage, files = [], ephemeral = false) {
-    const embed = createInfoEmbed(successMessage);
+    return sendEmbedReply(interaction, createInfoEmbed(successMessage), files, ephemeral);
+}
 
+/**
+ * 統一處理互動的 Embed 回覆方式。
+ * 已延遲或已回覆的 Interaction 必須使用 editReply；其餘情況才使用 reply。
+ */
+async function sendEmbedReply(interaction, embed, files = [], ephemeral = false) {
     const replyOptions = { embeds: [embed], files: files };
-
     if (interaction.deferred || interaction.replied) {
-        await interaction.editReply(replyOptions).catch(() => {});
-    } else {
-        await interaction.reply({ ...replyOptions, ephemeral }).catch(() => {});
+        return interaction.editReply(replyOptions).catch(() => {});
     }
+    return interaction.reply({ ...replyOptions, ephemeral }).catch(() => {});
 }
 
 module.exports = { createErrorEmbed, createInfoEmbed, errorReply, infoReply };
