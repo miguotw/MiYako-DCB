@@ -11,12 +11,15 @@ const {
     ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, StringSelectMenuBuilder
 } = require('discord.js');
 const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
-const { errorReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { errorReply, validationReply } = require(path.join(process.cwd(), 'core/Reply'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const { extractTracks, downloadTrack, deleteTrackFile } = require(path.join(process.cwd(), 'util/ytDlpManager'));
 const { getGuildState, enqueue, togglePause, skipCurrent, isCurrentPanel, elapsedSeconds, restoreGuildState, removeQueuedTracks, clearQueue, beginTrackPreparation, endTrackPreparation } = require(path.join(process.cwd(), 'util/musicPlayer'));
 const { loadAllGuildQueues } = require(path.join(process.cwd(), 'util/musicQueueStore'));
-const { formatDuration, getUploadYear, createProgressBar, paginateQueue } = require(path.join(process.cwd(), 'util/musicHelpers'));
+const {
+    formatDuration, getUploadYear, createProgressBar, paginateQueue,
+    isMusicValidationError, musicValidationError
+} = require(path.join(process.cwd(), 'util/musicHelpers'));
 const { getLatestMusicPanel, getAllLatestMusicPanels, saveLatestMusicPanel } = require(path.join(process.cwd(), 'util/musicPanelStore'));
 
 const MUSIC_CONFIG = configCommands.music || {};
@@ -144,10 +147,10 @@ async function restorePersistedPlayback(client) {
 
 // 互動前置條件：操作人必須在語音頻道，且舊面板不得再改動狀態。
 function requireGuildVoice(interaction, state = null) {
-    if (!interaction.inGuild()) throw new Error('音樂功能僅能在伺服器中使用。');
+    if (!interaction.inGuild()) throw musicValidationError('音樂功能僅能在伺服器中使用。');
     const channel = interaction.member?.voice?.channel;
-    if (!channel) throw new Error('請先加入語音頻道。');
-    if (state?.voiceChannelID && state.voiceChannelID !== channel.id) throw new Error('請先加入 Bot 所在的語音頻道。');
+    if (!channel) throw musicValidationError('請先加入語音頻道。');
+    if (state?.voiceChannelID && state.voiceChannelID !== channel.id) throw musicValidationError('請先加入 Bot 所在的語音頻道。');
     return channel;
 }
 
@@ -155,7 +158,7 @@ function requireCurrentPanel(interaction, state) {
     const messageID = interaction.message?.id;
     const persisted = getLatestMusicPanel(interaction.guildId);
     const isPersistedCurrent = persisted?.messageID === messageID;
-    if (!isCurrentPanel(state, messageID) && !isPersistedCurrent) throw new Error('此面板已過期，請創建一個新的音樂面板。');
+    if (!isCurrentPanel(state, messageID) && !isPersistedCurrent) throw musicValidationError('此面板已過期，請創建一個新的音樂面板。');
     // Bot 重啟後，從持久化 ID 與本次互動重新綁定最新面板。
     if (!state.panelMessage && isPersistedCurrent) {
         state.panelMessage = interaction.message;
@@ -228,8 +231,15 @@ function createMusicRequestModal(insertNext = false) {
 }
 
 async function replyError(interaction, error) {
-    // 互動失敗屬於狀態回覆，統一交給 core/Reply 套用共用顏色與 Emoji。
-    return errorReply(interaction, `**${error.message || '執行音樂功能時發生錯誤。'}**`, [], true);
+    const options = interaction.deferred
+        ? {}
+        : interaction.replied
+            ? { method: 'followUp', ephemeral: true }
+            : { method: 'reply', ephemeral: true };
+    if (isMusicValidationError(error)) {
+        return validationReply(interaction, `**${error.message}**`, options);
+    }
+    return errorReply(interaction, error, { ...options, context: '執行音樂功能' });
 }
 
 async function handleQueueOpen(interaction) {
@@ -292,7 +302,7 @@ module.exports = {
                 requireGuildVoice(interaction, state);
                 requireCurrentPanel(interaction, state);
                 const paused = togglePause(state);
-                if (paused === null) throw new Error('目前沒有播放中的音樂。');
+                if (paused === null) throw musicValidationError('目前沒有播放中的音樂。');
                 await interaction.reply({ embeds: [createActionEmbed(paused ? '⏸️ ┃ 已暫停播放' : `${SUCCESS_EMOJI} ┃ 已繼續播放`, `<@${interaction.user.id}> ${paused ? '暫停了目前的音樂。' : '繼續播放目前的音樂。'}`, SUCCESS_COLOR)] });
             } catch (error) { return replyError(interaction, error); }
         },
@@ -302,7 +312,7 @@ module.exports = {
                 requireGuildVoice(interaction, state);
                 requireCurrentPanel(interaction, state);
                 const skippedTitle = state.current?.title;
-                if (!skipCurrent(state)) throw new Error('目前沒有播放中的音樂。');
+                if (!skipCurrent(state)) throw musicValidationError('目前沒有播放中的音樂。');
                 await interaction.reply({ embeds: [createActionEmbed('⏭️ ┃ 已跳過歌曲', `<@${interaction.user.id}> 跳過了 **${skippedTitle}**。`, SUCCESS_COLOR)] });
             } catch (error) { return replyError(interaction, error); }
         },
@@ -312,7 +322,7 @@ module.exports = {
             try {
                 const state = getState(interaction.guildId, interaction.client);
                 requireGuildVoice(interaction, state);
-                if (!state.queue.length) throw new Error('目前沒有待播歌曲。');
+                if (!state.queue.length) throw musicValidationError('目前沒有待播歌曲。');
                 await interaction.showModal(createClearQueueModal(interaction.channelId, interaction.message.id));
             } catch (error) { return replyError(interaction, error); }
         }
@@ -333,7 +343,7 @@ module.exports = {
     modalSubmitHandlers: {
         music_queue_clear_modal: async interaction => {
             try {
-                if (interaction.fields.getTextInputValue('confirmation').trim().toLowerCase() !== 'y') throw new Error('確認文字不正確，未清空序列。');
+                if (interaction.fields.getTextInputValue('confirmation').trim().toLowerCase() !== 'y') throw musicValidationError('確認文字不正確，未清空序列。');
                 const state = getState(interaction.guildId, interaction.client);
                 requireGuildVoice(interaction, state);
                 const removed = clearQueue(state);
@@ -392,7 +402,6 @@ module.exports = {
                 await interaction.editReply({ embeds: [createActionEmbed(`${SUCCESS_EMOJI} ┃ ${insertNext ? '插播' : '點播'}成功`, description, SUCCESS_COLOR)] });
             } catch (error) {
                 for (const track of downloadedTracks) if (!enqueuedTracks.has(track)) deleteTrackFile(track);
-                sendLog(interaction.client, `${ERROR_EMOJI} 點播音樂失敗`, 'ERROR', error);
                 await replyError(interaction, error);
             } finally {
                 if (preparationStarted) endTrackPreparation(state);

@@ -3,7 +3,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
 const { getAdminCommandPath } = require(path.join(process.cwd(), 'core/commandPolicy'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { errorReply, infoReply, validationReply } = require(path.join(process.cwd(), 'core/Reply'));
 
 // 導入設定檔內容
 const EMBED_COLOR = config.embed.color.default;
@@ -65,7 +65,7 @@ module.exports = {
 
             // 確保刪除的訊息數量在合理範圍內 (1-DELETE_LIMIT)
             if (amount < 1 || amount > DELETE_LIMIT) {
-                return errorReply(interaction, `**請輸入一個介於 1 到 ${DELETE_LIMIT} 之間的數字！**`);
+                return validationReply(interaction, `**請輸入一個介於 1 到 ${DELETE_LIMIT} 之間的數字！**`);
             }
 
             // 提示開始刪除
@@ -125,7 +125,7 @@ module.exports = {
         } catch (error) {
             // 錯誤處理
             sendLog(interaction.client, `❌ 在執行 ${getAdminCommandPath('刪除訊息')} 指令時發生錯誤`, "ERROR", error); // 記錄錯誤日誌
-            return errorReply(interaction, `**${error.message || '發生未預期的錯誤，請向開發者回報！'}**`); // 向用戶顯示錯誤訊息
+            return errorReply(interaction, error, { context: '刪除 Discord 訊息' });
         }
     }
 };

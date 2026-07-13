@@ -6,7 +6,7 @@ const {
 } = require('discord.js');
 const { getAdminCommandPath } = require(path.join(process.cwd(), 'core/commandPolicy'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { errorReply, infoReply, validationReply } = require(path.join(process.cwd(), 'core/Reply'));
 const {
     loadGuildStore,
     removeEntrance,
@@ -60,13 +60,13 @@ module.exports = {
 
         try {
             if (channel.guildId !== interaction.guildId || channel.type !== ChannelType.GuildVoice) {
-                return errorReply(interaction, '**請選擇目前伺服器中的語音頻道！**');
+                return validationReply(interaction, '**請選擇目前伺服器中的語音頻道！**');
             }
 
             if (subcommand === '移除') {
                 const store = loadGuildStore(interaction.guildId);
                 if (!store.entrances[channel.id]) {
-                    return errorReply(interaction, '**這個語音頻道不是已設定的臨時語音入口！**');
+                    return validationReply(interaction, '**這個語音頻道不是已設定的臨時語音入口！**');
                 }
 
                 removeEntrance(interaction.guildId, channel.id);
@@ -76,7 +76,7 @@ module.exports = {
             const botMember = interaction.guild.members.me;
             const missingPermissions = channel.permissionsFor(botMember)?.missing(REQUIRED_BOT_PERMISSIONS) || REQUIRED_BOT_PERMISSIONS;
             if (missingPermissions.length > 0) {
-                return errorReply(interaction, `**機器人在該頻道缺少必要權限：${missingPermissions.join('、')}**`);
+                return validationReply(interaction, `**機器人在該頻道缺少必要權限：${missingPermissions.join('、')}**`);
             }
 
             const wasConfigured = Boolean(loadGuildStore(interaction.guildId).entrances[channel.id]);
@@ -88,7 +88,7 @@ module.exports = {
             );
         } catch (error) {
             sendLog(interaction.client, '❌ 管理臨時語音頻道入口時發生錯誤：', 'ERROR', error);
-            return errorReply(interaction, '**無法儲存臨時語音頻道設定，請稍後再試。**');
+            return errorReply(interaction, error, { context: '儲存臨時語音頻道設定' });
         }
     }
 };

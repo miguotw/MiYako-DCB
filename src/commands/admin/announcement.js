@@ -3,7 +3,7 @@ const { ChannelType, SlashCommandBuilder, EmbedBuilder } = require('discord.js')
 const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
 const { getAdminCommandPath } = require(path.join(process.cwd(), 'core/commandPolicy'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { errorReply, infoReply, validationReply } = require(path.join(process.cwd(), 'core/Reply'));
 const { fetchSourceMessage } = require(path.join(process.cwd(), 'util/discordCommandInput'));
 
 // 導入設定檔內容
@@ -43,7 +43,7 @@ module.exports = {
 
             // 保留執行時檢查，避免舊版已註冊指令或偽造 Interaction 傳入其他頻道類型。
             if (channel?.type !== ChannelType.GuildText) {
-                return errorReply(interaction, '**請選擇伺服器的一般文字頻道！**');
+                return validationReply(interaction, '**請選擇伺服器的一般文字頻道！**');
             }
 
             // 發送執行指令的摘要到 sendLog
@@ -77,14 +77,14 @@ module.exports = {
                 });
 
                 // 提示已發送公告
-                infoReply(interaction, `**公告已發送到 ${channel}${role ? ` 並提及 ${role}` : ''}！**`);
+                return infoReply(interaction, `**公告已發送到 ${channel}${role ? ` 並提及 ${role}` : ''}！**`);
             } catch (error) {
                 sendLog(interaction.client, `❌ 在執行 ${getAdminCommandPath('發送公告')} 指令時發生錯誤`, "ERROR", error);
-                return errorReply(interaction, '**無法取得該訊息，請檢查以下內容！**\n 1. 機器人應具有 `讀取訊息歷史`、`檢視頻道`、`發送訊息`、`嵌入連結`、`提及身分組` 權限。\n 2. 確認訊息 ID 或連結是否正確，且連結屬於目前伺服器！');
+                return validationReply(interaction, '**無法取得該訊息，請檢查以下內容！**\n 1. 機器人應具有 `讀取訊息歷史`、`檢視頻道`、`發送訊息`、`嵌入連結`、`提及身分組` 權限。\n 2. 確認訊息 ID 或連結是否正確，且連結屬於目前伺服器！');
             }
         } catch (error) {
             sendLog(interaction.client, `❌ 在執行 ${getAdminCommandPath('發送公告')} 指令時發生未預期的錯誤`, "ERROR", error);
-            return errorReply(interaction, '**發生未預期的錯誤，請向開發者回報！**');
+            return errorReply(interaction, error, { context: '發送公告' });
         }
     }
 };

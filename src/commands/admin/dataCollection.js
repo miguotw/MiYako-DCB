@@ -5,7 +5,7 @@ const {
 } = require('discord.js');
 const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
 const { getAdminCommandPath } = require(path.join(process.cwd(), 'core/commandPolicy'));
-const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { errorReply, infoReply, validationReply } = require(path.join(process.cwd(), 'core/Reply'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
 const {
     createDataCollection, deleteDataCollection, findDataCollection, getDataCollection,
@@ -98,13 +98,13 @@ module.exports = {
         const mentionMessages = [];
         try {
             const source = await fetchSourceMessage(interaction, interaction.options.getString('訊息id或連結', true));
-            if (!source.content.trim()) return errorReply(interaction, '**來源訊息沒有可作為介紹的文字內容。**');
-            if (source.content.length > 4096) return errorReply(interaction, '**來源訊息超過 Embed 介紹內文的 4096 字元上限。**');
+            if (!source.content.trim()) return validationReply(interaction, '**來源訊息沒有可作為介紹的文字內容。**');
+            if (source.content.length > 4096) return validationReply(interaction, '**來源訊息超過 Embed 介紹內文的 4096 字元上限。**');
             const publicChannel = interaction.options.getChannel('選擇頻道', true);
-            if (!publicChannel.isTextBased() || typeof publicChannel.send !== 'function') return errorReply(interaction, '**請選擇可發送訊息的文字頻道。**');
-            if (!interaction.channel?.isTextBased() || typeof interaction.channel.send !== 'function') return errorReply(interaction, '**目前頻道無法建立管理面板。**');
+            if (!publicChannel.isTextBased() || typeof publicChannel.send !== 'function') return validationReply(interaction, '**請選擇可發送訊息的文字頻道。**');
+            if (!interaction.channel?.isTextBased() || typeof interaction.channel.send !== 'function') return validationReply(interaction, '**目前頻道無法建立管理面板。**');
             const deadline = parseDeadline(interaction.options.getString('截止時間', true));
-            if (!deadline || deadline <= Math.floor(Date.now() / 1000)) return errorReply(interaction, '**截止時間格式錯誤或已過期，請使用 yyyy-mm-dd hh:mm。**');
+            if (!deadline || deadline <= Math.floor(Date.now() / 1000)) return validationReply(interaction, '**截止時間格式錯誤或已過期，請使用 yyyy-mm-dd hh:mm。**');
             const whitelist = await buildWhitelist(interaction, interaction.options.getString('白名單', true));
             const whitelistTargets = whitelist.targets;
             const whitelistUserIDs = whitelist.userIDs;
@@ -115,7 +115,7 @@ module.exports = {
                 ? await interaction.user.createDM()
                 : interaction.channel;
             if (!adminChannel?.isTextBased() || typeof adminChannel.send !== 'function') {
-                return errorReply(interaction, '**無法建立管理面板頻道；若選擇私信我，請確認 Bot 可以私訊您。**');
+                return validationReply(interaction, '**無法建立管理面板頻道；若選擇私信我，請確認 Bot 可以私訊您。**');
             }
 
             record = createDataCollection(interaction.guildId, {
@@ -161,7 +161,7 @@ module.exports = {
                 await deleteAdminPanels(interaction.client, getDataCollection(interaction.guildId, record.id) || record);
                 deleteDataCollection(interaction.guildId, record.id);
             }
-            return errorReply(interaction, `**${error.message || '無法建立資料收集面板。'}**`);
+            return errorReply(interaction, error, { context: '建立資料收集面板' });
         }
     },
 
@@ -173,8 +173,8 @@ module.exports = {
         data_collection_delete: async interaction => {
             const collectionID = interaction.customId.split(':')[1];
             const record = findDataCollection(collectionID);
-            if (!record) return errorReply(interaction, '**找不到這筆資料收集。**', [], privateReply(interaction));
-            if (!canManageCollection(interaction, record)) return errorReply(interaction, '**只有資料收集建立者或伺服器管理員可以刪除資料。**', [], privateReply(interaction));
+            if (!record) return validationReply(interaction, '**找不到這筆資料收集。**', { ephemeral: privateReply(interaction) });
+            if (!canManageCollection(interaction, record)) return validationReply(interaction, '**只有資料收集建立者或伺服器管理員可以刪除資料。**', { ephemeral: privateReply(interaction) });
             const modal = new ModalBuilder().setCustomId(`data_collection_delete_modal:${collectionID}`).setTitle('確認刪除資料收集')
                 .addComponents(new ActionRowBuilder().addComponents(
                     new TextInputBuilder().setCustomId('confirmation').setLabel('輸入 y 以刪除所有收集資料')
@@ -185,9 +185,9 @@ module.exports = {
         data_collection_submit: async interaction => {
             const collectionID = interaction.customId.split(':')[1];
             const record = getDataCollection(interaction.guildId, collectionID);
-            if (!record) return errorReply(interaction, '**找不到這筆資料收集。**', [], true);
-            if (record.status !== 'open' || Math.floor(Date.now() / 1000) >= record.deadline) return errorReply(interaction, '**資料提交已截止。**', [], true);
-            if (!record.whitelistUserIDs.includes(interaction.user.id)) return errorReply(interaction, '**您不在本次資料收集的白名單中。**', [], true);
+            if (!record) return validationReply(interaction, '**找不到這筆資料收集。**', { ephemeral: true });
+            if (record.status !== 'open' || Math.floor(Date.now() / 1000) >= record.deadline) return validationReply(interaction, '**資料提交已截止。**', { ephemeral: true });
+            if (!record.whitelistUserIDs.includes(interaction.user.id)) return validationReply(interaction, '**您不在本次資料收集的白名單中。**', { ephemeral: true });
             return interaction.showModal(createSubmitModal(record, interaction.user.id));
         }
     },
@@ -197,12 +197,12 @@ module.exports = {
             const collectionID = interaction.customId.split(':')[1];
             await interaction.deferReply({ ephemeral: privateReply(interaction) });
             if (interaction.fields.getTextInputValue('confirmation').trim().toLowerCase() !== 'y') {
-                return errorReply(interaction, '**確認文字不正確，未刪除資料。**');
+                return validationReply(interaction, '**確認文字不正確，未刪除資料。**');
             }
             return withCollectionLock(collectionID, async () => {
                 const record = findDataCollection(collectionID);
-                if (!record) return errorReply(interaction, '**找不到這筆資料收集。**');
-                if (!canManageCollection(interaction, record)) return errorReply(interaction, '**只有資料收集建立者或伺服器管理員可以刪除資料。**');
+                if (!record) return validationReply(interaction, '**找不到這筆資料收集。**');
+                if (!canManageCollection(interaction, record)) return validationReply(interaction, '**只有資料收集建立者或伺服器管理員可以刪除資料。**');
                 await disablePublicPanel(interaction.client, record);
                 await deleteAdminPanels(interaction.client, record);
                 deleteDataCollection(record.guildID, collectionID);
@@ -215,11 +215,11 @@ module.exports = {
             await interaction.deferReply({ ephemeral: true });
             return withCollectionLock(collectionID, async () => {
                 let record = getDataCollection(interaction.guildId, collectionID);
-                if (!record) return errorReply(interaction, '**找不到這筆資料收集。**', [], true);
-                if (record.status !== 'open' || Math.floor(Date.now() / 1000) >= record.deadline) return errorReply(interaction, '**資料提交已截止。**', [], true);
-                if (!record.whitelistUserIDs.includes(interaction.user.id)) return errorReply(interaction, '**您不在本次資料收集的白名單中。**', [], true);
+                if (!record) return validationReply(interaction, '**找不到這筆資料收集。**');
+                if (record.status !== 'open' || Math.floor(Date.now() / 1000) >= record.deadline) return validationReply(interaction, '**資料提交已截止。**');
+                if (!record.whitelistUserIDs.includes(interaction.user.id)) return validationReply(interaction, '**您不在本次資料收集的白名單中。**');
                 const values = record.fieldLabels.map((_, index) => interaction.fields.getTextInputValue(`data_${index + 1}`).trim());
-                if (values.some(value => !value)) return errorReply(interaction, '**所有資料欄位皆為必填。**', [], true);
+                if (values.some(value => !value)) return validationReply(interaction, '**所有資料欄位皆為必填。**');
                 const previous = record.submissions?.[interaction.user.id];
                 const now = new Date().toISOString();
                 record = updateDataCollection(interaction.guildId, collectionID, current => {

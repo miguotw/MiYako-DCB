@@ -58,7 +58,7 @@ module.exports = {
         } catch (error) {
             sendLog(interaction.client, `❌ 在執行 ${getAdminCommandPath('擷取用戶資料')} 指令時發生錯誤：`, 'ERROR', error);
 
-            await errorReply(interaction, '**無法取得該用戶的資料，請稍後再試一次。**');
+            await errorReply(interaction, error, { context: '取得 Discord 用戶資料' });
         }
     }
 };

@@ -5,14 +5,20 @@ const fs = require('fs');
  * extractor 類錯誤會強制更新 yt-dlp 後重試一次；私人影片、網路或輸入錯誤不重試。
  */
 const path = require('path');
-const https = require('https');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
+const { pipeline } = require('stream/promises');
 const ffmpegPath = require('ffmpeg-static');
-const { toYtDlpQuery, normalizeTrack, validateTrack } = require('./musicHelpers');
+const { http } = require('../core/http');
+const { musicValidationError, toYtDlpQuery, normalizeTrack, validateTrack, validateYouTubeUrl } = require('./musicHelpers');
 
 const DOWNLOAD_URL = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux';
 let updatePromise = null;
+
+/** 所有 yt-dlp 呼叫都忽略主機與使用者設定，避免部署環境偷偷擴大 extractor 或 proxy 行為。 */
+function createYtDlpArgs(args) {
+    return ['--ignore-config', ...args];
+}
 
 function resolveBinaryPath(value = 'assets/music/yt-dlp') {
     return path.resolve(process.cwd(), value);
@@ -42,25 +48,17 @@ function runProcess(command, args, options = {}) {
 }
 
 /** 下載到 `.download` 後才原子 rename，避免未完成檔案被當成可執行檔。 */
-function downloadBinary(destination) {
+async function downloadBinary(destination) {
     fs.mkdirSync(path.dirname(destination), { recursive: true });
     const temporary = `${destination}.download`;
-    return new Promise((resolve, reject) => {
-        const request = url => https.get(url, response => {
-            if ([301, 302, 307, 308].includes(response.statusCode)) return request(new URL(response.headers.location, url));
-            if (response.statusCode !== 200) return reject(new Error(`下載 yt-dlp 失敗：HTTP ${response.statusCode}`));
-            const output = fs.createWriteStream(temporary, { mode: 0o755 });
-            response.pipe(output);
-            output.once('finish', () => {
-                output.close();
-                fs.chmodSync(temporary, 0o755);
-                fs.renameSync(temporary, destination);
-                resolve();
-            });
-            output.once('error', reject);
-        }).once('error', reject);
-        request(DOWNLOAD_URL);
-    }).finally(() => { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); });
+    try {
+        const response = await http.get(DOWNLOAD_URL, { responseType: 'stream', maxRedirects: 5 });
+        await pipeline(response.data, fs.createWriteStream(temporary, { mode: 0o755 }));
+        fs.chmodSync(temporary, 0o755);
+        fs.renameSync(temporary, destination);
+    } finally {
+        if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
+    }
 }
 
 function getMetadataPath(binaryPath) {
@@ -85,7 +83,7 @@ async function ensureYtDlp(options = {}, force = false) {
         if (!fs.existsSync(binaryPath)) await downloadBinary(binaryPath);
         const intervalHours = Math.max(Number(options.updateHours) || 24, 1);
         if (force || shouldCheckUpdate(binaryPath, intervalHours)) {
-            try { await runProcess(binaryPath, ['-U'], { timeout: 120000 }); }
+            try { await runProcess(binaryPath, createYtDlpArgs(['-U']), { timeout: 120000 }); }
             catch (error) {
                 // 更新失敗時保留目前可執行版本；實際抽取仍會回報原始錯誤。
                 if (!fs.existsSync(binaryPath)) throw error;
@@ -110,7 +108,7 @@ async function extractTrack(input, requestedBy, options = {}, retried = false) {
     const binaryPath = await ensureYtDlp(options);
     const { query } = toYtDlpQuery(input);
     try {
-        const result = await runProcess(binaryPath, ['--dump-single-json', '--no-playlist', '--no-warnings', '--socket-timeout', '15', query], { timeout: 45000 });
+        const result = await runProcess(binaryPath, createYtDlpArgs(['--dump-single-json', '--no-playlist', '--no-warnings', '--socket-timeout', '15', query]), { timeout: 45000 });
         const data = JSON.parse(result.stdout);
         const item = data.entries?.[0] || data;
         return validateTrack(normalizeTrack(item, requestedBy), options.maxDurationSeconds, options.minDurationSeconds);
@@ -125,7 +123,7 @@ async function extractTrack(input, requestedBy, options = {}, retried = false) {
 
 function isPlaylistInput(input) {
     try {
-        const url = new URL(String(input).trim());
+        const url = new URL(validateYouTubeUrl(input));
         return url.pathname.includes('/playlist') || url.searchParams.has('list');
     } catch { return false; }
 }
@@ -140,21 +138,21 @@ function getPlaylistEntryURL(entry) {
 /** 單曲直接抽取；播放清單先 flat 展開，再逐曲取得完整 metadata 與驗證。 */
 async function extractTracks(input, requestedBy, options = {}, retried = false) {
     const playlistInput = isPlaylistInput(input);
-    if (playlistInput && !options.allowPlaylists) throw new Error('目前設定不允許點播 YouTube 播放清單。');
+    if (playlistInput && !options.allowPlaylists) throw musicValidationError('目前設定不允許點播 YouTube 播放清單。');
     if (!playlistInput) return [await extractTrack(input, requestedBy, options)];
     const binaryPath = await ensureYtDlp(options);
     try {
-        const result = await runProcess(binaryPath, [
-            '--dump-single-json', '--flat-playlist', '--yes-playlist', '--no-warnings', '--socket-timeout', '15', String(input).trim()
-        ], { timeout: 60000 });
+        const result = await runProcess(binaryPath, createYtDlpArgs([
+            '--dump-single-json', '--flat-playlist', '--yes-playlist', '--no-warnings', '--socket-timeout', '15', validateYouTubeUrl(input)
+        ]), { timeout: 60000 });
         const data = JSON.parse(result.stdout);
         const entries = Array.isArray(data.entries) ? data.entries : [];
-        if (!entries.length) throw new Error('播放清單中沒有可加入的曲目。');
+        if (!entries.length) throw musicValidationError('播放清單中沒有可加入的曲目。');
         const limit = Math.min(Math.max(Number(options.maxPlaylistTracks) || 25, 1), 100);
         const tracks = [];
         for (const entry of entries.slice(0, limit)) {
             const url = getPlaylistEntryURL(entry);
-            if (!url) throw new Error('播放清單包含無法解析的曲目。');
+            if (!url) throw musicValidationError('播放清單包含無法解析的曲目。');
             tracks.push(await extractTrack(url, requestedBy, options));
         }
         return tracks;
@@ -172,16 +170,17 @@ async function extractTracks(input, requestedBy, options = {}, retried = false) 
  * 失敗時會清除同 UUID 的殘檔，成功後由播放器在不再需要時呼叫 deleteTrackFile。
  */
 async function downloadTrack(track, options = {}, onProgress = null, retried = false) {
+    validateYouTubeUrl(track?.url);
     const binaryPath = await ensureYtDlp(options);
     const cacheDirectory = path.join(process.cwd(), 'assets', 'music', 'cache');
     fs.mkdirSync(cacheDirectory, { recursive: true });
     const outputTemplate = path.join(cacheDirectory, `${crypto.randomUUID()}.%(ext)s`);
     try {
-        const result = await runProcess(binaryPath, [
+        const result = await runProcess(binaryPath, createYtDlpArgs([
             '--no-playlist', '--no-warnings', '--newline', '--progress', '--socket-timeout', '15',
             '--ffmpeg-location', ffmpegPath, '-f', 'bestaudio/best',
             '--print', 'after_move:filepath', '-o', outputTemplate, track.url
-        ], {
+        ]), {
             timeout: 15 * 60 * 1000,
             onStderr: output => {
                 const matches = [...output.matchAll(/\[download\]\s+([\d.]+)%/g)];
@@ -220,4 +219,4 @@ async function checkFfmpeg() {
     return runProcess(ffmpegPath, ['-version'], { timeout: 10000 });
 }
 
-module.exports = { ffmpegPath, resolveBinaryPath, runProcess, shouldCheckUpdate, ensureYtDlp, isExtractorFailure, extractTrack, extractTracks, downloadTrack, deleteTrackFile, checkFfmpeg };
+module.exports = { ffmpegPath, createYtDlpArgs, resolveBinaryPath, runProcess, shouldCheckUpdate, ensureYtDlp, isExtractorFailure, extractTrack, extractTracks, downloadTrack, deleteTrackFile, checkFfmpeg };

@@ -3,7 +3,7 @@ const path = require('path');
  * Twitch Helix 輪詢與 Discord 通知生命週期。
  * 直播中的通知會依伺服器持久化，讓程序重啟後能接續編輯原訊息。
  */
-const axios = require('axios');
+const { http } = require(path.join(process.cwd(), 'core/http'));
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, Events } = require('discord.js');
 const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
@@ -151,7 +151,7 @@ async function getTwitchAccessToken(streamConfig) {
         grant_type: 'client_credentials'
     });
 
-    const response = await axios.post('https://id.twitch.tv/oauth2/token', body);
+    const response = await http.post('https://id.twitch.tv/oauth2/token', body);
     accessToken = response.data.access_token;
     tokenExpiresAt = Date.now() + (Number(response.data.expires_in) || 0) * 1000;
 
@@ -165,7 +165,7 @@ async function fetchStreams(streamConfig) {
         params.append('user_login', twitchUserLogin);
     }
 
-    const response = await axios.get(`https://api.twitch.tv/helix/streams?${params.toString()}`, {
+    const response = await http.get(`https://api.twitch.tv/helix/streams?${params.toString()}`, {
         headers: {
             'Client-Id': streamConfig.twitchClientID,
             Authorization: `Bearer ${token}`
@@ -182,7 +182,7 @@ async function fetchUsers(streamConfig) {
         params.append('login', twitchUserLogin);
     }
 
-    const response = await axios.get(`https://api.twitch.tv/helix/users?${params.toString()}`, {
+    const response = await http.get(`https://api.twitch.tv/helix/users?${params.toString()}`, {
         headers: {
             'Client-Id': streamConfig.twitchClientID,
             Authorization: `Bearer ${token}`
@@ -199,7 +199,7 @@ async function fetchUserColors(streamConfig, users) {
     const params = new URLSearchParams();
     for (const user of users) params.append('user_id', user.id);
 
-    const response = await axios.get(`https://api.twitch.tv/helix/chat/color?${params.toString()}`, {
+    const response = await http.get(`https://api.twitch.tv/helix/chat/color?${params.toString()}`, {
         headers: {
             'Client-Id': streamConfig.twitchClientID,
             Authorization: `Bearer ${token}`

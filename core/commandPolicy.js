@@ -1,7 +1,7 @@
 const path = require('path');
 const { PermissionFlagsBits } = require('discord.js');
 const { config } = require(path.join(process.cwd(), 'core/config'));
-const { errorReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { validationReply } = require(path.join(process.cwd(), 'core/Reply'));
 
 const ADMIN_COMMAND_NAME = String(config.Startup.adminCommandName || 'admin').trim();
 const COMMAND_NAME_PATTERN = /^[-_\p{L}\p{N}\p{sc=Devanagari}\p{sc=Thai}]{1,32}$/u;
@@ -23,7 +23,7 @@ async function denyAdminInteraction(interaction) {
     const message = interaction.inGuild()
         ? '**你必須是伺服器管理員才能使用此功能。**'
         : '**此功能僅能在伺服器中使用。**';
-    return errorReply(interaction, message, [], true);
+    return validationReply(interaction, message, { ephemeral: true });
 }
 
 function wrapAdminHandler(handler) {

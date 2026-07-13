@@ -1,10 +1,10 @@
-const axios = require('axios');
 const OpenCC = require('opencc-js');
+const { http } = require('../core/http');
 
-// 請求短句 API
+/** 透過共用 timeout／retry policy 取得一言並轉換成台灣繁體。 */
 const getHitokoto = async () => {
     try {
-        const response = await axios.get('https://v1.hitokoto.cn/?c=a&encode=json');
+        const response = await http.get('https://v1.hitokoto.cn/?c=a&encode=json');
         const { hitokoto, from } = response.data;
 
         // 使用 OpenCC 將簡體中文轉為繁體中文

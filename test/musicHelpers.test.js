@@ -1,10 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
-    toYtDlpQuery, normalizeTrack, validateTrack, formatDuration,
+    toYtDlpQuery, validateYouTubeUrl, normalizeTrack, validateTrack, formatDuration,
     getUploadYear, createProgressBar, paginateQueue
 } = require('../util/musicHelpers');
-const { ffmpegPath, checkFfmpeg, shouldCheckUpdate, isExtractorFailure } = require('../util/ytDlpManager');
+const { ffmpegPath, checkFfmpeg, createYtDlpArgs, shouldCheckUpdate, isExtractorFailure } = require('../util/ytDlpManager');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -13,6 +13,36 @@ const { saveGuildQueue, loadAllGuildQueues, deleteGuildQueue } = require('../uti
 test('網址原樣傳入，標題使用 ytsearch1', () => {
     assert.deepEqual(toYtDlpQuery('https://youtu.be/abc'), { query: 'https://youtu.be/abc', isUrl: true });
     assert.deepEqual(toYtDlpQuery('歌曲名稱'), { query: 'ytsearch1:歌曲名稱', isUrl: false });
+});
+
+test('只接受精確且安全的 YouTube URL', () => {
+    const accepted = [
+        'https://www.youtube.com/watch?v=abc',
+        'https://youtube.com/shorts/abc',
+        'https://m.youtube.com/live/abc',
+        'https://music.youtube.com/playlist?list=abc',
+        'https://www.youtube.com/embed/abc',
+        'https://youtu.be/abc'
+    ];
+    for (const url of accepted) assert.doesNotThrow(() => validateYouTubeUrl(url));
+
+    const rejected = [
+        'http://youtube.com/watch?v=abc',
+        'https://user@youtube.com/watch?v=abc',
+        'https://youtube.com:444/watch?v=abc',
+        'https://youtube.com.evil.test/watch?v=abc',
+        'https://youtu.be.evil.test/abc',
+        'https://localhost/watch?v=abc',
+        'https://127.0.0.1/watch?v=abc',
+        'https://192.168.1.1/watch?v=abc',
+        'https://www.youtube.com/redirect?q=http://127.0.0.1',
+        'https://vimeo.com/123'
+    ];
+    for (const url of rejected) assert.throws(() => toYtDlpQuery(url));
+});
+
+test('所有 yt-dlp 參數都強制忽略本機設定', () => {
+    assert.deepEqual(createYtDlpArgs(['--dump-single-json', 'query']), ['--ignore-config', '--dump-single-json', 'query']);
 });
 
 test('metadata 正規化並取得年份', () => {
@@ -24,10 +54,11 @@ test('metadata 正規化並取得年份', () => {
 });
 
 test('拒絕直播與超長內容', () => {
-    assert.throws(() => validateTrack({ isLive: true, url: 'x', duration: 1 }, 7200), /直播/);
-    assert.throws(() => validateTrack({ isLive: false, url: 'x', duration: 7201 }, 7200), /2:00:00/);
-    assert.throws(() => validateTrack({ isLive: false, url: 'x', duration: 30 }, 7200, 60), /1:00/);
-    assert.doesNotThrow(() => validateTrack({ isLive: false, url: 'x', duration: 999999 }, 0, 0));
+    const url = 'https://youtu.be/abc';
+    assert.throws(() => validateTrack({ isLive: true, url, duration: 1 }, 7200), /直播/);
+    assert.throws(() => validateTrack({ isLive: false, url, duration: 7201 }, 7200), /2:00:00/);
+    assert.throws(() => validateTrack({ isLive: false, url, duration: 30 }, 7200, 60), /1:00/);
+    assert.doesNotThrow(() => validateTrack({ isLive: false, url, duration: 999999 }, 0, 0));
 });
 
 test('格式化時間、進度與佇列分頁', () => {

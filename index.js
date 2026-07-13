@@ -5,7 +5,7 @@ const { Client, GatewayIntentBits, REST, Routes, Collection } = require('discord
 const { config } = require(path.join(process.cwd(), 'core/config'));
 const { applyAdminCommandPolicy, createAdminCommand, isAdminCommandPath } = require(path.join(process.cwd(), 'core/commandPolicy'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { errorReply } = require(path.join(process.cwd(), 'core/Reply'));
 const { getHitokoto } = require(path.join(process.cwd(), 'util/getHitokoto'));
 
 // Discord bot 設定
@@ -141,7 +141,7 @@ client.on('interactionCreate', async interaction => {
         }
     } catch (error) {
         console.error(error);
-        errorReply(interaction, '**執行指令時發生錯誤**');
+        await errorReply(interaction, error, { context: '執行 Discord 指令' });
     }
 });
 

@@ -3,7 +3,7 @@ const { ActionRowBuilder, SlashCommandBuilder, StringSelectMenuBuilder } = requi
 const { readGuildStore, writeGuildStore } = require(path.join(process.cwd(), 'util/twitchStreamStore'));
 const { getAdminCommandPath } = require(path.join(process.cwd(), 'core/commandPolicy'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { createErrorEmbed, createInfoEmbed } = require(path.join(process.cwd(), 'core/Reply'));
+const { infoReply, validationReply } = require(path.join(process.cwd(), 'core/Reply'));
 
 function normalizeTwitchLogin(value) {
     return String(value || '').trim().replace(/^https?:\/\/(?:www\.)?twitch\.tv\//i, '').split(/[/?#]/)[0].toLowerCase();
@@ -12,7 +12,7 @@ function normalizeTwitchLogin(value) {
 async function handleRemoveSelected(interaction) {
     const [, ownerID] = interaction.customId.split(':');
     if (ownerID !== interaction.user.id) {
-        return interaction.reply({ embeds: [createErrorEmbed('這不是你建立的移除選單。')], ephemeral: true });
+        return validationReply(interaction, '這不是你建立的移除選單。', { ephemeral: true });
     }
 
     const twitchUserLogin = normalizeTwitchLogin(interaction.values[0]);
@@ -21,13 +21,17 @@ async function handleRemoveSelected(interaction) {
     store.subscriptions = store.subscriptions.filter(item => item.twitchUserLogin !== twitchUserLogin);
 
     if (store.subscriptions.length === originalLength) {
-        return interaction.update({ content: null, embeds: [createErrorEmbed('這個 Twitch 頻道已不在追蹤清單中。')], components: [] });
+        return validationReply(interaction, '這個 Twitch 頻道已不在追蹤清單中。', {
+            method: 'update', content: null, components: []
+        });
     }
 
     store.notifications = store.notifications.filter(item => item.twitchUserLogin !== twitchUserLogin);
     writeGuildStore(interaction.guildId, store);
     sendLog(interaction.client, `💾 ${interaction.user.tag} 移除 Twitch 直播通知：${twitchUserLogin}（所有設定）`);
-    return interaction.update({ content: null, embeds: [createInfoEmbed(`已移除 **${twitchUserLogin}** 在此伺服器的所有直播通知設定。`)], components: [] });
+    return infoReply(interaction, `已移除 **${twitchUserLogin}** 在此伺服器的所有直播通知設定。`, {
+        method: 'update', content: null, components: []
+    });
 }
 
 module.exports = {
@@ -62,7 +66,7 @@ module.exports = {
             sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：${commandPath}`, 'INFO');
             const trackedChannels = [...new Set(store.subscriptions.map(item => normalizeTwitchLogin(item.twitchUserLogin)).filter(Boolean))];
             if (!trackedChannels.length) {
-                return interaction.reply({ embeds: [createErrorEmbed('此伺服器目前沒有已建立的 Twitch 追蹤頻道。')], ephemeral: true });
+                return validationReply(interaction, '此伺服器目前沒有已建立的 Twitch 追蹤頻道。', { ephemeral: true });
             }
 
             const menu = new StringSelectMenuBuilder()
@@ -77,10 +81,9 @@ module.exports = {
                     };
                 }));
 
-            return interaction.reply({
-                embeds: [createInfoEmbed(trackedChannels.length > 25
+            return infoReply(interaction, trackedChannels.length > 25
                     ? '請選擇要移除的 Twitch 頻道（選單最多顯示前 25 個）。'
-                    : '請選擇要移除的 Twitch 頻道。')],
+                    : '請選擇要移除的 Twitch 頻道。', {
                 components: [new ActionRowBuilder().addComponents(menu)],
                 ephemeral: true
             });
@@ -96,12 +99,12 @@ module.exports = {
         );
 
         if (!/^[a-z0-9_]{1,25}$/.test(twitchUserLogin)) {
-            return interaction.reply({ embeds: [createErrorEmbed('twitch頻道id 格式不正確。請輸入登入名稱或頻道網址。')], ephemeral: true });
+            return validationReply(interaction, 'twitch頻道id 格式不正確。請輸入登入名稱或頻道網址。', { ephemeral: true });
         }
 
         if (subcommand === '新增') {
             if (!channel?.isTextBased() || typeof channel.send !== 'function') {
-                return interaction.reply({ embeds: [createErrorEmbed('請選擇可以發送訊息的文字頻道。')], ephemeral: true });
+                return validationReply(interaction, '請選擇可以發送訊息的文字頻道。', { ephemeral: true });
             }
 
             const subscription = {
@@ -116,8 +119,7 @@ module.exports = {
                 item.twitchUserLogin !== twitchUserLogin || item.channelID === channel.id
             );
             writeGuildStore(interaction.guildId, store);
-            await interaction.reply({
-                embeds: [createInfoEmbed(`已${isOverwrite ? '覆寫' : '新增'}追蹤 **${twitchUserLogin}**，通知將發送至 ${channel}${role ? `，並提及 ${role}` : '，未指定身分組時將提及 @everyone'}。`)],
+            await infoReply(interaction, `已${isOverwrite ? '覆寫' : '新增'}追蹤 **${twitchUserLogin}**，通知將發送至 ${channel}${role ? `，並提及 ${role}` : '，未指定身分組時將提及 @everyone'}。`, {
                 ephemeral: true
             });
             interaction.client.checkTwitchStreamStatus?.().catch(error => {

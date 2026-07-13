@@ -1,7 +1,7 @@
-const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const { Buffer } = require('buffer');
+const { http } = require('../core/http');
 
 const MINECRAFT_TEMP_DIR = path.join(process.cwd(), 'assets', 'minecraft', 'temp');
 
@@ -32,13 +32,13 @@ function sanitizeApiResponse(data) {
     };
 }
 
-// 查詢伺服器狀態
+/** 查詢 Minecraft 伺服器狀態；第三方 GET 套用共用 timeout／retry policy。 */
 const getServerStatus = async (serverIP) => {
     const normalizedServerIP = normalizeServerAddress(serverIP);
     const requestURL = `https://api.mcsrvstat.us/2/${encodeURIComponent(normalizedServerIP)}`;
 
     try {
-        const response = await axios.get(requestURL, { timeout: 15000 });
+        const response = await http.get(requestURL);
         const data = response.data;
 
         // 處理玩家列表

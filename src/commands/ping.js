@@ -2,7 +2,7 @@ const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { errorReply } = require(path.join(process.cwd(), 'core/Reply'));
 
 // 導入設定檔內容
 const EMBED_COLOR = config.embed.color.default;
@@ -37,7 +37,7 @@ module.exports = {
         } catch (error) {
             // 錯誤處理
             sendLog(interaction.client, `❌ 在執行 /延遲 指令時發生錯誤`, "ERROR", error);
-            return errorReply(interaction, '**發生未預期的錯誤，請向開發者回報！**');
+            return errorReply(interaction, error, { context: '執行延遲指令' });
         }
     }
 };

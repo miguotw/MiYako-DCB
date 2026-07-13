@@ -2,7 +2,7 @@ const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, ModalBuilder, TextInputBuilder, ActionRowBuilder, TextInputStyle } = require('discord.js');
 const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
 const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { errorReply, validationReply } = require(path.join(process.cwd(), 'core/Reply'));
 
 // 導入設定檔內容
 const EMBED_COLOR = config.embed.color.default;
@@ -87,7 +87,7 @@ async execute(interaction) {
 
         } catch (error) {
             sendLog(interaction.client, `❌ 在執行 /時間戳 指令時發生錯誤：`, "ERROR", error);
-            errorReply(interaction, `**無法執行時間戳指令，原因：${error.message || '未知錯誤'}**`);
+            return errorReply(interaction, error, { context: '執行時間戳指令' });
         }
     }
 };
@@ -102,21 +102,21 @@ module.exports.modalSubmitHandlers = {
             
             // 驗證日期格式 YYYY-MM-DD
             if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-                return errorReply(interaction, '**日期格式錯誤，請使用 YYYY-MM-DD，例如：2020-03-24**');
+                return validationReply(interaction, '**日期格式錯誤，請使用 YYYY-MM-DD，例如：2020-03-24**');
             }
             // 驗證時間格式 HH:MM:SS
             if (!/^\d{2}:\d{2}:\d{2}$/.test(time)) {
-                return errorReply(interaction, '**時間格式錯誤，請使用 HH:MM:SS，例如：23:59:59**');
+                return validationReply(interaction, '**時間格式錯誤，請使用 HH:MM:SS，例如：23:59:59**');
             }
             // 驗證時區格式（允許 +8、-5、8、-08、+08）
             if (timezoneInput && !/^([+-]?\d{1,2})$/.test(timezoneInput)) {
-                return errorReply(interaction, '**時區格式錯誤，請輸入類似 +8、-5**');
+                return validationReply(interaction, '**時區格式錯誤，請輸入類似 +8、-5**');
             }
 
             // 檢查時區範圍（-12 ~ +14）
             const timezoneNum = parseInt(timezoneInput, 10);
             if (timezoneNum < -12 || timezoneNum > 14) {
-                return errorReply(interaction, '**時區超出範圍，請輸入 -12 ~ +14 之間的數字**');
+                return validationReply(interaction, '**時區超出範圍，請輸入 -12 ~ +14 之間的數字**');
             }
             
             // 組合日期和時間
@@ -145,7 +145,7 @@ module.exports.modalSubmitHandlers = {
 
         } catch (error) {
             sendLog(interaction.client, '❌ 在處理時間戳 Modal 時發生錯誤：', "ERROR", error);
-            errorReply(interaction, `**無法解析時間戳：${error.message || '未知錯誤'}**`);
+            return errorReply(interaction, error, { context: '解析時間戳表單' });
         }
     }
 };

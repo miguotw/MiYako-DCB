@@ -191,15 +191,13 @@ module.exports = {
 
 ```js
 const path = require('path');
-const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
+const { errorReply, infoReply, validationReply } = require(path.join(process.cwd(), 'core/Reply'));
 
 try {
-    // 執行操作
+    if (!isValid) return validationReply(interaction, '**設定內容不正確。**', { ephemeral: true });
     return infoReply(interaction, '**設定已儲存。**');
 } catch (error) {
-    sendLog(interaction.client, '❌ 儲存設定失敗：', 'ERROR', error);
-    return errorReply(interaction, `**設定儲存失敗：${error.message || '未知錯誤'}**`);
+    return errorReply(interaction, error, { context: '儲存設定' });
 }
 ```
 
@@ -207,19 +205,19 @@ try {
 
 | API | 用途 |
 | --- | --- |
-| `infoReply(interaction, message, files?, ephemeral?)` | 成功狀態；標題固定為「操作成功」 |
-| `errorReply(interaction, message, files?, ephemeral?)` | 失敗、驗證與錯誤狀態 |
-| `createInfoEmbed(message)` | 需要自行組合 `components`、`interaction.update()` 或 `channel.send()` 時取得相同成功樣式 |
-| `createErrorEmbed(message)` | 需要自行組合 payload 時取得相同錯誤樣式 |
+| `infoReply(interaction, message, options?)` | 成功狀態；標題固定為「操作成功」 |
+| `validationReply(interaction, message, options?)` | 可預期的輸入、權限、過期狀態與業務失敗 |
+| `errorReply(interaction, error, options?)` | 未知系統錯誤；原始 Error 只進入遮罩日誌，使用者只看到事件 ID |
+| `createStatusEmbed({ status, message, eventId })` | 建立 `success`、`validation` 或 `error` 狀態 Embed |
 
 需要元件的狀態回覆仍應使用 builder，而不是重新製作樣式：
 
 ```js
-const { createInfoEmbed } = require(path.join(process.cwd(), 'core/Reply'));
+const { infoReply } = require(path.join(process.cwd(), 'core/Reply'));
 
-return interaction.update({
+return infoReply(interaction, '**設定已移除。**', {
+    method: 'update',
     content: null,
-    embeds: [createInfoEmbed('**設定已移除。**')],
     components: []
 });
 ```
@@ -229,8 +227,8 @@ return interaction.update({
 | 設定鍵 | 用途 |
 | --- | --- |
 | `embed.color.default` | 指令功能本身的一般 Embed |
-| `embed.color.success` | `createInfoEmbed`／`infoReply` |
-| `embed.color.error` | `createErrorEmbed`／`errorReply` |
+| `embed.color.success` | `success`／`infoReply` |
+| `embed.color.error` | `validation`、`error`／對應 Reply helper |
 | `emoji.success` | 成功標題 Emoji |
 | `emoji.error` | 錯誤標題 Emoji |
 | `emoji.loading` | 功能本身的載入／進度顯示 |
@@ -239,12 +237,18 @@ return interaction.update({
 
 Reply 的互動生命週期注意事項：
 
-- 尚未回覆時使用 `interaction.reply()`；已 `deferReply()` 或已回覆時自動改用 `editReply()`。
+- `options.method` 支援 `auto`、`reply`、`editReply`、`update`、`followUp`；`auto` 在未回覆時使用 `reply`，已 defer/reply 時使用 `editReply`。
 - 私密耗時操作必須在一開始 `deferReply({ ephemeral: true })`；defer 後才傳入 `ephemeral` 無法改變可見性。
-- Interaction 已回覆時 helper 會覆寫原回覆，不會建立 `followUp()`。需要新增一則訊息時，應搭配 `createInfoEmbed`／`createErrorEmbed` 自行送出。
-- `infoReply`／`errorReply` 只接受 Embed、附件與初次回覆的 ephemeral 選項；需要 components、allowed mentions 等欄位時使用 `create*Embed` 組 payload。
-- 錯誤 Embed 會自動附上 `configCommands.about.repository` 與 `provider` 的回報資訊。
-- Reply 內部會吞掉 Discord 回覆失敗，因此需要診斷的錯誤仍必須另外呼叫 `sendLog()`。
+- `options` 可傳 `content`、`files`、`components`、`ephemeral` 與日誌用 `context`；`ephemeral` 只能搭配 `reply`／`followUp`。
+- 元件 `deferUpdate()` 後若驗證失敗，必須使用 `{ method: 'followUp', ephemeral: true }`，不得覆寫原公開訊息。
+- 預期錯誤使用 `validationReply`；未知例外把原始 `Error` 傳給 `errorReply`，不得把 `error.message` 拼入公開訊息。
+- Reply 傳送失敗會寫入遮罩日誌並重新拋出，呼叫端與測試都能觀察，不得以空 `catch` 吞掉。
+
+### 日誌與第三方 HTTP 安全規則
+
+- `sendLog(client, message, level, error, { sensitiveValues })` 會清理控制字元、code fence 與 Token；物流單號、IP 等執行期敏感值必須透過 `sensitiveValues` 明確宣告。
+- Discord 日誌一律使用 `allowedMentions: { parse: [] }`，訊息中的 `@everyone`、用戶或身分組文字不可實際觸發 mention。
+- Bot 直接呼叫的第三方 HTTP API 一律使用 `core/http.js`：單次 15 秒 timeout；GET 只對網路錯誤、408、429、5xx 額外重試兩次；POST／PATCH 不自動重試。
 
 ### 優先重用 `util/`，拒絕重複造輪子
 
@@ -256,6 +260,7 @@ Reply 的互動生命週期注意事項：
 
 | 模組 | 已有能力；新增功能應優先使用 |
 | --- | --- |
+| `core/http.js` | 第三方 HTTP 15 秒 timeout、GET 限定重試與 `Retry-After` 處理 |
 | `discordCommandInput.js` | Discord API timeout、截止時間解析、用戶／身分組提及、訊息 ID／官方連結解析與抓取、將身分組展開為真人成員 |
 | `guildJsonStore.js` | 通用 per-guild JSON Store factory：`getFile`、`listGuildIDs`、`read`、`update`、`write` |
 | `dataCollectionStore.js` | 資料收集 CRUD、全域尋找／列舉、同一 collection 的程序內 Promise lock |
@@ -288,7 +293,8 @@ Reply 的互動生命週期注意事項：
 
 ### 音樂
 
-- 支援 YouTube URL、文字搜尋第一筆，以及依設定展開播放清單；不支援直播。
+- 支援文字搜尋第一筆，以及 HTTPS 的 YouTube／youtu.be 單曲、Shorts、直播頁、Embed 與播放清單 URL；不支援直播內容。
+- URL 必須使用精確 YouTube hostname，禁止帳密、自訂 port、redirect、localhost、IP、相似網域及其他 yt-dlp 網站；yt-dlp 固定忽略主機設定檔。
 - 音訊先下載至 `assets/music/cache/` 再播放，完成、移除、跳過或失敗後清理；播放清單中任一曲目驗證或下載失敗會取消整批操作。
 - 目前歌曲、秒數、點播者與待播序列會寫入 `assets/music/queues/<guildID>.json`。Bot 重啟或語音連線中斷後會嘗試重連，成功時自動繼續原先因斷線暫停的播放。
 - 最新控制面板索引位於 `assets/music/panels.json`；新面板建立後，舊面板視為過期。
@@ -299,7 +305,7 @@ Reply 的互動生命週期注意事項：
 ### 臨時語音、物流與 Twitch
 
 - 臨時語音入口可有各自前綴。真人加入後，Bot 在相同分類建立繼承入口權限的專屬頻道並移動成員；移除入口只停止建立新頻道，既有受管頻道仍會清理。
-- Track.TW Token 未設定時物流背景監聽不啟動；資料按 Discord 使用者分檔，不是按 Guild 分檔。
+- Track.TW Token 未設定時物流背景監聽不啟動；資料按 Discord 使用者分檔，不是按 Guild 分檔。操作按鈕攜帶 package ID，handler 在 acknowledgement 前以點擊者 ID 核對 owner。
 - Twitch Client ID／Secret 不完整時直播監聽不啟動；訂閱、Discord 通知位置與最近 stream 狀態會持久化，排程執行旗標才只存在記憶體。
 
 ## 資料與外部服務
@@ -319,6 +325,8 @@ Reply 的互動生命週期注意事項：
 
 這些 JSON Store 沒有跨程序檔案鎖，部署模型應維持單一 Bot 程序。持久化目錄必須可寫，並應依資料重要性獨立備份；音樂 cache 與 Minecraft temp 則是可重建的暫存資料。
 
+第三方 HTTP 每次嘗試均有 15 秒 timeout；GET 最多額外重試兩次並遵守最長 60 秒的 `Retry-After`。IP 查詢另限制每位使用者同時一筆、每分鐘五筆，且只接受 `net.isIP()` 驗證通過的位址。
+
 ## 新需求實作順序
 
 1. 先用 `rg` 找出相近 command、event、core 與 util，確認資料格式、custom ID 與設定鍵。
@@ -337,7 +345,7 @@ Reply 的互動生命週期注意事項：
 npm test
 ```
 
-目前 `test/` 有 7 個測試檔、34 個 `test()` 案例，涵蓋 Discord 輸入解析、共用 Store 重構、抽選、資料收集、音樂純函式、yt-dlp 更新判斷、FFmpeg 與播放快照。外部 API 與完整 Discord 互動仍需要測試 Bot／測試伺服器驗證。
+目前測試涵蓋 Discord 輸入解析、Reply 生命週期、Logger 遮罩、HTTP retry、物流 owner 邊界、IP 限流、音樂 URL、共用 Store、抽選、資料收集、FFmpeg 與播放快照。安全回歸測試不連線 Discord 或真實第三方 API；完整 Discord 互動仍需測試 Bot／測試伺服器驗證。
 
 專案沒有 lint 或 format script。變更至少執行：
 

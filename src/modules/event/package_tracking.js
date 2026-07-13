@@ -43,7 +43,7 @@ async function sendPackageUpdate(client, record, packageData) {
         const channel = record.channelID ? await client.channels.fetch(record.channelID).catch(() => null) : null;
         if (channel && typeof channel.send === 'function') {
             const message = await channel.send(payload);
-            updatePackageRecord(record.userPackageID, {
+            updatePackageRecord(record.userID, record.userPackageID, {
                 lastNotificationChannelID: message.channelId,
                 lastNotificationMessageID: message.id
             });
@@ -53,14 +53,16 @@ async function sendPackageUpdate(client, record, packageData) {
         const user = await client.users.fetch(record.userID).catch(() => null);
         if (user) {
             const message = await user.send({ embeds: [embed], components: createPackageNotificationActionsRows(record) });
-            updatePackageRecord(record.userPackageID, {
+            updatePackageRecord(record.userID, record.userPackageID, {
                 lastNotificationChannelID: message.channelId,
                 lastNotificationMessageID: message.id
             });
             return;
         }
 
-        sendLog(client, `⚠️ 無法通知包裹更新，找不到頻道與使用者：${record.trackingNumber}`, 'WARN');
+        sendLog(client, `⚠️ 無法通知包裹更新，找不到頻道與使用者：${record.trackingNumber}`, 'WARN', null, {
+            sensitiveValues: [record.trackingNumber]
+        });
     } catch (error) {
         sendLog(client, '❌ 發送包裹更新通知時發生錯誤：', 'ERROR', error);
     }
@@ -69,12 +71,16 @@ async function sendPackageUpdate(client, record, packageData) {
 async function archiveStalePackage(client, record) {
     try {
         await changePackageState(record.userPackageID, 'archive');
-        updatePackageRecord(record.userPackageID, {
+        updatePackageRecord(record.userID, record.userPackageID, {
             status: 'archived'
         });
-        sendLog(client, `📦 已自動封存長時間無更新的包裹：${record.trackingNumber}`);
+        sendLog(client, `📦 已自動封存長時間無更新的包裹：${record.trackingNumber}`, 'INFO', null, {
+            sensitiveValues: [record.trackingNumber]
+        });
     } catch (error) {
-        sendLog(client, `❌ 自動封存包裹失敗：${record.trackingNumber}`, 'ERROR', error);
+        sendLog(client, `❌ 自動封存包裹失敗：${record.trackingNumber}`, 'ERROR', error, {
+            sensitiveValues: [record.trackingNumber]
+        });
     }
 }
 
@@ -94,7 +100,7 @@ async function checkPackages(client) {
                 const signature = createHistorySignature(packageData);
 
                 if (signature !== record.lastHistorySignature) {
-                    const updatedRecord = updatePackageRecord(record.userPackageID, {
+                    const updatedRecord = updatePackageRecord(record.userID, record.userPackageID, {
                         lastHistorySignature: signature,
                         lastHistoryChangedAt: new Date().toISOString(),
                         lastPackageData: packageData
@@ -108,7 +114,9 @@ async function checkPackages(client) {
                     await archiveStalePackage(client, record);
                 }
             } catch (error) {
-                sendLog(client, `❌ 檢查包裹貨態時發生錯誤：${record.trackingNumber}`, 'ERROR', error);
+                sendLog(client, `❌ 檢查包裹貨態時發生錯誤：${record.trackingNumber}`, 'ERROR', error, {
+                    sensitiveValues: [record.trackingNumber]
+                });
             }
         }
     } finally {

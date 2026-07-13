@@ -7,7 +7,7 @@ const path = require('path');
  * 顯示與重複檢查。此模組使用同步檔案 I/O，呼叫端應避免高頻並行寫入同一使用者檔案。
  */
 const fs = require('fs');
-const axios = require('axios');
+const { http } = require('../core/http');
 const {
     ActionRowBuilder,
     ButtonBuilder,
@@ -197,24 +197,19 @@ function getPackageTrackingConfig() {
     };
 }
 
-function createTrackTwClient() {
-    return axios.create({
-        baseURL: API_BASE_URL,
-        headers: {
-            Authorization: `Bearer ${getTrackTwToken()}`
-        }
-    });
+function createTrackTwRequestConfig() {
+    return { headers: { Authorization: `Bearer ${getTrackTwToken()}` } };
 }
 
 async function getAvailableCarriers() {
-    const response = await createTrackTwClient().get('/carrier/available');
+    const response = await http.get(`${API_BASE_URL}/carrier/available`, createTrackTwRequestConfig());
     return response.data || [];
 }
 
 async function detectCarrier(trackingNumbers) {
-    const response = await createTrackTwClient().post('/carrier/detect', {
+    const response = await http.post(`${API_BASE_URL}/carrier/detect`, {
         tracking_numbers: trackingNumbers
-    });
+    }, createTrackTwRequestConfig());
     return response.data.carriers || [];
 }
 
@@ -232,17 +227,21 @@ async function importPackage(carrierID, trackingNumber, note = '', extraFields =
         };
     }
 
-    const response = await createTrackTwClient().post('/package/import', body);
+    const response = await http.post(`${API_BASE_URL}/package/import`, body, createTrackTwRequestConfig());
     return response.data;
 }
 
 async function trackingPackage(userPackageID) {
-    const response = await createTrackTwClient().get(`/package/tracking/${userPackageID}`);
+    const response = await http.get(`${API_BASE_URL}/package/tracking/${encodeURIComponent(userPackageID)}`, createTrackTwRequestConfig());
     return response.data;
 }
 
 async function changePackageState(userPackageID, state) {
-    const response = await createTrackTwClient().patch(`/package/state/${userPackageID}/${state}`);
+    const response = await http.patch(
+        `${API_BASE_URL}/package/state/${encodeURIComponent(userPackageID)}/${encodeURIComponent(state)}`,
+        undefined,
+        createTrackTwRequestConfig()
+    );
     return response.data;
 }
 
@@ -390,17 +389,19 @@ function createStoredPackageEmbed(record, title = '包裹貨態') {
 // Record 查詢與異動 ---------------------------------------------------------
 
 function findPackageRecord(userID, trackingNumber) {
+    const normalizedUserID = String(userID);
     const store = loadUserPackageStore(userID);
     return store.packages.find(record =>
-        record.userID === userID &&
+        String(record.userID) === normalizedUserID &&
         record.trackingNumber.toLowerCase() === trackingNumber.toLowerCase()
     );
 }
 
 function findDuplicatePackage(userID, carrierID, trackingNumber) {
+    const normalizedUserID = String(userID);
     const store = loadUserPackageStore(userID);
     return store.packages.find(record =>
-        record.userID === userID &&
+        String(record.userID) === normalizedUserID &&
         record.carrierID === carrierID &&
         record.trackingNumber.toLowerCase() === trackingNumber.toLowerCase() &&
         record.status !== 'deleted'
@@ -409,54 +410,63 @@ function findDuplicatePackage(userID, carrierID, trackingNumber) {
 
 /** 以 userPackageID upsert；新資料插在前方，讓面板優先顯示最近操作項目。 */
 function upsertPackageRecord(record) {
-    const store = loadUserPackageStore(record.userID);
-    const index = store.packages.findIndex(item => item.userPackageID === record.userPackageID);
+    const normalizedRecord = {
+        ...record,
+        userID: String(record.userID),
+        userPackageID: String(record.userPackageID)
+    };
+    const store = loadUserPackageStore(normalizedRecord.userID);
+    const index = store.packages.findIndex(item => String(item.userPackageID) === normalizedRecord.userPackageID);
 
     if (index === -1) {
-        store.packages.push(record);
+        store.packages.push(normalizedRecord);
     } else {
-        store.packages[index] = { ...store.packages[index], ...record };
+        store.packages[index] = { ...store.packages[index], ...normalizedRecord };
     }
 
-    saveUserPackageStore(record.userID, store);
-    return record;
+    saveUserPackageStore(normalizedRecord.userID, store);
+    return normalizedRecord;
 }
 
-/**
- * 由遠端 ID 反查 owner。這會掃描所有使用者檔案，適合背景排程但不應放入高頻熱路徑。
- */
-function findPackageStoreByID(userPackageID) {
-    for (const { userID, store } of getUserPackageStores()) {
-        const index = store.packages.findIndex(record => record.userPackageID === userPackageID);
-        if (index !== -1) return { userID, store, index };
-    }
-
-    return null;
+/** 以 owner 與遠端包裹 ID 直接定位，避免互動熱路徑掃描其他使用者資料。 */
+function getPackageRecord(userID, userPackageID) {
+    const normalizedUserID = String(userID);
+    return loadUserPackageStore(normalizedUserID).packages.find(record =>
+        String(record.userID) === normalizedUserID && String(record.userPackageID) === String(userPackageID)
+    ) || null;
 }
 
-function updatePackageRecord(userPackageID, updates) {
-    const result = findPackageStoreByID(userPackageID);
-    if (!result) return null;
-
-    const { userID, store, index } = result;
+/** 只更新指定 owner 檔案內的包裹，owner 不符時不得跨檔搜尋。 */
+function updatePackageRecord(userID, userPackageID, updates) {
+    const normalizedUserID = String(userID);
+    const store = loadUserPackageStore(normalizedUserID);
+    const index = store.packages.findIndex(record =>
+        String(record.userID) === normalizedUserID && String(record.userPackageID) === String(userPackageID)
+    );
+    if (index === -1) return null;
 
     store.packages[index] = {
         ...store.packages[index],
         ...updates,
+        userID: normalizedUserID,
+        userPackageID: String(userPackageID),
         updatedAt: new Date().toISOString()
     };
-    saveUserPackageStore(userID, store);
+    saveUserPackageStore(normalizedUserID, store);
     return store.packages[index];
 }
 
-function deletePackageRecord(userPackageID) {
-    const result = findPackageStoreByID(userPackageID);
-    if (!result) return null;
-
-    const { userID, store, index } = result;
+/** 只刪除指定 owner 檔案內的包裹，避免以外部 ID 操作其他使用者資料。 */
+function deletePackageRecord(userID, userPackageID) {
+    const normalizedUserID = String(userID);
+    const store = loadUserPackageStore(normalizedUserID);
+    const index = store.packages.findIndex(record =>
+        String(record.userID) === normalizedUserID && String(record.userPackageID) === String(userPackageID)
+    );
+    if (index === -1) return null;
 
     const [deletedRecord] = store.packages.splice(index, 1);
-    saveUserPackageStore(userID, store);
+    saveUserPackageStore(normalizedUserID, store);
     return deletedRecord;
 }
 
@@ -467,7 +477,7 @@ function getPackageRecords(filter = {}) {
 
     return records.filter(record => {
         if (filter.status && filter.status !== 'all' && record.status !== filter.status) return false;
-        if (filter.userID && record.userID !== filter.userID) return false;
+        if (filter.userID && String(record.userID) !== String(filter.userID)) return false;
         return true;
     });
 }
@@ -476,7 +486,7 @@ function getPackageRecords(filter = {}) {
 function createPackageRecord({ interaction, carrier, trackingNumber, note, userPackageID, packageData }) {
     const now = new Date().toISOString();
     return {
-        userPackageID,
+        userPackageID: String(userPackageID),
         userID: interaction.user.id,
         username: interaction.user.tag,
         guildID: interaction.guildId || null,
@@ -513,6 +523,7 @@ module.exports = {
     withAddPackageRow,
     findPackageRecord,
     findDuplicatePackage,
+    getPackageRecord,
     upsertPackageRecord,
     updatePackageRecord,
     deletePackageRecord,
