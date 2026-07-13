@@ -148,7 +148,7 @@ function refreshInactivityTimer(state) {
         await state.hooks.notifyPlaybackStatus?.(
             state,
             'disconnect',
-            '頻道內沒有使用者或撥放序列為空'
+            '頻道內沒有使用者或播放序列為空。'
         );
     }, timeoutMinutes * 60 * 1000);
     state.inactivityTimer.unref?.();
