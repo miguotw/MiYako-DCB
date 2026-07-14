@@ -146,12 +146,9 @@ function createInteractionRouter({ logger = null, config } = {}) {
             await descriptor.execute(interaction, context);
             return true;
         } catch (error) {
-            logger?.error?.('執行 Discord 互動時發生錯誤。', error);
             try {
                 await replies.errorReply(interaction, error, { context: '執行 Discord 互動' });
-            } catch (replyError) {
-                logger?.error?.('Discord 系統錯誤回覆失敗。', replyError);
-            }
+            } catch {}
             return false;
         }
     }

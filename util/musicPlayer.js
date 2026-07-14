@@ -13,6 +13,7 @@ const {
     createAudioPlayer, createAudioResource, entersState, joinVoiceChannel
 } = require('@discordjs/voice');
 const { deleteTrackFile } = require('./ytDlpManager');
+const { musicValidationError } = require('./musicHelpers');
 
 const guildStates = new Map();
 
@@ -76,11 +77,18 @@ function persistState(state, immediate = false) {
  * 五秒一次的應用層 recovery；播放會先暫停，防止連線恢復後進度已經漂移。
  */
 async function connect(state, voiceChannel) {
-    if (state.connection && state.voiceChannelID === voiceChannel.id) return state.connection;
+    const waitForState = state.options.entersState || entersState;
+    if (state.connection && state.voiceChannelID === voiceChannel.id) {
+        state.voiceChannel = voiceChannel;
+        await waitForState(state.connection, VoiceConnectionStatus.Ready, 20000);
+        refreshInactivityTimer(state);
+        return state.connection;
+    }
     if (state.connection) state.connection.destroy();
     // 閒置退出後若先前已開啟的點播流程才完成下載，重新連線時要把狀態放回索引。
     guildStates.set(state.guildID, state);
-    state.connection = joinVoiceChannel({ channelId: voiceChannel.id, guildId: voiceChannel.guild.id, adapterCreator: voiceChannel.guild.voiceAdapterCreator, selfDeaf: true });
+    const join = state.options.joinVoiceChannel || joinVoiceChannel;
+    state.connection = join({ channelId: voiceChannel.id, guildId: voiceChannel.guild.id, adapterCreator: voiceChannel.guild.voiceAdapterCreator, selfDeaf: true });
     state.voiceChannelID = voiceChannel.id;
     state.voiceChannel = voiceChannel;
     state.connection.subscribe(state.player);
@@ -89,10 +97,10 @@ async function connect(state, voiceChannel) {
         pauseForRecovery(state);
         try {
             await Promise.race([
-                entersState(disconnectedConnection, VoiceConnectionStatus.Signalling, 5000),
-                entersState(disconnectedConnection, VoiceConnectionStatus.Connecting, 5000)
+                waitForState(disconnectedConnection, VoiceConnectionStatus.Signalling, 5000),
+                waitForState(disconnectedConnection, VoiceConnectionStatus.Connecting, 5000)
             ]);
-            await entersState(disconnectedConnection, VoiceConnectionStatus.Ready, 20000);
+            await waitForState(disconnectedConnection, VoiceConnectionStatus.Ready, 20000);
             const resumed = resumeRecoveredPlayback(state);
             await state.hooks.notifyPlaybackStatus?.(
                 state,
@@ -105,10 +113,29 @@ async function connect(state, voiceChannel) {
             scheduleRecovery(state);
         }
     });
-    await entersState(state.connection, VoiceConnectionStatus.Ready, 20000);
+    await waitForState(state.connection, VoiceConnectionStatus.Ready, 20000);
     persistState(state);
     refreshInactivityTimer(state);
     return state.connection;
+}
+
+/**
+ * 從管理面板主動召喚 Bot。跨頻道搬移只允許完全空閒的播放器，避免其他頻道的
+ * 播放或下載流程被使用者搶走；同頻道則等待現有連線 Ready 後冪等成功。
+ */
+async function summonToVoiceChannel(state, voiceChannel) {
+    if (!state || !voiceChannel?.id || !voiceChannel.guild?.id) {
+        throw new TypeError('召喚音樂播放器缺少有效的語音頻道。');
+    }
+    const previousChannelID = state.voiceChannelID;
+    const movingChannels = Boolean(previousChannelID && previousChannelID !== voiceChannel.id);
+    const busy = Boolean(state.current || state.starting || state.preparingTracks > 0 || state.queue.length);
+    if (movingChannels && busy) {
+        throw musicValidationError('Bot 正在其他語音頻道播放或準備歌曲，請先加入 Bot 所在的語音頻道。');
+    }
+    await connect(state, voiceChannel);
+    if (previousChannelID === voiceChannel.id) return 'alreadyConnected';
+    return previousChannelID ? 'moved' : 'joined';
 }
 
 /** Bot 不計入聽眾；頻道內至少一位真人才視為有人使用。 */
@@ -436,4 +463,4 @@ async function shutdownAllPlayers() {
     }
 }
 function isCurrentPanel(state, messageID) { return Boolean(state.panelMessage?.id && state.panelMessage.id === messageID); }
-module.exports = { guildStates, getGuildState, enqueue, togglePause, skipCurrent, cleanupState, snapshotAllGuildStates, shutdownAllPlayers, isCurrentPanel, elapsedSeconds, restoreGuildState, handleVoiceStateUpdate, removeQueuedTracks, clearQueue, beginTrackPreparation, endTrackPreparation };
+module.exports = { guildStates, getGuildState, enqueue, summonToVoiceChannel, togglePause, skipCurrent, cleanupState, snapshotAllGuildStates, shutdownAllPlayers, isCurrentPanel, elapsedSeconds, restoreGuildState, handleVoiceStateUpdate, removeQueuedTracks, clearQueue, beginTrackPreparation, endTrackPreparation };

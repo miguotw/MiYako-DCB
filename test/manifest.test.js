@@ -25,6 +25,24 @@ const FEATURE_FILES = [
     'memberLifecycle', 'memberLogger', 'messageLogger', 'roleLogger', 'voiceLogger', 'presence'
 ];
 
+const COMMAND_FEATURES = new Map([
+    ['about', config => config.commands.about],
+    ['hitokoto', config => config.commands.hitokoto],
+    ['ipQuery', config => config.commands.ipQuery],
+    ['minecraft', config => config.commands.minecraft],
+    ['ping', config => config.commands.ping],
+    ['unixTimestamp', config => config.commands.unixTimestamp],
+    ['announcement', config => config.commands.announcement],
+    ['messageDelete', config => config.commands.messageDelete],
+    ['userInfo', config => config.commands.userInfo],
+    ['music', config => config.commands.music],
+    ['packageTracking', config => config.commands.packageTracking],
+    ['dataCollection', config => config.commands.dataCollection],
+    ['raffle', config => config.commands.raffle],
+    ['temporaryVoice', config => config.modules.temporaryVoice],
+    ['twitchStream', config => config.commands.stream]
+]);
+
 test('每個 feature 模組各自匯出 createManifest(config)', () => {
     for (const file of FEATURE_FILES) {
         const feature = require(`../src/features/${file}`);
@@ -134,4 +152,30 @@ test('停用四種 logger 後不會加入 manifest 或額外 Gateway Intent', ()
     ], { adminCommandName: config.startup.adminCommandName });
     assert.deepEqual(isolatedCatalog.intents, [GatewayIntentBits.Guilds]);
     assert.equal(isolatedCatalog.intents.includes(disabledOnlyIntent), false);
+});
+
+test('15 個指令開關會停用整個 feature、互動、啟動與 intents', () => {
+    for (const [featureName, selectConfig] of COMMAND_FEATURES) {
+        const config = structuredClone(loadConfig());
+        selectConfig(config).enable = false;
+        const manifest = createFeatureManifests(config).find(item => item.name === featureName);
+        assert.equal(manifest.enabled, false, featureName);
+        const catalog = buildCommandCatalog([manifest], { adminCommandName: config.startup.adminCommandName });
+        assert.deepEqual(catalog.manifests, [], featureName);
+        assert.deepEqual(catalog.commands, [], featureName);
+        assert.deepEqual(catalog.interactions, [], featureName);
+        assert.deepEqual(catalog.intents, [], featureName);
+    }
+});
+
+test('全部管理指令停用時不建立 admin aggregate', () => {
+    const config = structuredClone(loadConfig());
+    for (const section of ['announcement', 'raffle', 'dataCollection', 'messageDelete', 'userInfo', 'stream']) {
+        config.commands[section].enable = false;
+    }
+    config.modules.temporaryVoice.enable = false;
+    const catalog = buildCommandCatalog(createFeatureManifests(config), {
+        adminCommandName: config.startup.adminCommandName
+    });
+    assert.equal(catalog.commands.some(command => command.name === config.startup.adminCommandName), false);
 });

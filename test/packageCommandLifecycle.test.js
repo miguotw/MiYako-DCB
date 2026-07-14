@@ -28,6 +28,7 @@ function createInteraction() {
         async deferUpdate() { this.deferred = true; calls.push(['deferUpdate']); },
         async editReply(payload) { calls.push(['editReply', payload]); return payload; },
         async followUp(payload) { calls.push(['followUp', payload]); return payload; },
+        async update(payload) { calls.push(['update', payload]); return payload; },
         async showModal(payload) { calls.push(['showModal', payload]); return payload; }
     };
 }
@@ -123,10 +124,76 @@ test('物流多步互動從新增到刪除皆以 owner ID 與 package ID 直接�
     interaction.customId = 'package_panel_wake:package-1';
     await command.buttonHandlers.package_panel_wake(interaction, context);
     assert.equal((await repository.getPackage(interaction.user.id, 'package-1')).status, 'active');
-    interaction.customId = 'package_panel_delete:package-1';
-    await command.buttonHandlers.package_panel_delete(interaction, context);
+
+    interaction.customId = 'package_panel_archive:package-1';
+    await command.buttonHandlers.package_panel_archive(interaction, context);
+    assert.equal((await repository.getPackage(interaction.user.id, 'package-1')).status, 'archived');
+
+    interaction.customId = 'package_panel_delete_archived';
+    interaction.deferred = false;
+    interaction.replied = false;
+    await command.buttonHandlers.package_panel_delete_archived(interaction, context);
+    const deleteMenu = interaction.calls.at(-1)[1];
+    assert.equal(deleteMenu.components[0].components[0].data.custom_id, 'package_panel_delete_archived_select');
+    interaction.customId = 'package_panel_delete_archived_select';
+    interaction.values = ['package-1'];
+    await command.componentHandlers.package_panel_delete_archived_select(interaction, context);
+    const deleteModal = interaction.calls.filter(([name]) => name === 'showModal').at(-1)[1];
+    interaction.customId = deleteModal.data.custom_id;
+    interaction.setFields({ confirmation: 'y' });
+    interaction.deferred = false;
+    await command.modalSubmitHandlers.package_panel_delete_confirm(interaction, context);
     assert.equal(await repository.getPackage(interaction.user.id, 'package-1'), null);
-    assert.deepEqual(stateChanges, ['archive', 'inbox', 'delete']);
+    assert.deepEqual(stateChanges, ['archive', 'inbox', 'archive', 'delete']);
+
+    interaction.deferred = false;
+    interaction.replied = false;
+    await command.modalSubmitHandlers.package_panel_delete_confirm(interaction, context);
+    assert.deepEqual(stateChanges, ['archive', 'inbox', 'archive', 'delete'], '重放不得再次呼叫遠端刪除');
+});
+
+test('封存包裹刪除選單完整分頁，遠端失敗時保留本機資料', async t => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'miyako-package-delete-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const store = createStoreRegistry({ dataRoot: root });
+    const context = { store };
+    const localConfig = structuredClone(loadConfig());
+    localConfig.commands.packageTracking.trackTwToken = 'test-track-token';
+    const command = createCommand(localConfig);
+    const records = Array.from({ length: 51 }, (_, index) => ({
+        userID: 'package-owner', userPackageID: `archived-${index}`,
+        carrierName: '測試物流', trackingNumber: `TRACK-${index}`,
+        note: '', status: 'archived', updatedAt: new Date(51 - index).toISOString()
+    }));
+    await store.packageTracking.write('package-owner', { packages: records, reservations: [], outbox: [] });
+
+    const lastPage = command._test.createArchivedDeletePayload(records, 2);
+    assert.match(lastPage.embeds[0].data.description, /3 \/ 3/);
+    assert.equal(lastPage.components[0].components[0].options.length, 1);
+    assert.equal(lastPage.components[0].components[0].data.min_values, 1);
+    assert.equal(lastPage.components[0].components[0].data.max_values, 1);
+
+    setDefaultHttpClient(createHttpClient({ transport: async request => {
+        if (request.url.includes('/package/state/')) throw new Error('Track.TW 暫時失敗');
+        throw new Error(`未預期請求 ${request.url}`);
+    } }));
+    const interaction = createInteraction();
+    interaction.customId = 'package_panel_delete:archived-0';
+    await command.buttonHandlers.package_panel_delete(interaction, context);
+    const modal = interaction.calls.filter(([name]) => name === 'showModal').at(-1)[1];
+    interaction.customId = modal.data.custom_id;
+    interaction.setFields({ confirmation: 'Y' });
+    await command.modalSubmitHandlers.package_panel_delete_confirm(interaction, context);
+
+    const repository = createPackageTrackingRepository(store.packageTracking);
+    assert.equal((await repository.getPackage(interaction.user.id, 'archived-0')).status, 'archived');
+
+    interaction.setFields({ confirmation: 'y' });
+    interaction.deferred = false;
+    interaction.replied = false;
+    await command.modalSubmitHandlers.package_panel_delete_confirm(interaction, context);
+
+    assert.equal((await repository.getPackage(interaction.user.id, 'archived-0')).status, 'archived');
 });
 
 test('多物流商 session 與額外欄位流程拒絕重放並完成匯入', async t => {

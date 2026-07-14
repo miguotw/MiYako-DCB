@@ -201,7 +201,7 @@ test('Router 集中執行 admin gate，無權限與 DM 均無法觸發 handler',
     assert.equal(administrator.replies.length, 0);
 });
 
-test('handler 與 Discord 錯誤回覆同時失敗時，dispatch 仍會收斂 rejection', async () => {
+test('handler 與 Discord 錯誤回覆同時失敗時，dispatch 仍會收斂且不重複 logger', async () => {
     const errors = [];
     const router = createRouter({
         config: loadConfig(),
@@ -219,5 +219,5 @@ test('handler 與 Discord 錯誤回覆同時失敗時，dispatch 仍會收斂 re
     } finally {
         console.log = originalConsoleLog;
     }
-    assert.equal(errors.some(item => /系統錯誤回覆失敗/.test(item.message)), true);
+    assert.deepEqual(errors, []);
 });

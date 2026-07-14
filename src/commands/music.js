@@ -14,7 +14,7 @@ const { createLogTools } = require('../../core/sendLog');
 const {
     extractTracks, downloadTrack, deleteTrackFile, cleanupOrphanedCache
 } = require('../../util/ytDlpManager');
-const { getGuildState, enqueue, togglePause, skipCurrent, isCurrentPanel, elapsedSeconds, restoreGuildState, removeQueuedTracks, clearQueue, beginTrackPreparation, endTrackPreparation } = require('../../util/musicPlayer');
+const { getGuildState, enqueue, summonToVoiceChannel, togglePause, skipCurrent, isCurrentPanel, elapsedSeconds, restoreGuildState, removeQueuedTracks, clearQueue, beginTrackPreparation, endTrackPreparation } = require('../../util/musicPlayer');
 const { createMusicRepository } = require('../../util/musicRepository');
 const {
     formatDuration, getUploadYear, createProgressBar, paginateQueue,
@@ -143,13 +143,18 @@ function snapshotWriter(context) {
 
 /** 根據播放狀態建立主面板按鈕；disabled 用於讓被取代的舊面板失效。 */
 function createButtons(state, disabled = false) {
-    return [new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('music_request').setLabel('點播').setStyle(ButtonStyle.Success).setDisabled(disabled),
-        new ButtonBuilder().setCustomId('music_play_next').setLabel('插播').setStyle(ButtonStyle.Success).setDisabled(disabled),
-        new ButtonBuilder().setCustomId('music_pause').setLabel(state?.paused ? '繼續' : '暫停').setStyle(ButtonStyle.Primary).setDisabled(disabled || !state?.current),
-        new ButtonBuilder().setCustomId('music_skip').setLabel('跳過').setStyle(ButtonStyle.Danger).setDisabled(disabled || !state?.current),
-        new ButtonBuilder().setCustomId('music_queue_open:0').setLabel('序列').setStyle(ButtonStyle.Secondary).setDisabled(disabled || !state?.queue?.length)
-    )];
+    return [
+        new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('music_request').setLabel('點播').setStyle(ButtonStyle.Success).setDisabled(disabled),
+            new ButtonBuilder().setCustomId('music_play_next').setLabel('插播').setStyle(ButtonStyle.Success).setDisabled(disabled),
+            new ButtonBuilder().setCustomId('music_pause').setLabel(state?.paused ? '繼續' : '暫停').setStyle(ButtonStyle.Primary).setDisabled(disabled || !state?.current),
+            new ButtonBuilder().setCustomId('music_skip').setLabel('跳過').setStyle(ButtonStyle.Danger).setDisabled(disabled || !state?.current)
+        ),
+        new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('music_queue_open:0').setLabel('播放序列').setStyle(ButtonStyle.Secondary).setDisabled(disabled || !state?.queue?.length),
+            new ButtonBuilder().setCustomId('music_summon').setLabel('召喚加入').setStyle(ButtonStyle.Secondary).setDisabled(disabled)
+        )
+    ];
 }
 
 function createPanelEmbed(state) {
@@ -440,6 +445,18 @@ const command = {
                 await interaction.reply({ embeds: [createActionEmbed('⏭️ ┃ 已跳過歌曲', `<@${interaction.user.id}> 跳過了 **${skippedTitle}**。`, SUCCESS_COLOR)] });
             } catch (error) { return replyError(interaction, error); }
         },
+        music_summon: async (interaction, context) => {
+            try {
+                const state = getState(interaction.guildId, interaction.client, context);
+                const voiceChannel = requireGuildVoice(interaction);
+                requireCurrentPanel(interaction, state);
+                const result = await withGuildLock(interaction.guildId, () => summonToVoiceChannel(state, voiceChannel));
+                const action = result === 'moved' ? '已移動至' : result === 'alreadyConnected' ? '已在' : '已加入';
+                await interaction.reply({
+                    embeds: [createActionEmbed(`${SUCCESS_EMOJI} ┃ 召喚成功`, `<@${interaction.user.id}>，Bot ${action} <#${voiceChannel.id}>。`, SUCCESS_COLOR)]
+                });
+            } catch (error) { return replyError(interaction, error); }
+        },
         music_queue_open: handleQueueOpen,
         music_queue_page: handleQueuePage,
         music_queue_clear: async (interaction, context) => {
@@ -558,7 +575,7 @@ const command = {
     },
     restorePersistedPlayback
 };
-command._test = { snapshotWriter };
+command._test = { createButtons, snapshotWriter };
 return command;
 }
 

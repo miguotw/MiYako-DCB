@@ -47,7 +47,7 @@ test('白名單只接受提及並去重', () => {
         { type: 'user', id: '12345678901234567' },
         { type: 'role', id: '23456789012345678' }
     ]);
-    assert.throws(() => command._test.parseMentionTargets('12345678901234567'), /不接受純數字 ID/);
+    assert.throws(() => command._test.parseMentionTargets('12345678901234567'), /僅接受 @用戶 或 @身分組/);
 });
 
 test('建立流程同時保留原始提及目標與展開後用戶', async () => {

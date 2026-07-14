@@ -8,7 +8,8 @@ function createManifest(config) {
     return createFeature({
         name: 'raffle', command, scope: 'admin',
         intents: [GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers],
-        initializer: (_client, context) => coordinator.start(context)
+        initializer: (_client, context) => coordinator.start(context),
+        enabled: config.commands.raffle.enable
     });
 }
 module.exports = { createManifest };

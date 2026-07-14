@@ -82,11 +82,10 @@ const command = {
                 // 提示已發送公告
                 return infoReply(interaction, `**公告已發送到 ${channel}${role ? ` 並提及 ${role}` : ''}！**`);
             } catch (error) {
-                sendLog(interaction.client, `❌ 在執行 ${getAdminCommandPath('發送公告')} 指令時發生錯誤`, "ERROR", error);
-                return validationReply(interaction, '**無法取得該訊息，請檢查以下內容！**\n 1. 機器人應具有 `讀取訊息歷史`、`檢視頻道`、`發送訊息`、`嵌入連結`、`提及身分組` 權限。\n 2. 確認訊息 ID 或連結是否正確，且連結屬於目前伺服器！');
+                if (error.isValidationError) return validationReply(interaction, `**${error.message}**`);
+                return errorReply(interaction, error, { context: '發送公告' });
             }
         } catch (error) {
-            sendLog(interaction.client, `❌ 在執行 ${getAdminCommandPath('發送公告')} 指令時發生未預期的錯誤`, "ERROR", error);
             return errorReply(interaction, error, { context: '發送公告' });
         }
     }

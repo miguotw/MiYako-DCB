@@ -15,7 +15,8 @@ const {
     StringSelectMenuBuilder,
     StringSelectMenuOptionBuilder,
     TextInputBuilder,
-    TextInputStyle
+    TextInputStyle,
+    MessageFlags
 } = require('discord.js');
 const { createLogTools } = require('../../core/sendLog');
 const { createReplyTools } = require('../../core/Reply');
@@ -35,7 +36,6 @@ const {
     findCarrier,
     createPackageEmbed,
     createAddPackageButton,
-    createAddPackageRow,
     createPackageNotificationActionsRows,
     withAddPackageRow,
     createPackageRecord,
@@ -109,7 +109,7 @@ function createPanelEmbed() {
     const embed = new EmbedBuilder()
         .setColor(EMBED_COLOR)
         .setTitle(`${EMBED_EMOJI} ┃ 物流追蹤 - 包裹管理面板`)
-        .setDescription('使用下方按鈕新增包裹，或進入追蹤中與已封存包裹管理。')
+        .setDescription('使用下方按鈕新增包裹，或進入追蹤中、已封存與刪除管理。')
         .setTimestamp();
 
     return embed;
@@ -126,7 +126,11 @@ function createPanelRows() {
             new ButtonBuilder()
                 .setCustomId('package_panel_archived')
                 .setLabel('已封存')
-                .setStyle(ButtonStyle.Secondary)
+                .setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder()
+                .setCustomId('package_panel_delete_archived')
+                .setLabel('刪除')
+                .setStyle(ButtonStyle.Danger)
         )
     ];
 }
@@ -228,6 +232,8 @@ function createPackageSelectRow(records, customId, placeholder) {
     const menu = new StringSelectMenuBuilder()
         .setCustomId(customId)
         .setPlaceholder(placeholder)
+        .setMinValues(1)
+        .setMaxValues(1)
         .addOptions(
             records.slice(0, MAX_SELECT_OPTIONS).map(record =>
                 new StringSelectMenuOptionBuilder()
@@ -238,6 +244,53 @@ function createPackageSelectRow(records, customId, placeholder) {
         );
 
     return new ActionRowBuilder().addComponents(menu);
+}
+
+function createArchivedDeletePayload(records, requestedPage = 0) {
+    const totalPages = Math.max(1, Math.ceil(records.length / MAX_SELECT_OPTIONS));
+    const page = Math.min(Math.max(Number(requestedPage) || 0, 0), totalPages - 1);
+    const pageRecords = records.slice(page * MAX_SELECT_OPTIONS, (page + 1) * MAX_SELECT_OPTIONS);
+    const components = [createPackageSelectRow(
+        pageRecords,
+        'package_panel_delete_archived_select',
+        '選擇要刪除的已封存包裹'
+    )];
+    if (totalPages > 1) {
+        components.push(new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`package_panel_delete_archived_page:${page - 1}`)
+                .setLabel('上一頁')
+                .setStyle(ButtonStyle.Secondary)
+                .setDisabled(page === 0),
+            new ButtonBuilder()
+                .setCustomId(`package_panel_delete_archived_page:${page + 1}`)
+                .setLabel('下一頁')
+                .setStyle(ButtonStyle.Secondary)
+                .setDisabled(page === totalPages - 1)
+        ));
+    }
+    return {
+        embeds: [new EmbedBuilder()
+            .setColor(EMBED_COLOR)
+            .setTitle(`${EMBED_EMOJI} ┃ 物流追蹤 - 刪除已封存包裹`)
+            .setDescription(`請選擇要刪除的物流單號。選取後仍需輸入 y 確認。\n頁數：${page + 1} / ${totalPages}`)],
+        components
+    };
+}
+
+function createDeleteConfirmationModal(record) {
+    return new ModalBuilder()
+        .setCustomId(`package_panel_delete_confirm:${record.userPackageID}`)
+        .setTitle('確認刪除已封存包裹')
+        .addComponents(new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+                .setCustomId('confirmation')
+                .setLabel('輸入 y 以永久刪除這筆物流追蹤')
+                .setPlaceholder(`${record.carrierName} ${record.trackingNumber}`.slice(0, 100))
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true)
+                .setMaxLength(1)
+        ));
 }
 
 function createPackageActionsRows(record = null) {
@@ -436,7 +489,6 @@ async function handleAddModalSubmit(interaction, context) {
         await continuePackageImport(interaction, pending, context);
     } catch (error) {
         if (error.isCarrierDetectionError || error.isValidationError) return replyPackageValidation(interaction, `**${error.message}**`);
-        sendLog(interaction.client, '❌ 新增物流追蹤時發生錯誤：', 'ERROR', error);
         return replyPackageError(interaction, error, '新增物流追蹤');
     }
 }
@@ -483,6 +535,35 @@ async function handleArchivedPackages(interaction, context) {
     });
 }
 
+async function handleArchivedDeleteMenu(interaction, context) {
+    const records = await getUserRecords(context, interaction.user.id, 'archived');
+    if (!records.length) return replyPackageValidation(interaction, '**目前沒有可刪除的已封存包裹。**');
+    await interaction.reply({
+        ...createArchivedDeletePayload(records, 0),
+        flags: MessageFlags.Ephemeral
+    });
+}
+
+async function handleArchivedDeletePage(interaction, context) {
+    const records = await getUserRecords(context, interaction.user.id, 'archived');
+    if (!records.length) return replyPackageValidation(interaction, '**目前沒有可刪除的已封存包裹。**');
+    const page = Number(interaction.customId.split(':')[1] || 0);
+    await interaction.update(createArchivedDeletePayload(records, page));
+}
+
+async function showDeleteConfirmation(interaction, context, customId = null) {
+    const userPackageID = customId
+        ? getScopedUserPackageID(interaction, customId)
+        : interaction.values?.[0];
+    const record = userPackageID
+        ? await getUserRecordByID(context, interaction.user.id, userPackageID)
+        : null;
+    if (!record || String(record.userID) !== interaction.user.id || record.status !== 'archived') {
+        return replyPackageValidation(interaction, '**這個包裹操作已過期，或你不是包裹擁有者。**');
+    }
+    await interaction.showModal(createDeleteConfirmationModal(record));
+}
+
 async function updateActiveRecord(context, record) {
     const packageData = await trackingPackage(record.userPackageID);
     const signature = createHistorySignature(packageData);
@@ -515,7 +596,6 @@ async function handleActivePackageSelected(interaction, context) {
             components: createPackageActionsRows(updated.record)
         });
     } catch (error) {
-        sendLog(interaction.client, '❌ 選擇追蹤中包裹並更新時發生錯誤：', 'ERROR', error);
         return replyPackageError(interaction, error, '更新選取的物流包裹');
     }
 }
@@ -563,7 +643,6 @@ async function handleRefreshSelected(interaction, context) {
             components: createPackageActionsRows(updated.record)
         });
     } catch (error) {
-        sendLog(interaction.client, '❌ 立即更新包裹時發生錯誤：', 'ERROR', error);
         return replyPackageError(interaction, error, '立即更新物流包裹');
     }
 }
@@ -581,15 +660,17 @@ async function handleArchiveSelected(interaction, context) {
             components: createArchivedActionsRows(updatedRecord)
         });
     } catch (error) {
-        sendLog(interaction.client, '❌ 封存包裹時發生錯誤：', 'ERROR', error);
         return replyPackageError(interaction, error, '封存物流包裹');
     }
 }
 
 async function handleDeleteSelected(interaction, context) {
-    const record = await getTargetRecord(interaction, context, 'package_panel_delete', ['active', 'archived']);
+    const record = await getTargetRecord(interaction, context, 'package_panel_delete_confirm', ['archived']);
     if (!record) return replyPackageValidation(interaction, '**這個包裹操作已過期，或你不是包裹擁有者。**');
-    await deferMessageUpdate(interaction);
+    if (interaction.fields.getTextInputValue('confirmation').trim() !== 'y') {
+        return replyPackageValidation(interaction, '**確認文字不正確，未刪除包裹。**');
+    }
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
         await changePackageState(record.userPackageID, 'delete');
@@ -597,10 +678,9 @@ async function handleDeleteSelected(interaction, context) {
         const updatedRecord = { ...record, status: 'deleted' };
         await interaction.editReply({
             embeds: [createManageEmbed(updatedRecord)],
-            components: [createAddPackageRow()]
+            components: []
         });
     } catch (error) {
-        sendLog(interaction.client, '❌ 刪除包裹時發生錯誤：', 'ERROR', error);
         return replyPackageError(interaction, error, '刪除物流包裹');
     }
 }
@@ -631,7 +711,6 @@ async function handleWakeSelected(interaction, context) {
             if (remoteWoke) await changePackageState(record.userPackageID, 'archive').catch(() => {});
         }
         if (error.isValidationError) return replyPackageValidation(interaction, `**${error.message}**`);
-        sendLog(interaction.client, '❌ 喚醒包裹時發生錯誤：', 'ERROR', error);
         return replyPackageError(interaction, error, '喚醒物流包裹');
     }
 }
@@ -680,7 +759,6 @@ async function handleCarrierSelected(interaction, context) {
         }, context, sessionID);
     } catch (error) {
         if (error.isValidationError) return replyPackageValidation(interaction, `**${error.message}**`);
-        sendLog(interaction.client, '❌ 選擇物流商新增物流追蹤時發生錯誤：', 'ERROR', error);
         return replyPackageError(interaction, error, '選擇物流商並新增物流追蹤');
     }
 }
@@ -703,6 +781,10 @@ const command = {
         package_panel_active: handleManagePackages,
 
         package_panel_archived: handleArchivedPackages,
+
+        package_panel_delete_archived: handleArchivedDeleteMenu,
+
+        package_panel_delete_archived_page: handleArchivedDeletePage,
 
         package_panel_extra_fields: async (interaction) => {
             const sessionID = interaction.customId.split(':')[1];
@@ -742,7 +824,7 @@ const command = {
 
         package_panel_archive: handleArchiveSelected,
 
-        package_panel_delete: handleDeleteSelected,
+        package_panel_delete: (interaction, context) => showDeleteConfirmation(interaction, context, 'package_panel_delete'),
 
         package_panel_wake: handleWakeSelected
     },
@@ -754,7 +836,9 @@ const command = {
 
         package_panel_select_active_package: handleActivePackageSelected,
 
-        package_panel_select_archived_package: handleArchivedPackageSelected
+        package_panel_select_archived_package: handleArchivedPackageSelected,
+
+        package_panel_delete_archived_select: (interaction, context) => showDeleteConfirmation(interaction, context)
     },
 
     modalSubmitHandlers: {
@@ -792,12 +876,13 @@ const command = {
                 );
             } catch (error) {
                 if (error.isValidationError) return replyPackageValidation(interaction, `**${error.message}**`);
-                sendLog(interaction.client, '❌ 補填資料新增物流追蹤時發生錯誤：', 'ERROR', error);
                 return replyPackageError(interaction, error, '補填資料並新增物流追蹤');
             }
         },
 
-        package_panel_note_modal: handleNoteModalSubmit
+        package_panel_note_modal: handleNoteModalSubmit,
+
+        package_panel_delete_confirm: handleDeleteSelected
     }
 };
 
@@ -809,7 +894,7 @@ function getTargetRecordForTest(interaction, customId, allowedStatuses, findReco
     return record;
 }
 
-command._test = { createArchivedActionsRows, getScopedUserPackageID, getTargetRecord: getTargetRecordForTest };
+command._test = { createArchivedActionsRows, createArchivedDeletePayload, createDeleteConfirmationModal, getScopedUserPackageID, getTargetRecord: getTargetRecordForTest };
 return command;
 }
 

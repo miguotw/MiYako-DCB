@@ -59,8 +59,6 @@ const command = {
             if (bannerURL) embed.setImage(bannerURL);
             await interaction.editReply({ embeds: [embed] });
         } catch (error) {
-            sendLog(interaction.client, `❌ 在執行 ${getAdminCommandPath('擷取用戶資料')} 指令時發生錯誤：`, 'ERROR', error);
-
             await errorReply(interaction, error, { context: '取得 Discord 用戶資料' });
         }
     }

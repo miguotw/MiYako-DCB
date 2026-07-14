@@ -74,7 +74,6 @@ const command = {
 
         } catch (error) {
             // 錯誤處理
-            sendLog(interaction.client, `❌ 在執行 /關於我 指令時發生錯誤`, "ERROR", error); // 記錄錯誤日誌
             return errorReply(interaction, error, { context: '執行關於指令' });
         }
     }

@@ -3,6 +3,6 @@ const { createCommand } = require('../commands/admin/twitchStream');
 const { createTwitchStreamFeature } = require('../modules/event/twitch_stream');
 function createManifest(config) {
     const twitch = createTwitchStreamFeature(config);
-    return createFeature({ name: 'twitchStream', command: createCommand(config, twitch), scope: 'admin', initializer: twitch.initializer });
+    return createFeature({ name: 'twitchStream', command: createCommand(config, twitch), scope: 'admin', initializer: twitch.initializer, enabled: config.commands.stream.enable });
 }
 module.exports = { createManifest };

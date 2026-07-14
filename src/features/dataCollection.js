@@ -8,7 +8,8 @@ function createManifest(config) {
     return createFeature({
         name: 'dataCollection', command, scope: 'admin',
         intents: [GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers],
-        initializer: (_client, context) => coordinator.start(context)
+        initializer: (_client, context) => coordinator.start(context),
+        enabled: config.commands.dataCollection.enable
     });
 }
 module.exports = { createManifest };

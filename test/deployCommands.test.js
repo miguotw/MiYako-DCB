@@ -10,6 +10,7 @@ const { buildCommandCatalog } = require('../core/commandCatalog');
 const { loadConfig } = require('../core/config');
 const { createFeatureManifests } = require('../src/features');
 const { deployCommands, parseDeployArgs } = require('../scripts/deployCommands');
+const { undeployCommands, parseUndeployArgs } = require('../scripts/undeployCommands');
 
 const CLIENT_ID = '12345678901234567';
 const GUILD_ID = '23456789012345678';
@@ -79,6 +80,29 @@ test('部署 CLI 對無效參數以非零狀態結束', () => {
         encoding: 'utf8'
     });
     assert.equal(result.status, 1);
+
+    const undeployResult = spawnSync(process.execPath, ['scripts/undeployCommands.js'], {
+        cwd: path.resolve(__dirname, '..'),
+        env: process.env,
+        encoding: 'utf8'
+    });
+    assert.equal(undeployResult.status, 1);
+});
+
+test('undeploy 對指定 global/guild route 只 PUT 空 catalog', async () => {
+    assert.deepEqual(parseUndeployArgs(['--scope', 'global']), { scope: 'global', guildId: null });
+    const calls = [];
+    const rest = { async put(route, options) { calls.push({ route, options }); } };
+    const globalResult = await undeployCommands({ args: ['--scope', 'global'], config, rest });
+    const guildResult = await undeployCommands({
+        args: ['--scope', 'guild', '--guild-id', GUILD_ID], config, rest
+    });
+    assert.deepEqual(calls, [
+        { route: Routes.applicationCommands(CLIENT_ID), options: { body: [] } },
+        { route: Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), options: { body: [] } }
+    ]);
+    assert.equal(globalResult.count, 0);
+    assert.equal(guildResult.count, 0);
 });
 
 test('deployCommands 對 global/guild 使用正確 REST route 與共用 catalog body', async () => {
@@ -141,9 +165,19 @@ test('deployCommands 傳遞 REST PUT 失敗，且部署腳本不建立 Discord C
         }),
         error => error === restError
     );
+    await assert.rejects(
+        undeployCommands({
+            args: ['--scope', 'guild', '--guild-id', GUILD_ID],
+            config,
+            rest: { put: async () => { throw restError; } }
+        }),
+        error => error === restError
+    );
 
     const source = fs.readFileSync(path.resolve(__dirname, '../scripts/deployCommands.js'), 'utf8');
     assert.doesNotMatch(source, /\bnew\s+Client\s*\(/);
+    const undeploySource = fs.readFileSync(path.resolve(__dirname, '../scripts/undeployCommands.js'), 'utf8');
+    assert.doesNotMatch(undeploySource, /\bnew\s+Client\s*\(/);
 });
 
 test('deploy 使用真實 enabled manifests 的完整 catalog，且不執行 feature start', async () => {

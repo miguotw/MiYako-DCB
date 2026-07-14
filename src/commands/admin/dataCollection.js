@@ -175,7 +175,6 @@ const command = {
             scheduleCollection(await repository(context).get(interaction.guildId, record.id));
             return infoReply(interaction, `**已在 ${publicChannel} 建立資料收集面板。**\n唯一 ID：\`${record.id}\``);
         } catch (error) {
-            sendLog(interaction.client, '❌ 建立資料收集面板時發生錯誤：', 'ERROR', error);
             if (publicMessage) await publicMessage.delete().catch(() => {});
             for (const message of mentionMessages) await message.delete().catch(() => {});
             if (record) {

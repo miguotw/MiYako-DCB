@@ -56,6 +56,7 @@ function createInteraction(values = {}) {
         send: async payload => ({ id: '45678901234567890', channelId: '23456789012345678', ...payload }),
         toString: () => '<#23456789012345678>'
     };
+    const guildChannels = values.guildChannels || new Collection();
     const interaction = {
         client,
         options: createOptions(values),
@@ -74,7 +75,7 @@ function createInteraction(values = {}) {
                 cache: new Collection()
             },
             roles: { cache: new Collection() },
-            channels: { fetch: async () => channel }
+            channels: { cache: guildChannels, fetch: async () => channel }
         },
         memberPermissions: { has: () => true },
         createdTimestamp: Date.now() - 25,
@@ -211,7 +212,7 @@ test('管理查詢、公告與近期訊息刪除皆完成 Discord 生命週期',
     assert.equal(deletion.replies.at(-1)[0], 'editReply');
 });
 
-test('臨時語音與 Twitch 管理指令經 repository 保存、更新及移除', async t => {
+test('臨時語音移除使用已設定頻道下拉選單，並拒絕過期選項', async t => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'miyako-command-lifecycle-'));
     t.after(() => fs.rmSync(root, { recursive: true, force: true }));
     const store = createStoreRegistry({ dataRoot: root });
@@ -219,14 +220,73 @@ test('臨時語音與 Twitch 管理指令經 repository 保存、更新及移除
 
     const voiceChannel = {
         id: '444444444444444444', guildId: '111111111111111111', type: ChannelType.GuildVoice,
-        permissionsFor: () => ({ missing: () => [] }), toString: () => '<#444444444444444444>'
+        name: '臨時語音入口', permissionsFor: () => ({ missing: () => [] }),
+        toString: () => '<#444444444444444444>'
     };
+    const guildChannels = new Collection([[voiceChannel.id, voiceChannel]]);
     const temporaryVoice = require('../src/commands/admin/temporaryVoice').createCommand(config);
-    const add = createInteraction({ subcommand: '新增', '語音頻道': voiceChannel, '前綴': '小房間' });
+    const removeCommand = temporaryVoice.data.toJSON().options.find(option => option.name === '移除');
+    assert.equal(removeCommand.options?.length || 0, 0, '移除子指令不再要求手動輸入頻道');
+    const add = createInteraction({
+        subcommand: '新增', '語音頻道': voiceChannel, '前綴': '小房間', guildChannels
+    });
     await temporaryVoice.execute(add, context);
-    const remove = createInteraction({ subcommand: '移除', '語音頻道': voiceChannel });
+    const remove = createInteraction({ subcommand: '移除', guildChannels });
     await temporaryVoice.execute(remove, context);
     assert.equal(remove.replies.at(-1)[0], 'editReply');
+    const payload = remove.replies.at(-1)[1];
+    assert.match(payload.embeds[0].data.title, /移除臨時語音頻道入口/);
+    assert.equal(payload.components[0].components[0].data.custom_id, 'temporary_voice_remove_select');
+    assert.equal(payload.components[0].components[0].options[0].data.label, voiceChannel.name);
+    assert.equal(payload.components[0].components[0].options[0].data.value, voiceChannel.id);
+
+    remove.customId = 'temporary_voice_remove_select';
+    remove.values = [voiceChannel.id];
+    await temporaryVoice.componentHandlers.temporary_voice_remove_select(remove, context);
+    assert.equal(remove.replies.at(-1)[0], 'update');
+    assert.deepEqual(remove.replies.at(-1)[1].components, []);
+
+    await temporaryVoice.componentHandlers.temporary_voice_remove_select(remove, context);
+    assert.match(remove.replies.at(-1)[1].embeds[0].data.description, /已不存在/);
+
+    const empty = createInteraction({ subcommand: '移除', guildChannels });
+    await temporaryVoice.execute(empty, context);
+    assert.match(empty.replies.at(-1)[1].embeds[0].data.description, /目前沒有已設定/);
+});
+
+test('臨時語音移除選單每頁最多 25 筆並可切換頁面', async t => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'miyako-temporary-voice-pages-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const store = createStoreRegistry({ dataRoot: root });
+    const context = { store };
+    const repository = require('../util/temporaryVoiceRepository')
+        .createTemporaryVoiceRepository(store.temporaryVoice);
+    const guildChannels = new Collection();
+    for (let index = 0; index < 26; index++) {
+        const channelID = String(500000000000000000n + BigInt(index));
+        guildChannels.set(channelID, { id: channelID, name: `入口 ${String(index).padStart(2, '0')}` });
+        await repository.setEntrance('111111111111111111', channelID, `前綴 ${index}`);
+    }
+
+    const temporaryVoice = require('../src/commands/admin/temporaryVoice').createCommand(config);
+    const remove = createInteraction({ subcommand: '移除', guildChannels });
+    await temporaryVoice.execute(remove, context);
+    const firstPage = remove.replies.at(-1)[1];
+    assert.equal(firstPage.components[0].components[0].options.length, 25);
+    assert.equal(firstPage.components[1].components[1].data.custom_id, 'temporary_voice_remove_page:1');
+
+    remove.customId = 'temporary_voice_remove_page:1';
+    await temporaryVoice.buttonHandlers.temporary_voice_remove_page(remove, context);
+    const secondPage = remove.replies.at(-1)[1];
+    assert.equal(secondPage.components[0].components[0].options.length, 1);
+    assert.match(secondPage.embeds[0].data.description, /2 \/ 2/);
+});
+
+test('Twitch 管理指令經 repository 保存、更新及移除', async t => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'miyako-twitch-command-lifecycle-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const store = createStoreRegistry({ dataRoot: root });
+    const context = { store };
 
     let checks = 0;
     let reconciled = 0;

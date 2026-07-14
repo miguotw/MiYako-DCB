@@ -50,6 +50,7 @@ const color = label => integerRange(label, 0x000000, 0xffffff);
 const messageList = label => z.array(trimmedText(`${label}內容`))
     .min(1, `${label}至少需要一筆內容`);
 const emoji = label => trimmedText(label, 100);
+const commandEnable = () => z.boolean().default(true);
 
 const commandName = label => trimmedText(label, 32)
     .refine(value => DISCORD_COMMAND_NAME.test(value), `${label}不符合 Discord Slash Command 名稱規則`)
@@ -90,19 +91,22 @@ const baseConfigSchema = strictObject({
 });
 
 const commandsConfigSchema = strictObject({
-    announcement: strictObject({ emoji: emoji('announcement.emoji') }),
-    raffle: strictObject({ emoji: emoji('raffle.emoji') }),
+    announcement: strictObject({ enable: commandEnable(), emoji: emoji('announcement.emoji') }),
+    raffle: strictObject({ enable: commandEnable(), emoji: emoji('raffle.emoji') }),
     dataCollection: strictObject({
+        enable: commandEnable(),
         emoji: emoji('dataCollection.emoji'),
         titleMaxLength: integerRange('dataCollection.titleMaxLength', 1, 45),
         submissionMaxLength: integerRange('dataCollection.submissionMaxLength', 1, 700)
     }),
     messageDelete: strictObject({
+        enable: commandEnable(),
         emoji: emoji('messageDelete.emoji'),
         deleteLimit: integerRange('messageDelete.deleteLimit', 1, 100)
     }),
-    userInfo: strictObject({ emoji: emoji('userInfo.emoji') }),
+    userInfo: strictObject({ enable: commandEnable(), emoji: emoji('userInfo.emoji') }),
     stream: strictObject({
+        enable: commandEnable(),
         twitchClientId: optionalSecret(255),
         twitchClientSecret: optionalSecret(255),
         checkInterval: integerRange('stream.checkInterval', 1, 1440),
@@ -120,6 +124,7 @@ const commandsConfigSchema = strictObject({
         }
     }),
     about: strictObject({
+        enable: commandEnable(),
         emoji: emoji('about.emoji'),
         botNickname: trimmedText('about.botNickname', 30),
         introduce: trimmedText('about.introduce', 4096),
@@ -135,9 +140,10 @@ const commandsConfigSchema = strictObject({
             });
         }
     }),
-    ping: strictObject({ emoji: emoji('ping.emoji') }),
-    hitokoto: strictObject({ emoji: emoji('hitokoto.emoji') }),
+    ping: strictObject({ enable: commandEnable(), emoji: emoji('ping.emoji') }),
+    hitokoto: strictObject({ enable: commandEnable(), emoji: emoji('hitokoto.emoji') }),
     packageTracking: strictObject({
+        enable: commandEnable(),
         emoji: emoji('packageTracking.emoji'),
         trackTwToken: optionalSecret(512),
         checkInterval: integerRange('packageTracking.checkInterval', 1, 1440),
@@ -145,8 +151,9 @@ const commandsConfigSchema = strictObject({
         archiveAfterDays: integerRange('packageTracking.archiveAfterDays', 1, 3650),
         maxActivePackages: integerRange('packageTracking.maxActivePackages', 1, 100).default(20)
     }),
-    ipQuery: strictObject({ emoji: emoji('ipQuery.emoji') }),
+    ipQuery: strictObject({ enable: commandEnable(), emoji: emoji('ipQuery.emoji') }),
     minecraft: strictObject({
+        enable: commandEnable(),
         emoji: emoji('minecraft.emoji'),
         defaultServer: z.record(
             trimmedText('minecraft.defaultServer 的伺服器名稱', 100),
@@ -154,8 +161,9 @@ const commandsConfigSchema = strictObject({
         ).refine(servers => Object.keys(servers).length >= 1, 'minecraft.defaultServer 至少需要一筆伺服器')
             .refine(servers => Object.keys(servers).length <= 25, 'minecraft.defaultServer 最多只能有 25 筆伺服器')
     }),
-    unixTimestamp: strictObject({ emoji: emoji('unixTimestamp.emoji') }),
+    unixTimestamp: strictObject({ enable: commandEnable(), emoji: emoji('unixTimestamp.emoji') }),
     music: strictObject({
+        enable: commandEnable(),
         emoji: emoji('music.emoji'),
         panelUpdateSeconds: integerRange('music.panelUpdateSeconds', 5, 3600),
         inactivityTimeoutMinutes: integerRange('music.inactivityTimeoutMinutes', 1, 1440),
@@ -218,6 +226,7 @@ const modulesConfigSchema = strictObject({
     role: strictObject({ enable: z.boolean() }),
     voice: strictObject({ enable: z.boolean() }),
     temporaryVoice: strictObject({
+        enable: commandEnable(),
         deleteAfterMinutes: integerRange('temporaryVoice.deleteAfterMinutes', 1, 1440)
     }),
     keywords: strictObject({

@@ -85,7 +85,6 @@ const command = {
 
             } catch (error) {
                 // 錯誤處理
-                sendLog(interaction.client, `❌ 在執行 /麥塊 外觀 指令時發生錯誤`, "ERROR", error); // 記錄錯誤日誌
                 return errorReply(interaction, error, { context: '查詢 Minecraft 玩家外觀' });
             };
             
@@ -153,7 +152,6 @@ const command = {
                 });
             } catch (error) {
                 // 如果伺服器不是 Minecraft 伺服器或無法連接
-                sendLog(interaction.client, `❌ 在執行 /麥塊 伺服器狀態資訊 指令時發生錯誤：`, "ERROR", error); // 記錄錯誤日誌
                 if (error.publicMessage) return validationReply(interaction, `**${error.publicMessage}**`);
                 return errorReply(interaction, error, { context: '查詢 Minecraft 伺服器狀態' });
             } finally {

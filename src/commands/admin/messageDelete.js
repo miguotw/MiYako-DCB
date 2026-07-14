@@ -26,8 +26,7 @@ async function deleteMessagesIndividually(interaction, messages) {
 
             await new Promise(resolve => setTimeout(resolve, MESSAGE_DELETE_DELAY_MS));
         } catch (error) {
-            sendLog(interaction.client, `❌ 在執行 ${getAdminCommandPath('刪除訊息')} 指令時發生錯誤，無法刪除訊息 ID: ${message.id}`, "ERROR", error);
-            throw new Error(`無法刪除訊息 ID: ${message.id}`);
+            throw new Error(`無法刪除訊息 ID: ${message.id}`, { cause: error });
         }
     }
 
@@ -127,7 +126,6 @@ const command = {
 
         } catch (error) {
             // 錯誤處理
-            sendLog(interaction.client, `❌ 在執行 ${getAdminCommandPath('刪除訊息')} 指令時發生錯誤`, "ERROR", error); // 記錄錯誤日誌
             return errorReply(interaction, error, { context: '刪除 Discord 訊息' });
         }
     }

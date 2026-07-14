@@ -38,7 +38,6 @@ const command = {
             
         } catch (error) {
             // 錯誤處理
-            sendLog(interaction.client, `❌ 在執行 /延遲 指令時發生錯誤`, "ERROR", error);
             return errorReply(interaction, error, { context: '執行延遲指令' });
         }
     }

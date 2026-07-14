@@ -98,7 +98,6 @@ const command = {
 
         } catch (error) {
             // 錯誤處理
-            sendLog(interaction.client, `❌ 在執行 /網際協定位址資訊 指令時發生錯誤：`, "ERROR", error); // 記錄錯誤日誌
             return errorReply(interaction, error, { context: '查詢 IP 位址資訊' });
         } finally {
             releaseIPRequest(interaction.user.id);

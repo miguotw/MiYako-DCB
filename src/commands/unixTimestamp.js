@@ -88,7 +88,6 @@ const command = {
         }
 
         } catch (error) {
-            sendLog(interaction.client, `❌ 在執行 /時間戳 指令時發生錯誤：`, "ERROR", error);
             return errorReply(interaction, error, { context: '執行時間戳指令' });
         }
     }
@@ -146,7 +145,6 @@ command.modalSubmitHandlers = {
             await interaction.reply({ embeds: [embed],ephemeral: false});
 
         } catch (error) {
-            sendLog(interaction.client, '❌ 在處理時間戳 Modal 時發生錯誤：', "ERROR", error);
             return errorReply(interaction, error, { context: '解析時間戳表單' });
         }
     }

@@ -21,6 +21,10 @@ const {
 } = require('./helpers/configFixture');
 
 const originalConfigDirectory = process.env.MIYAKO_CONFIG_DIR;
+const COMMAND_CONFIG_SECTIONS = [
+    'announcement', 'raffle', 'dataCollection', 'messageDelete', 'userInfo', 'stream',
+    'about', 'ping', 'hitokoto', 'packageTracking', 'ipQuery', 'minecraft', 'unixTimestamp', 'music'
+];
 
 function useFixture(options) {
     const fixture = createConfigFixture(options);
@@ -58,7 +62,35 @@ test('loadConfig 回傳統一 camelCase 結構，空白外部憑證可停用輪�
         assert.equal(config.commands.music.maxQueueTracks, 100);
         assert.equal(config.commands.music.maxFileSizeMiB, 256);
         assert.equal(config.commands.music.maxCacheSizeMiB, 2048);
+        for (const section of COMMAND_CONFIG_SECTIONS) assert.equal(config.commands[section].enable, true, section);
+        assert.equal(config.modules.temporaryVoice.enable, true);
         assert.equal(config.modules.temporaryVoice.deleteAfterMinutes, 5);
+    } finally {
+        removeConfigFixture(fixture.directory);
+    }
+});
+
+test('15 個指令開關缺省為啟用，並接受顯式停用', () => {
+    const defaults = createValidConfigDocuments();
+    for (const section of COMMAND_CONFIG_SECTIONS) delete defaults['configCommands.yml'][section].enable;
+    delete defaults['configModules.yml'].temporaryVoice.enable;
+    let fixture = useFixture({ documents: defaults });
+    try {
+        const config = loadConfig();
+        for (const section of COMMAND_CONFIG_SECTIONS) assert.equal(config.commands[section].enable, true, section);
+        assert.equal(config.modules.temporaryVoice.enable, true);
+    } finally {
+        removeConfigFixture(fixture.directory);
+    }
+
+    const disabled = createValidConfigDocuments();
+    for (const section of COMMAND_CONFIG_SECTIONS) disabled['configCommands.yml'][section].enable = false;
+    disabled['configModules.yml'].temporaryVoice.enable = false;
+    fixture = useFixture({ documents: disabled });
+    try {
+        const config = loadConfig();
+        for (const section of COMMAND_CONFIG_SECTIONS) assert.equal(config.commands[section].enable, false, section);
+        assert.equal(config.modules.temporaryVoice.enable, false);
     } finally {
         removeConfigFixture(fixture.directory);
     }

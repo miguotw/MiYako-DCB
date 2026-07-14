@@ -4,11 +4,12 @@ const PREFIX_ROUTES = new Set([
     'button:music_queue_open', 'button:music_queue_page', 'select:music_queue_remove',
     'modal:music_queue_clear_modal', 'button:package_panel_refresh', 'button:package_panel_note',
     'button:package_panel_archive', 'button:package_panel_delete', 'button:package_panel_wake',
+    'button:package_panel_delete_archived_page', 'modal:package_panel_delete_confirm',
     'modal:package_panel_note_modal', 'button:data_collection_submit', 'button:data_collection_delete',
     'modal:data_collection_delete_modal', 'modal:data_collection_modal', 'button:raffle_join',
     'select:twitch_stream_remove', 'select:package_panel_select_carrier',
     'select:package_panel_select_carrier_2', 'button:package_panel_extra_fields',
-    'modal:package_panel_extra_fields_modal'
+    'modal:package_panel_extra_fields_modal', 'button:temporary_voice_remove_page'
 ]);
 
 const EXACT_VARIANTS = new Map([

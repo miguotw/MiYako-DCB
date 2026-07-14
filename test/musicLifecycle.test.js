@@ -4,12 +4,13 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { EventEmitter } = require('node:events');
 const test = require('node:test');
 const { Collection } = require('discord.js');
 const { loadConfig } = require('../core/config');
 const { createStoreRegistry } = require('../core/storeRegistry');
 const {
-    guildStates, getGuildState, togglePause, removeQueuedTracks, clearQueue,
+    guildStates, getGuildState, summonToVoiceChannel, togglePause, removeQueuedTracks, clearQueue,
     beginTrackPreparation, endTrackPreparation, handleVoiceStateUpdate,
     cleanupState, isCurrentPanel
 } = require('../util/musicPlayer');
@@ -90,12 +91,40 @@ test('音樂面板、序列、暫停、移除、清空與 preparation 狀態皆�
     const { interaction, panelMessage, calls } = interactionFixture(voiceChannel);
     const command = createCommand(loadConfig());
 
+    const buttonRows = command._test.createButtons({ current: null, queue: [], paused: false });
+    assert.equal(buttonRows.length, 2);
+    assert.deepEqual(
+        buttonRows.map(row => row.components.map(component => component.data.custom_id)),
+        [['music_request', 'music_play_next', 'music_pause', 'music_skip'], ['music_queue_open:0', 'music_summon']]
+    );
+    assert.equal(buttonRows.every(row => row.components.length <= 5), true);
+
     await command.execute(interaction, context);
     const state = guildStates.get('music-guild');
     assert.ok(state);
     assert.equal(isCurrentPanel(state, panelMessage.id), true);
     state.voiceChannelID = voiceChannel.id;
     state.voiceChannel = voiceChannel;
+
+    const existingConnection = new EventEmitter();
+    existingConnection.state = { status: 'ready' };
+    existingConnection.subscribe = () => {};
+    existingConnection.destroy = () => {};
+    state.connection = existingConnection;
+    interaction.customId = 'music_summon';
+    await command.buttonHandlers.music_summon(interaction, context);
+    assert.match(calls.at(-1)[1].embeds[0].data.title, /召喚成功/);
+
+    interaction.replied = false;
+    interaction.message = { ...panelMessage, id: 'stale-panel' };
+    await command.buttonHandlers.music_summon(interaction, context);
+    assert.match(calls.at(-1)[1].embeds[0].data.description, /面板已過期/);
+    interaction.replied = false;
+    interaction.message = panelMessage;
+    interaction.member.voice.channel = null;
+    await command.buttonHandlers.music_summon(interaction, context);
+    assert.match(calls.at(-1)[1].embeds[0].data.description, /先加入語音頻道/);
+    interaction.member.voice.channel = voiceChannel;
 
     interaction.customId = 'music_request';
     await command.buttonHandlers.music_request(interaction, context);
@@ -137,6 +166,62 @@ test('音樂面板、序列、暫停、移除、清空與 preparation 狀態皆�
     assert.equal(state.preparingTracks, 1);
     endTrackPreparation(state);
     assert.equal(state.preparingTracks, 0);
+});
+
+test('召喚等待 Ready、同頻道冪等，空閒可搬移但播放工作中拒絕', async t => {
+    const guild = {
+        id: 'summon-guild', voiceAdapterCreator: {},
+        voiceStates: { cache: new Collection() }
+    };
+    const connections = [];
+    class FakeConnection extends EventEmitter {
+        constructor(channelID) {
+            super();
+            this.channelID = channelID;
+            this.state = { status: 'connecting' };
+            this.destroyed = false;
+        }
+        subscribe() {}
+        destroy() { this.destroyed = true; this.state = { status: 'destroyed' }; }
+    }
+    const readyWaits = [];
+    const state = getGuildState(guild.id, {
+        inactivityTimeoutMinutes: 1,
+        joinVoiceChannel(options) {
+            const connection = new FakeConnection(options.channelId);
+            connections.push(connection);
+            return connection;
+        },
+        async entersState(connection, status) {
+            readyWaits.push([connection.channelID, status]);
+            connection.state = { status };
+            return connection;
+        }
+    }, { persistSnapshot: async () => {} });
+    t.after(() => cleanupState(state, true));
+    const first = { id: 'voice-a', guild };
+    const second = { id: 'voice-b', guild };
+
+    assert.equal(await summonToVoiceChannel(state, first), 'joined');
+    assert.equal(await summonToVoiceChannel(state, first), 'alreadyConnected');
+    assert.equal(readyWaits.length, 2);
+    assert.equal(await summonToVoiceChannel(state, second), 'moved');
+    assert.equal(connections[0].destroyed, true);
+    assert.ok(state.inactivityTimer, '召喚後沿用既有閒置退出計時器');
+
+    state.current = { title: '正在播放' };
+    await assert.rejects(summonToVoiceChannel(state, first), /正在其他語音頻道/);
+    assert.equal(state.voiceChannelID, second.id);
+    state.current = null;
+    state.queue.push({ title: '排隊歌曲' });
+    await assert.rejects(summonToVoiceChannel(state, first), /正在其他語音頻道/);
+    state.queue.length = 0;
+    state.preparingTracks = 1;
+    await assert.rejects(summonToVoiceChannel(state, first), /正在其他語音頻道/);
+    state.preparingTracks = 0;
+    state.starting = true;
+    await assert.rejects(summonToVoiceChannel(state, first), /正在其他語音頻道/);
+    state.starting = false;
 });
 
 test('音樂下載 adapter 使用 fake process，下載後離開原語音會拒絕加入序列', async t => {

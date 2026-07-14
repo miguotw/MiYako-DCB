@@ -3,7 +3,7 @@ const { EmbedBuilder, MessageFlags } = require('discord.js');
 const { createLogTools } = require('./sendLog');
 
 function createReplyTools(config) {
-const { sendLog } = createLogTools(config);
+const { sanitizeLogText, sendLog } = createLogTools(config);
 
 const STATUS_STYLE = {
     success: {
@@ -22,8 +22,8 @@ const STATUS_STYLE = {
 const REPLY_METHODS = new Set(['auto', 'reply', 'editReply', 'update', 'followUp']);
 
 /**
- * 建立統一的互動狀態 Embed。系統錯誤刻意不接受原始錯誤文字，避免把憑證、
- * 外部回應或內部路徑洩漏給使用者；事件 ID 是使用者回報與伺服器日誌的關聯鍵。
+ * 建立統一的互動狀態 Embed。系統錯誤只接收已遮罩、截斷的第一行；事件 ID
+ * 是使用者回報與伺服器日誌的關聯鍵，stack 與 debug details 永不進入回覆。
  */
 function createStatusEmbed({ status, message, eventId } = {}) {
     const style = STATUS_STYLE[status];
@@ -32,7 +32,8 @@ function createStatusEmbed({ status, message, eventId } = {}) {
     let description;
     if (status === 'error') {
         if (!eventId) throw new TypeError('系統錯誤回覆必須包含事件 ID。');
-        description = `**處理請求時發生未預期的錯誤，請稍後再試。**\n事件 ID：\`${eventId}\``;
+        const safeMessage = String(message || '未知錯誤').trim();
+        description = `**${safeMessage}**\n請稍後再試；若問題持續發生，請提供以下事件 ID。\n事件 ID：\`${eventId}\``;
     } else {
         const safeMessage = String(message || '').trim();
         if (!safeMessage) throw new TypeError('狀態回覆訊息不可為空。');
@@ -95,16 +96,27 @@ function validationReply(interaction, message, options = {}) {
 }
 
 /**
- * 回覆未知系統錯誤。原始 Error 只寫入已遮罩的日誌；Discord 僅顯示通用訊息與事件 ID。
+ * 回覆未知系統錯誤。日誌保留遮罩後的完整診斷，Discord 只顯示安全第一行與事件 ID。
  */
 function errorReply(interaction, error, options = {}) {
-    const eventId = crypto.randomUUID();
     const normalizedError = error instanceof Error ? error : new Error(String(error || '未知錯誤'));
+    if (normalizedError.isValidationError) {
+        return validationReply(interaction, `**${normalizedError.message}**`, options);
+    }
+    const eventId = crypto.randomUUID();
     const context = options.context || '處理 Discord 互動';
+    const firstLine = String(normalizedError.message || '未知錯誤')
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .find(Boolean) || '未知錯誤';
+    const publicMessage = sanitizeLogText(firstLine)
+        .replace(/\b[A-Za-z]:\\(?:[^\\\s]+\\)*[^\s]*/g, '[路徑已遮罩]')
+        .replace(/(^|[\s("'`])\/(?:[^/\s]+\/)+[^\s"'`)]+/g, '$1[路徑已遮罩]')
+        .slice(0, 1000) || '未知錯誤';
     sendLog(interaction?.client, `❌ ${context}失敗（事件 ID：${eventId}）。`, 'ERROR', normalizedError);
     return sendStatusReply(
         interaction,
-        createStatusEmbed({ status: 'error', eventId }),
+        createStatusEmbed({ status: 'error', message: publicMessage, eventId }),
         { ...options, context: `${context}的系統錯誤回覆` }
     );
 }

@@ -99,7 +99,6 @@ const command = {
             }
             return infoReply(interaction, `**已在 ${channel} 建立抽選。**\n抽選 ID：\`${raffle.id}\``);
         } catch (error) {
-            sendLog(interaction.client, '❌ 建立抽選時發生錯誤：', 'ERROR', error);
             return errorReply(interaction, error, { context: '建立抽選' });
         }
     },

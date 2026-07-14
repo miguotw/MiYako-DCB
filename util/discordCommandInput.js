@@ -2,6 +2,13 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
 const DISCORD_HOST_PATTERN = /^(?:canary\.|ptb\.)?discord(?:app)?\.com$/i;
 const SNOWFLAKE_PATTERN = /^\d{17,20}$/;
 
+function commandInputError(message) {
+    return Object.assign(new Error(message), {
+        code: 'DISCORD_INPUT_VALIDATION',
+        isValidationError: true
+    });
+}
+
 /** 為 Discord API 操作加上逾時，避免成員展開等請求無限等待。 */
 function withTimeout(promise, message, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS) {
     let timeout;
@@ -39,7 +46,7 @@ function parseDeadline(value, timezoneOffset = 0) {
 function parseMentionTargets(value, fieldName, { required = false } = {}) {
     const tokens = String(value || '').trim().split(/[\s,，]+/).filter(Boolean);
     if (!tokens.length) {
-        if (required) throw new Error(`${fieldName}不可留白。`);
+        if (required) throw commandInputError(`${fieldName}不可留白。`);
         return [];
     }
     const targets = tokens.map(token => {
@@ -47,7 +54,7 @@ function parseMentionTargets(value, fieldName, { required = false } = {}) {
         if (user) return { type: 'user', id: user[1] };
         const role = token.match(/^<@&(\d{17,20})>$/);
         if (role) return { type: 'role', id: role[1] };
-        throw new Error(`${fieldName}僅接受 @用戶 或 @身分組，不接受純數字 ID。`);
+        throw commandInputError(`${fieldName}僅接受 @用戶 或 @身分組，不接受 @everyone 或 @here。`);
     });
     return [...new Map(targets.map(target => [`${target.type}:${target.id}`, target])).values()];
 }
@@ -84,13 +91,13 @@ async function fetchSourceMessage(interaction, input) {
     const link = parseMessageLink(normalizedInput);
     if (link) {
         const { guildID, channelID, messageID } = link;
-        if (guildID !== interaction.guildId) throw new Error('來源訊息連結必須屬於目前伺服器。');
+        if (guildID !== interaction.guildId) throw commandInputError('來源訊息連結必須屬於目前伺服器。');
         const channel = await interaction.guild.channels.fetch(channelID).catch(() => null);
-        if (!channel?.messages) throw new Error('無法讀取來源訊息所在頻道。');
+        if (!channel?.messages) throw commandInputError('無法讀取來源訊息所在頻道。');
         return channel.messages.fetch(messageID);
     }
-    if (!SNOWFLAKE_PATTERN.test(normalizedInput)) throw new Error('請輸入有效的 Discord 訊息 ID 或訊息連結。');
-    if (!interaction.channel?.messages) throw new Error('目前頻道不支援讀取訊息。');
+    if (!SNOWFLAKE_PATTERN.test(normalizedInput)) throw commandInputError('請輸入有效的 Discord 訊息 ID 或訊息連結。');
+    if (!interaction.channel?.messages) throw commandInputError('目前頻道不支援讀取訊息。');
     return interaction.channel.messages.fetch(normalizedInput);
 }
 
@@ -113,12 +120,12 @@ async function resolveMentionedUsers(interaction, targets, fieldName) {
                 interaction.guild.members.fetch(target.id).catch(() => null),
                 `查詢${fieldName}用戶逾時。`
             );
-            if (!member || member.user.bot) throw new Error(`${fieldName}包含不在伺服器中的用戶或 Bot。`);
+            if (!member || member.user.bot) throw commandInputError(`${fieldName}包含不在伺服器中的用戶或 Bot。`);
             userIDs.add(member.id);
             continue;
         }
         const role = interaction.guild.roles.cache.get(target.id);
-        if (!role) throw new Error(`${fieldName}包含不存在的身分組。`);
+        if (!role) throw commandInputError(`${fieldName}包含不存在的身分組。`);
         for (const member of role.members.values()) {
             if (!member.user.bot) userIDs.add(member.id);
         }
@@ -127,6 +134,6 @@ async function resolveMentionedUsers(interaction, targets, fieldName) {
 }
 
 module.exports = {
-    fetchSourceMessage, parseDeadline, parseMentionTargets,
+    commandInputError, fetchSourceMessage, parseDeadline, parseMentionTargets,
     parseMessageLink, resolveMentionedUsers, withTimeout
 };
