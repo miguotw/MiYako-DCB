@@ -125,8 +125,8 @@ function createProcessManager({
     }
 
     /**
-     * 啟動並等待一個外部程序。預設保留完整 stdout/stderr，不在第二階段加入
-     * 輸出上限；timeout 或 signal 取消時仍會走同一套 TERM/KILL 流程。
+     * 啟動並等待一個外部程序。stdout/stderr 各自有固定上限；timeout、輸出超限
+     * 或 signal 取消時都會走同一套 TERM/KILL 流程。
      */
     function run(command, args = [], options = {}) {
         if (stopping || rootSignal?.aborted) {
@@ -140,6 +140,8 @@ function createProcessManager({
             onStdout,
             onStderr,
             rejectOnNonZero = true,
+            maxStdoutBytes = 8 * 1024 * 1024,
+            maxStderrBytes = 8 * 1024 * 1024,
             ...spawnOptions
         } = options;
         if (signal?.aborted) return Promise.reject(createAbortError('外部程序已取消。', signal.reason));
@@ -157,6 +159,8 @@ function createProcessManager({
         const record = addRecord(child, { processGroup: useProcessGroups });
         const stdout = [];
         const stderr = [];
+        let stdoutBytes = 0;
+        let stderrBytes = 0;
         let timeoutTimer = null;
         let settled = false;
 
@@ -177,11 +181,25 @@ function createProcessManager({
 
             child.stdout?.on('data', chunk => {
                 const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+                stdoutBytes += buffer.length;
+                if (stdoutBytes > maxStdoutBytes) {
+                    const error = new Error(`${command} stdout 超過 ${maxStdoutBytes} bytes 上限。`);
+                    error.code = 'MAX_BUFFER';
+                    void terminate(record, error).catch(() => {});
+                    return;
+                }
                 stdout.push(buffer);
                 onStdout?.(buffer.toString());
             });
             child.stderr?.on('data', chunk => {
                 const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+                stderrBytes += buffer.length;
+                if (stderrBytes > maxStderrBytes) {
+                    const error = new Error(`${command} stderr 超過 ${maxStderrBytes} bytes 上限。`);
+                    error.code = 'MAX_BUFFER';
+                    void terminate(record, error).catch(() => {});
+                    return;
+                }
                 stderr.push(buffer);
                 onStderr?.(buffer.toString());
             });

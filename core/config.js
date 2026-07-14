@@ -142,7 +142,8 @@ const commandsConfigSchema = strictObject({
         trackTwToken: optionalSecret(512),
         checkInterval: integerRange('packageTracking.checkInterval', 1, 1440),
         historyStatusMaxLength: integerRange('packageTracking.historyStatusMaxLength', 1, 1024),
-        archiveAfterDays: integerRange('packageTracking.archiveAfterDays', 1, 3650)
+        archiveAfterDays: integerRange('packageTracking.archiveAfterDays', 1, 3650),
+        maxActivePackages: integerRange('packageTracking.maxActivePackages', 1, 100).default(20)
     }),
     ipQuery: strictObject({ emoji: emoji('ipQuery.emoji') }),
     minecraft: strictObject({
@@ -165,13 +166,22 @@ const commandsConfigSchema = strictObject({
         allowPlaylists: z.boolean(),
         maxPlaylistTracks: integerRange('music.maxPlaylistTracks', 1, 100),
         ytDlpUpdateHours: integerRange('music.ytDlpUpdateHours', 1, 720),
-        ytDlpPath: trimmedText('music.ytDlpPath', 1024)
+        maxQueueTracks: integerRange('music.maxQueueTracks', 1, 1000).default(100),
+        maxFileSizeMiB: integerRange('music.maxFileSizeMiB', 1, 4096).default(256),
+        maxCacheSizeMiB: integerRange('music.maxCacheSizeMiB', 1, 102400).default(2048)
     }).superRefine((music, context) => {
         if (music.maxDurationMinutes > 0 && music.maxDurationMinutes < music.minDurationMinutes) {
             context.addIssue({
                 code: 'custom',
                 path: ['maxDurationMinutes'],
                 message: 'music.maxDurationMinutes 啟用限制時不得小於 minDurationMinutes'
+            });
+        }
+        if (music.maxCacheSizeMiB < music.maxFileSizeMiB) {
+            context.addIssue({
+                code: 'custom',
+                path: ['maxCacheSizeMiB'],
+                message: 'music.maxCacheSizeMiB 不得小於 maxFileSizeMiB'
             });
         }
     })

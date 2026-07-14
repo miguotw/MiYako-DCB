@@ -137,3 +137,22 @@ test('run timeout 終止 child 並保留 ETIMEDOUT 錯誤代碼', async () => {
     assert.deepEqual(child.killSignals, ['SIGTERM']);
     await manager.stopAll();
 });
+
+test('stdout/stderr 超過上限會終止程序樹並回傳 MAX_BUFFER', async () => {
+    const child = createChild();
+    child.kill = childSignal => {
+        child.killSignals.push(childSignal);
+        queueMicrotask(() => child.close(null, childSignal));
+        return true;
+    };
+    const manager = createProcessManager({
+        platform: 'win32',
+        spawnFn: () => {
+            queueMicrotask(() => child.stdout.write('12345'));
+            return child;
+        }
+    });
+    await assert.rejects(manager.run('noisy-tool', [], { maxStdoutBytes: 4 }), error => error.code === 'MAX_BUFFER');
+    assert.deepEqual(child.killSignals, ['SIGTERM']);
+    await manager.stopAll();
+});

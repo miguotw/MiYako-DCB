@@ -113,6 +113,9 @@ packageTracking:
   # 多久沒有新貨態後自動封存，單位為天。
   archiveAfterDays: 14
 
+  # 每位使用者可同時追蹤或保留匯入名額的包裹上限，可設定 1～100。
+  maxActivePackages: 20
+
 
 #-------------------------------
 # /網際協定位址資訊 相關設定：
@@ -161,5 +164,9 @@ music:
   # 啟用播放清單時，一次最多加入的曲目數。
   maxPlaylistTracks: 25
 
+  # 播放序列、單一下載檔與整體 cache 上限。
+  maxQueueTracks: 100
+  maxFileSizeMiB: 256
+  maxCacheSizeMiB: 2048
+
   ytDlpUpdateHours: 24
-  ytDlpPath: "assets/music/yt-dlp"

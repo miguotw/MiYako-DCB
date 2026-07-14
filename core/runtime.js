@@ -54,7 +54,7 @@ function createRuntime({
     // 否則 HTTP abort 會讓兩者同時開始關閉而破壞 lifecycle 順序。
     const scheduler = schedulerFactory({ logger });
     const processManager = processManagerFactory();
-    const store = storeFactory();
+    const store = storeFactory({ logger });
     const enabledManifests = manifests || createFeatureManifests(config);
     const catalog = buildCommandCatalog(enabledManifests, { adminCommandName: config.startup.adminCommandName });
     const router = createInteractionRouter({ logger, config });

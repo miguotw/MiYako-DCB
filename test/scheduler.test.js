@@ -277,3 +277,63 @@ test('外部 AbortSignal 會觸發中央停止並取消執行中工作', async (
     assert.equal((await execution).status, 'stopped');
     await scheduler.stop();
 });
+
+test('deadline 未到期不執行、成功只執行一次，reschedule 可重新啟用', async () => {
+    const clock = new FakeClock();
+    const scheduler = createScheduler({ clock, logger: silentLogger() });
+    const runTimes = [];
+    const job = scheduler.scheduleDeadline({
+        name: 'deadline-once', deadlineAt: 1000, timeoutMs: 100,
+        run: async () => { runTimes.push(clock.now); }
+    });
+    await clock.advance(999);
+    assert.deepEqual(runTimes, []);
+    await clock.advance(1);
+    assert.deepEqual(runTimes, [1000]);
+    await clock.advance(10000);
+    assert.deepEqual(runTimes, [1000]);
+    job.reschedule(12000);
+    await clock.advance(999);
+    assert.deepEqual(runTimes, [1000]);
+    await clock.advance(1);
+    assert.deepEqual(runTimes, [1000, 12000]);
+    await scheduler.stop();
+});
+
+test('deadline 失敗從五秒開始退避，成功後解除排程', async () => {
+    const clock = new FakeClock();
+    const scheduler = createScheduler({ clock, logger: silentLogger() });
+    let calls = 0;
+    scheduler.scheduleDeadline({
+        name: 'deadline-retry', deadlineAt: 0,
+        run: async () => {
+            calls += 1;
+            if (calls < 3) throw new Error('temporary');
+        }
+    });
+    await clock.advance(0);
+    assert.equal(calls, 1);
+    await clock.advance(4999);
+    assert.equal(calls, 1);
+    await clock.advance(1);
+    assert.equal(calls, 2);
+    await clock.advance(9999);
+    assert.equal(calls, 2);
+    await clock.advance(1);
+    assert.equal(calls, 3);
+    await clock.advance(60_000);
+    assert.equal(calls, 3);
+    await scheduler.stop();
+});
+
+test('個別停止 deadline 後可安全重用同一名稱', async () => {
+    const clock = new FakeClock();
+    const scheduler = createScheduler({ clock, logger: silentLogger() });
+    const first = scheduler.scheduleDeadline({ name: 'reusable', deadlineAt: 1000, run: async () => {} });
+    await first.stop();
+    let calls = 0;
+    scheduler.scheduleDeadline({ name: 'reusable', deadlineAt: 0, run: async () => { calls += 1; } });
+    await clock.advance(0);
+    assert.equal(calls, 1);
+    await scheduler.stop();
+});

@@ -1,9 +1,11 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('node:crypto');
 const { Buffer } = require('buffer');
 const { http } = require('../core/http');
+const { PROJECT_ROOT } = require('../core/config');
 
-const MINECRAFT_TEMP_DIR = path.join(process.cwd(), 'assets', 'minecraft', 'temp');
+const MINECRAFT_TEMP_DIR = path.join(PROJECT_ROOT, 'runtime', 'tmp', 'minecraft');
 
 function normalizeServerAddress(serverIP) {
     return serverIP.trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
@@ -11,8 +13,9 @@ function normalizeServerAddress(serverIP) {
 
 function createSafeIconPath(serverIP) {
     const safeName = serverIP.replace(/[^a-zA-Z0-9.-]/g, '_');
-    fs.mkdirSync(MINECRAFT_TEMP_DIR, { recursive: true });
-    return path.join(MINECRAFT_TEMP_DIR, `${safeName}_${Date.now()}_icon.png`);
+    fs.mkdirSync(MINECRAFT_TEMP_DIR, { recursive: true, mode: 0o700 });
+    if (process.platform !== 'win32') fs.chmodSync(MINECRAFT_TEMP_DIR, 0o700);
+    return path.join(MINECRAFT_TEMP_DIR, `${safeName}_${crypto.randomUUID()}_icon.png`);
 }
 
 function createServerStatusError(message, publicMessage, debugDetails, cause) {
@@ -59,7 +62,7 @@ const getServerStatus = async (serverIP) => {
             const base64Data = data.icon.split(',')[1]; // 去掉 data:image/png;base64, 前綴
             const iconBuffer = Buffer.from(base64Data, 'base64'); // 解碼 Base64
             const iconPath = createSafeIconPath(normalizedServerIP); // 臨時文件路徑
-            fs.writeFileSync(iconPath, iconBuffer); // 寫入文件
+            fs.writeFileSync(iconPath, iconBuffer, { mode: 0o600 }); // 寫入文件
             ServerStatusIcon = iconPath; // 保存文件路徑
         }
 

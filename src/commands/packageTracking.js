@@ -2,8 +2,8 @@ const path = require('path');
 /**
  * Track.TW 物流功能的 Discord 互動層。
  *
- * 新增流程可能跨越 Modal、物流商選單與額外欄位表單，因此 Map 保存本次程序的
- * 暫態選擇；正式包裹資料由 `util/getPackageTracking` 依使用者寫入 JSON。
+ * 新增流程可能跨越 Modal、物流商選單與額外欄位表單，因此 session manager 保存
+ * 本次程序的暫態選擇；正式包裹資料由 owner-scoped repository 非同步寫入 runtime。
  * 暫態資料不跨重啟，遺失時使用者只需重新執行新增或選取流程。
  */
 const {
@@ -21,6 +21,8 @@ const {
 const { createLogTools } = require('../../core/sendLog');
 const { createReplyTools } = require('../../core/Reply');
 const { createPackageTrackingTools } = require('../../util/getPackageTracking');
+const { createPackageTrackingRepository } = require('../../util/packageTrackingRepository');
+const { createPackageSessionManager } = require('../../util/packageSessionManager');
 
 function createCommand(config) {
 const { sendLog } = createLogTools(config);
@@ -37,12 +39,6 @@ const {
     createAddPackageRow,
     createPackageNotificationActionsRows,
     withAddPackageRow,
-    findDuplicatePackage,
-    getPackageRecord,
-    upsertPackageRecord,
-    updatePackageRecord,
-    deletePackageRecord,
-    getPackageRecords,
     createPackageRecord,
     createHistorySignature,
     createStoredPackageEmbed
@@ -53,9 +49,28 @@ const EMBED_COLOR = config.embed.color.default;
 const EMBED_EMOJI = configCommands.packageTracking?.emoji || '📦';
 const MAX_SELECT_OPTIONS = 25;
 const MAX_CARRIER_SELECT_OPTIONS = MAX_SELECT_OPTIONS * 2;
-const pendingExtraFields = new Map();
-const pendingCarrierChoices = new Map();
+const repositoryCache = new WeakMap();
+const sessions = createPackageSessionManager();
 const DEFERRED_UPDATE = Symbol('packageDeferredUpdate');
+
+function getRepository(context) {
+    const json = context?.store?.packageTracking;
+    if (!json) throw new Error('物流功能缺少 packageTracking repository context。');
+    if (!repositoryCache.has(json)) {
+        repositoryCache.set(json, createPackageTrackingRepository(json, {
+            maxActivePackages: configCommands.packageTracking.maxActivePackages
+        }));
+    }
+    return repositoryCache.get(json);
+}
+
+function sessionBinding(interaction) {
+    return {
+        userID: interaction.user.id,
+        guildID: interaction.guildId,
+        messageID: interaction.message?.id || null
+    };
+}
 
 // 面板元件與跨互動狀態 ------------------------------------------------------
 
@@ -81,14 +96,14 @@ function replyPackageError(interaction, error, context) {
     return errorReply(interaction, error, { context });
 }
 
-function getUserRecords(userID, status = 'all') {
-    return getPackageRecords({ userID, status })
+async function getUserRecords(context, userID, status = 'all') {
+    return (await getRepository(context).listPackages({ ownerID: userID, status }))
         .filter(record => record.status !== 'deleted')
         .sort((a, b) => Date.parse(b.updatedAt || b.createdAt || 0) - Date.parse(a.updatedAt || a.createdAt || 0));
 }
 
-function getUserRecordByID(userID, userPackageID) {
-    return getPackageRecord(userID, userPackageID);
+function getUserRecordByID(context, userID, userPackageID) {
+    return getRepository(context).getPackage(userID, userPackageID);
 }
 
 function createPanelEmbed(interaction) {
@@ -182,7 +197,7 @@ function createCarrierChoiceEmbed(carrierIDs, carriers) {
         .setDescription(description);
 }
 
-function createCarrierChoiceRows(carrierIDs, carriers) {
+function createCarrierChoiceRows(carrierIDs, carriers, sessionID) {
     const shownCarrierIDs = carrierIDs.slice(0, MAX_CARRIER_SELECT_OPTIONS);
     const chunks = [
         shownCarrierIDs.slice(0, MAX_SELECT_OPTIONS),
@@ -192,7 +207,7 @@ function createCarrierChoiceRows(carrierIDs, carriers) {
     return chunks.map((chunk, chunkIndex) => {
         const offset = chunkIndex * MAX_SELECT_OPTIONS;
         const menu = new StringSelectMenuBuilder()
-            .setCustomId(chunkIndex === 0 ? 'package_panel_select_carrier' : 'package_panel_select_carrier_2')
+            .setCustomId(`${chunkIndex === 0 ? 'package_panel_select_carrier' : 'package_panel_select_carrier_2'}:${sessionID}`)
             .setPlaceholder(chunkIndex === 0 ? '選擇物流商' : '選擇物流商（26-50）')
             .addOptions(
                 chunk.map((carrierID, index) => {
@@ -295,39 +310,55 @@ async function resolveCarrier(trackingNumber) {
 }
 
 /** 遠端匯入成功並取得首份貨態後才寫入本機；這是新增流程的 commit 點。 */
-async function importAndStorePackage(interaction, pending, extraFields = null) {
-    const duplicate = findDuplicatePackage(interaction.user.id, pending.carrier.id, pending.trackingNumber);
+async function importAndStorePackage(interaction, pending, extraFields, context) {
+    const repository = getRepository(context);
+    const duplicate = await repository.findDuplicate(interaction.user.id, pending.carrier.id, pending.trackingNumber);
     if (duplicate) {
         return replyPackageValidation(interaction, `**這筆物流單已存在。**\n狀態：${duplicate.status === 'active' ? '追蹤中' : '已封存'}`);
     }
 
-    const importResult = await importPackage(pending.carrier.id, pending.trackingNumber, pending.note, extraFields);
-    const userPackageID = getImportResultID(importResult, pending.trackingNumber);
-    if (!userPackageID) throw new Error('Track.TW 未回傳 user_package_id。');
-
-    const packageData = await trackingPackage(userPackageID);
-    const record = createPackageRecord({
-        interaction,
-        carrier: pending.carrier,
-        trackingNumber: pending.trackingNumber,
-        note: pending.note,
-        userPackageID,
-        packageData
+    const reservation = await repository.reserveImport(interaction.user.id, {
+        carrierID: pending.carrier.id,
+        trackingNumber: pending.trackingNumber
     });
+    let userPackageID = null;
+    let committed = false;
+    try {
+        const importResult = await importPackage(pending.carrier.id, pending.trackingNumber, pending.note, extraFields);
+        userPackageID = getImportResultID(importResult, pending.trackingNumber);
+        if (!userPackageID) throw new Error('Track.TW 未回傳 user_package_id。');
 
-    upsertPackageRecord(record);
-    const embed = createPackageEmbed(record, packageData, '物流追蹤 - 新增完成');
-    await interaction.editReply({ embeds: [embed], components: createPackageActionsRows(record) });
-    sendLog(
-        interaction.client,
-        `📦 ${interaction.user.tag} 新增了物流追蹤：${pending.trackingNumber}`,
-        'INFO',
-        null,
-        { sensitiveValues: [pending.trackingNumber] }
-    );
+        const packageData = await trackingPackage(userPackageID);
+        const record = createPackageRecord({
+            interaction,
+            carrier: pending.carrier,
+            trackingNumber: pending.trackingNumber,
+            note: pending.note,
+            userPackageID,
+            packageData
+        });
+        await repository.commitImport(interaction.user.id, reservation.id, record);
+        committed = true;
+        const embed = createPackageEmbed(record, packageData, '物流追蹤 - 新增完成');
+        await interaction.editReply({ embeds: [embed], components: createPackageActionsRows(record) });
+        sendLog(
+            interaction.client,
+            `📦 ${interaction.user.tag} 新增了物流追蹤：${pending.trackingNumber}`,
+            'INFO',
+            null,
+            { sensitiveValues: [pending.trackingNumber] }
+        );
+    } catch (error) {
+        if (!committed) {
+            await repository.releaseReservation(interaction.user.id, reservation.id).catch(() => {});
+            // 遠端匯入已成功但本機 commit 失敗時，盡力移除 Track.TW 的孤兒資料。
+            if (userPackageID) await changePackageState(userPackageID, 'delete').catch(() => {});
+        }
+        throw error;
+    }
 }
 
-async function continuePackageImport(interaction, pending) {
+async function continuePackageImport(interaction, pending, context, sessionID = null) {
     const requirements = Array.isArray(pending.carrier.requirements) ? pending.carrier.requirements : [];
     pending.requirements = requirements;
 
@@ -336,7 +367,13 @@ async function continuePackageImport(interaction, pending) {
     }
 
     if (requirements.length > 0) {
-        pendingExtraFields.set(interaction.user.id, pending);
+        let id = sessionID;
+        if (id) sessions.update(id, sessionBinding(interaction), () => ({ stage: 'extra', pending }));
+        else {
+            const binding = sessionBinding(interaction);
+            if (pending.detached) binding.messageID = null;
+            id = sessions.create({ ...binding, data: { stage: 'extra', pending } }).id;
+        }
 
         const embed = new EmbedBuilder()
             .setColor(EMBED_COLOR)
@@ -345,7 +382,7 @@ async function continuePackageImport(interaction, pending) {
 
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
-                .setCustomId('package_panel_extra_fields')
+                .setCustomId(`package_panel_extra_fields:${id}`)
                 .setLabel('填寫額外資訊')
                 .setStyle(ButtonStyle.Primary)
         );
@@ -354,7 +391,8 @@ async function continuePackageImport(interaction, pending) {
         return;
     }
 
-    await importAndStorePackage(interaction, pending);
+    await importAndStorePackage(interaction, pending, null, context);
+    if (sessionID) sessions.remove(sessionID);
 }
 
 // 面板導覽與包裹操作 --------------------------------------------------------
@@ -366,8 +404,9 @@ async function handlePanel(interaction) {
     });
 }
 
-async function handleAddModalSubmit(interaction) {
-    if (isDetachedAddFlow(interaction)) {
+async function handleAddModalSubmit(interaction, context) {
+    const detached = isDetachedAddFlow(interaction);
+    if (detached) {
         // 從既有物流狀態訊息新增時另建流程訊息；後續選物流商/補填資訊/完成都 edit 這則回覆。
         await interaction.deferReply({ ephemeral: true });
     } else {
@@ -379,29 +418,34 @@ async function handleAddModalSubmit(interaction) {
 
     try {
         const { carrier, carrierIDs, carriers } = await resolveCarrier(trackingNumber);
-        const pending = { trackingNumber, note, carrier };
+        const pending = { trackingNumber, note, carrier, detached };
 
         if (!carrier && carrierIDs?.length > 1) {
-            pendingCarrierChoices.set(interaction.user.id, { trackingNumber, note, carrierIDs, carriers });
+            const binding = sessionBinding(interaction);
+            if (detached) binding.messageID = null;
+            const session = sessions.create({
+                ...binding,
+                data: { stage: 'carrier', pending: { trackingNumber, note }, carrierIDs, carriers }
+            });
             await interaction.editReply({
                 embeds: [createCarrierChoiceEmbed(carrierIDs, carriers)],
-                components: withAddPackageRow(createCarrierChoiceRows(carrierIDs, carriers))
+                components: withAddPackageRow(createCarrierChoiceRows(carrierIDs, carriers, session.id))
             });
             return;
         }
 
-        await continuePackageImport(interaction, pending);
+        await continuePackageImport(interaction, pending, context);
     } catch (error) {
-        if (error.isCarrierDetectionError) return replyPackageValidation(interaction, error.message);
+        if (error.isCarrierDetectionError || error.isValidationError) return replyPackageValidation(interaction, `**${error.message}**`);
         sendLog(interaction.client, '❌ 新增物流追蹤時發生錯誤：', 'ERROR', error);
         return replyPackageError(interaction, error, '新增物流追蹤');
     }
 }
 
-async function handleManagePackages(interaction) {
+async function handleManagePackages(interaction, context) {
     await deferMessageUpdate(interaction);
 
-    const records = getUserRecords(interaction.user.id, 'active');
+    const records = await getUserRecords(context, interaction.user.id, 'active');
     if (!records.length) {
         return replyPackageValidation(interaction, '**目前沒有追蹤中的包裹。**');
     }
@@ -419,10 +463,10 @@ async function handleManagePackages(interaction) {
     });
 }
 
-async function handleArchivedPackages(interaction) {
+async function handleArchivedPackages(interaction, context) {
     await deferMessageUpdate(interaction);
 
-    const records = getUserRecords(interaction.user.id, 'archived');
+    const records = await getUserRecords(context, interaction.user.id, 'archived');
     if (!records.length) {
         return replyPackageValidation(interaction, '**目前沒有已封存的包裹。**');
     }
@@ -440,7 +484,7 @@ async function handleArchivedPackages(interaction) {
     });
 }
 
-async function updateActiveRecord(record) {
+async function updateActiveRecord(context, record) {
     const packageData = await trackingPackage(record.userPackageID);
     const signature = createHistorySignature(packageData);
     const updates = {
@@ -453,20 +497,20 @@ async function updateActiveRecord(record) {
 
     return {
         packageData,
-        record: updatePackageRecord(record.userID, record.userPackageID, updates) || record
+        record: await getRepository(context).updatePackage(record.userID, record.userPackageID, updates) || record
     };
 }
 
-async function handleActivePackageSelected(interaction) {
+async function handleActivePackageSelected(interaction, context) {
     await deferMessageUpdate(interaction);
 
-    const record = getUserRecordByID(interaction.user.id, interaction.values[0]);
+    const record = await getUserRecordByID(context, interaction.user.id, interaction.values[0]);
     if (!record || record.status !== 'active') {
         return replyPackageValidation(interaction, '**找不到可管理的追蹤中包裹。**');
     }
 
     try {
-        const updated = await updateActiveRecord(record);
+        const updated = await updateActiveRecord(context, record);
         await interaction.editReply({
             embeds: [createManageEmbed(updated.record, updated.packageData)],
             components: createPackageActionsRows(updated.record)
@@ -477,10 +521,10 @@ async function handleActivePackageSelected(interaction) {
     }
 }
 
-async function handleArchivedPackageSelected(interaction) {
+async function handleArchivedPackageSelected(interaction, context) {
     await deferMessageUpdate(interaction);
 
-    const record = getUserRecordByID(interaction.user.id, interaction.values[0]);
+    const record = await getUserRecordByID(context, interaction.user.id, interaction.values[0]);
     if (!record || record.status !== 'archived') {
         return replyPackageValidation(interaction, '**找不到可查看的已封存包裹。**');
     }
@@ -499,21 +543,22 @@ function getScopedUserPackageID(interaction, customId) {
 }
 
 /** 在 acknowledgement 前直接從點擊者的檔案取回包裹並核對 owner 與允許狀態。 */
-function getTargetRecord(interaction, customId, allowedStatuses, findRecord = getUserRecordByID) {
+async function getTargetRecord(interaction, context, customId, allowedStatuses, findRecord = getUserRecordByID) {
     const userPackageID = getScopedUserPackageID(interaction, customId);
     if (!userPackageID) return null;
-    const record = findRecord(interaction.user.id, userPackageID);
+    if (!context && findRecord === getUserRecordByID) return null;
+    const record = await findRecord(context, interaction.user.id, userPackageID);
     if (!record || String(record.userID) !== interaction.user.id || !allowedStatuses.includes(record.status)) return null;
     return record;
 }
 
-async function handleRefreshSelected(interaction) {
-    const record = getTargetRecord(interaction, 'package_panel_refresh', ['active']);
+async function handleRefreshSelected(interaction, context) {
+    const record = await getTargetRecord(interaction, context, 'package_panel_refresh', ['active']);
     if (!record) return replyPackageValidation(interaction, '**這個包裹操作已過期，或你不是包裹擁有者。**');
     await deferMessageUpdate(interaction);
 
     try {
-        const updated = await updateActiveRecord(record);
+        const updated = await updateActiveRecord(context, record);
         await interaction.editReply({
             embeds: [createManageEmbed(updated.record, updated.packageData)],
             components: createPackageActionsRows(updated.record)
@@ -524,14 +569,14 @@ async function handleRefreshSelected(interaction) {
     }
 }
 
-async function handleArchiveSelected(interaction) {
-    const record = getTargetRecord(interaction, 'package_panel_archive', ['active']);
+async function handleArchiveSelected(interaction, context) {
+    const record = await getTargetRecord(interaction, context, 'package_panel_archive', ['active']);
     if (!record) return replyPackageValidation(interaction, '**這個包裹操作已過期，或你不是包裹擁有者。**');
     await deferMessageUpdate(interaction);
 
     try {
         await changePackageState(record.userPackageID, 'archive');
-        const updatedRecord = updatePackageRecord(record.userID, record.userPackageID, { status: 'archived' }) || record;
+        const updatedRecord = await getRepository(context).updatePackage(record.userID, record.userPackageID, { status: 'archived' }) || record;
         await interaction.editReply({
             embeds: [createStoredPackageEmbed(updatedRecord, '物流追蹤 - 已封存包裹')],
             components: createArchivedActionsRows(updatedRecord)
@@ -542,14 +587,14 @@ async function handleArchiveSelected(interaction) {
     }
 }
 
-async function handleDeleteSelected(interaction) {
-    const record = getTargetRecord(interaction, 'package_panel_delete', ['active', 'archived']);
+async function handleDeleteSelected(interaction, context) {
+    const record = await getTargetRecord(interaction, context, 'package_panel_delete', ['active', 'archived']);
     if (!record) return replyPackageValidation(interaction, '**這個包裹操作已過期，或你不是包裹擁有者。**');
     await deferMessageUpdate(interaction);
 
     try {
         await changePackageState(record.userPackageID, 'delete');
-        deletePackageRecord(record.userID, record.userPackageID);
+        await getRepository(context).deletePackage(record.userID, record.userPackageID);
         const updatedRecord = { ...record, status: 'deleted' };
         await interaction.editReply({
             embeds: [createManageEmbed(updatedRecord)],
@@ -561,47 +606,59 @@ async function handleDeleteSelected(interaction) {
     }
 }
 
-async function handleWakeSelected(interaction) {
-    const record = getTargetRecord(interaction, 'package_panel_wake', ['archived']);
+async function handleWakeSelected(interaction, context) {
+    const record = await getTargetRecord(interaction, context, 'package_panel_wake', ['archived']);
     if (!record) return replyPackageValidation(interaction, '**這個包裹操作已過期，或你不是包裹擁有者。**');
     await deferMessageUpdate(interaction);
 
+    let reservation;
+    let committed = false;
+    let remoteWoke = false;
     try {
+        reservation = await getRepository(context).reserveWake(record.userID, record.userPackageID);
         await changePackageState(record.userPackageID, 'inbox');
-        const updatedRecord = updatePackageRecord(record.userID, record.userPackageID, {
-            status: 'active',
-            lastHistoryChangedAt: new Date().toISOString()
-        }) || record;
+        remoteWoke = true;
+        const updatedRecord = await getRepository(context).commitWake(
+            record.userID, record.userPackageID, reservation.id
+        ) || record;
+        committed = true;
         await interaction.editReply({
             embeds: [createStoredPackageEmbed(updatedRecord, '物流追蹤 - 包裹已更新')],
             components: createPackageActionsRows(updatedRecord)
         });
     } catch (error) {
+        if (reservation && !committed) {
+            await getRepository(context).releaseReservation(record.userID, reservation.id).catch(() => {});
+            if (remoteWoke) await changePackageState(record.userPackageID, 'archive').catch(() => {});
+        }
+        if (error.isValidationError) return replyPackageValidation(interaction, `**${error.message}**`);
         sendLog(interaction.client, '❌ 喚醒包裹時發生錯誤：', 'ERROR', error);
         return replyPackageError(interaction, error, '喚醒物流包裹');
     }
 }
 
-async function handleNoteModalSubmit(interaction) {
-    const record = getTargetRecord(interaction, 'package_panel_note_modal', ['active']);
+async function handleNoteModalSubmit(interaction, context) {
+    const record = await getTargetRecord(interaction, context, 'package_panel_note_modal', ['active']);
     if (!record) return replyPackageValidation(interaction, '**這個包裹操作已過期，或你不是包裹擁有者。**');
     await deferMessageUpdate(interaction);
 
     const note = interaction.fields.getTextInputValue('note')?.trim() || '';
-    const updatedRecord = updatePackageRecord(record.userID, record.userPackageID, { note }) || record;
+    const updatedRecord = await getRepository(context).updatePackage(record.userID, record.userPackageID, { note }) || record;
     await interaction.editReply({
         embeds: [createStoredPackageEmbed(updatedRecord, '物流追蹤 - 包裹已更新')],
         components: createPackageActionsRows(updatedRecord)
     });
 }
 
-async function handleCarrierSelected(interaction) {
+async function handleCarrierSelected(interaction, context) {
     await deferMessageUpdate(interaction);
 
-    const pendingChoice = pendingCarrierChoices.get(interaction.user.id);
-    if (!pendingChoice) {
+    const sessionID = interaction.customId.split(':')[1];
+    const session = sessions.get(sessionID, sessionBinding(interaction));
+    if (!session || session.data.stage !== 'carrier') {
         return replyPackageValidation(interaction, '**找不到待選擇的物流商資料，請重新執行新增流程。**');
     }
+    const pendingChoice = session.data;
 
     const carrierIndex = Number(interaction.values[0]);
     const carrierID = pendingChoice.carrierIDs.slice(0, MAX_CARRIER_SELECT_OPTIONS)[carrierIndex];
@@ -614,15 +671,16 @@ async function handleCarrierSelected(interaction) {
         return replyPackageValidation(interaction, '**無法取得物流商資料，請稍後再次嘗試。**');
     }
 
-    pendingCarrierChoices.delete(interaction.user.id);
-
     try {
+        // 在任何外部 I/O 前先原子占用 session；重複點擊只能看到 processing 階段並被拒絕。
+        sessions.update(sessionID, sessionBinding(interaction), data => ({ ...data, stage: 'processing' }));
         await continuePackageImport(interaction, {
-            trackingNumber: pendingChoice.trackingNumber,
-            note: pendingChoice.note,
+            trackingNumber: pendingChoice.pending.trackingNumber,
+            note: pendingChoice.pending.note,
             carrier
-        });
+        }, context, sessionID);
     } catch (error) {
+        if (error.isValidationError) return replyPackageValidation(interaction, `**${error.message}**`);
         sendLog(interaction.client, '❌ 選擇物流商新增物流追蹤時發生錯誤：', 'ERROR', error);
         return replyPackageError(interaction, error, '選擇物流商並新增物流追蹤');
     }
@@ -648,13 +706,15 @@ const command = {
         package_panel_archived: handleArchivedPackages,
 
         package_panel_extra_fields: async (interaction) => {
-            const pending = pendingExtraFields.get(interaction.user.id);
-            if (!pending) {
+            const sessionID = interaction.customId.split(':')[1];
+            const session = sessions.get(sessionID, sessionBinding(interaction));
+            if (!session || session.data.stage !== 'extra') {
                 return replyPackageValidation(interaction, '**找不到待補填的包裹資料，請重新執行新增流程。**');
             }
+            const pending = session.data.pending;
 
             const modal = new ModalBuilder()
-                .setCustomId('package_panel_extra_fields_modal')
+                .setCustomId(`package_panel_extra_fields_modal:${sessionID}`)
                 .setTitle('補填物流資訊');
 
             for (const requirement of pending.requirements) {
@@ -673,8 +733,8 @@ const command = {
 
         package_panel_refresh: handleRefreshSelected,
 
-        package_panel_note: async (interaction) => {
-            const record = getTargetRecord(interaction, 'package_panel_note', ['active']);
+        package_panel_note: async (interaction, context) => {
+            const record = await getTargetRecord(interaction, context, 'package_panel_note', ['active']);
             if (!record) {
                 return replyPackageValidation(interaction, '**這個包裹操作已過期，或你不是包裹擁有者。**');
             }
@@ -701,13 +761,15 @@ const command = {
     modalSubmitHandlers: {
         package_panel_add_modal: handleAddModalSubmit,
 
-        package_panel_extra_fields_modal: async (interaction) => {
+        package_panel_extra_fields_modal: async (interaction, context) => {
             await deferMessageUpdate(interaction);
 
-            const pending = pendingExtraFields.get(interaction.user.id);
-            if (!pending) {
+            const sessionID = interaction.customId.split(':')[1];
+            const session = sessions.get(sessionID, sessionBinding(interaction));
+            if (!session || session.data.stage !== 'extra') {
                 return replyPackageValidation(interaction, '**找不到待補填的包裹資料，請重新執行新增流程。**');
             }
+            const pending = session.data.pending;
 
             const extraFields = {};
             for (const requirement of pending.requirements) {
@@ -719,8 +781,9 @@ const command = {
             }
 
             try {
-                await importAndStorePackage(interaction, pending, extraFields);
-                pendingExtraFields.delete(interaction.user.id);
+                sessions.update(sessionID, sessionBinding(interaction), data => ({ ...data, stage: 'processing' }));
+                await importAndStorePackage(interaction, pending, extraFields, context);
+                sessions.remove(sessionID);
                 sendLog(
                     interaction.client,
                     `📦 ${interaction.user.tag} 補填資料並新增了物流追蹤：${pending.trackingNumber}`,
@@ -729,6 +792,7 @@ const command = {
                     { sensitiveValues: [pending.trackingNumber] }
                 );
             } catch (error) {
+                if (error.isValidationError) return replyPackageValidation(interaction, `**${error.message}**`);
                 sendLog(interaction.client, '❌ 補填資料新增物流追蹤時發生錯誤：', 'ERROR', error);
                 return replyPackageError(interaction, error, '補填資料並新增物流追蹤');
             }
@@ -738,7 +802,15 @@ const command = {
     }
 };
 
-command._test = { createArchivedActionsRows, getScopedUserPackageID, getTargetRecord };
+function getTargetRecordForTest(interaction, customId, allowedStatuses, findRecord) {
+    const userPackageID = getScopedUserPackageID(interaction, customId);
+    if (!userPackageID) return null;
+    const record = findRecord(interaction.user.id, userPackageID);
+    if (!record || String(record.userID) !== interaction.user.id || !allowedStatuses.includes(record.status)) return null;
+    return record;
+}
+
+command._test = { createArchivedActionsRows, getScopedUserPackageID, getTargetRecord: getTargetRecordForTest };
 return command;
 }
 

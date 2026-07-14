@@ -22,8 +22,8 @@ const initializer = async (client, context = {}) => {
 
     const music = configCommands.music || {};
     const options = {
-        binaryPath: music.ytDlpPath || 'assets/music/yt-dlp',
-        updateHours: Number(music.ytDlpUpdateHours) || 24
+        updateHours: Number(music.ytDlpUpdateHours) || 24,
+        signal: context.signal
     };
     // yt-dlp 可自行下載/更新；ffmpeg-static 必須已由 npm 正確安裝。
     try {
@@ -35,9 +35,13 @@ const initializer = async (client, context = {}) => {
     try {
         const binary = await ensureYtDlp(options);
         sendLog(client, `✅ yt-dlp 已就緒：${binary}`);
-        await musicCommand.restorePersistedPlayback?.(client);
     } catch (error) {
         sendLog(client, '⚠️ yt-dlp 下載或檢查失敗，音樂點播暫時無法使用。', 'WARN', error);
+    }
+    try {
+        await musicCommand.restorePersistedPlayback?.(client, context);
+    } catch (error) {
+        sendLog(client, '⚠️ 無法清理或恢復音樂快照。', 'WARN', error);
     }
     return () => client.off(Events.VoiceStateUpdate, voiceListener);
 };

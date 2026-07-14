@@ -7,11 +7,7 @@ const {
 const { createCommandPolicy } = require('../../../core/commandPolicy');
 const { createLogTools } = require('../../../core/sendLog');
 const { createReplyTools } = require('../../../core/Reply');
-const {
-    loadGuildStore,
-    removeEntrance,
-    setEntrance
-} = require('../../../util/temporaryVoiceStore');
+const { createTemporaryVoiceRepository } = require('../../../util/temporaryVoiceRepository');
 
 const REQUIRED_BOT_PERMISSIONS = [
     PermissionFlagsBits.ViewChannel,
@@ -24,6 +20,14 @@ function createCommand(config) {
 const { getAdminCommandPath } = createCommandPolicy(config);
 const { sendLog } = createLogTools(config);
 const { errorReply, infoReply, validationReply } = createReplyTools(config);
+const repositories = new WeakMap();
+
+function repository(context) {
+    const json = context?.store?.temporaryVoice;
+    if (!json) throw new Error('臨時語音功能缺少 temporaryVoice repository context。');
+    if (!repositories.has(json)) repositories.set(json, createTemporaryVoiceRepository(json));
+    return repositories.get(json);
+}
 
 const command = {
     data: new SlashCommandBuilder()
@@ -69,12 +73,12 @@ const command = {
             }
 
             if (subcommand === '移除') {
-                const store = loadGuildStore(interaction.guildId);
+                const store = await repository(context).readGuild(interaction.guildId);
                 if (!store.entrances[channel.id]) {
                     return validationReply(interaction, '**這個語音頻道不是已設定的臨時語音入口！**');
                 }
 
-                removeEntrance(interaction.guildId, channel.id);
+                await repository(context).removeEntrance(interaction.guildId, channel.id);
                 return infoReply(interaction, `**已移除入口 ${channel}。既有臨時頻道仍會在空置逾時後自動刪除。**`);
             }
 
@@ -84,9 +88,9 @@ const command = {
                 return validationReply(interaction, `**機器人在該頻道缺少必要權限：${missingPermissions.join('、')}**`);
             }
 
-            const wasConfigured = Boolean(loadGuildStore(interaction.guildId).entrances[channel.id]);
+            const wasConfigured = Boolean((await repository(context).readGuild(interaction.guildId)).entrances[channel.id]);
             const prefix = interaction.options.getString('前綴')?.trim() || '';
-            setEntrance(interaction.guildId, channel.id, prefix);
+            await repository(context).setEntrance(interaction.guildId, channel.id, prefix);
             return infoReply(
                 interaction,
                 `**已${wasConfigured ? '更新' : '新增'}入口 ${channel}${prefix ? `，前綴為「${prefix}」` : '，不使用前綴'}。**`

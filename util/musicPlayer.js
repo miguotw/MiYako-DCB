@@ -4,7 +4,7 @@ const fs = require('fs');
  *
  * 本模組擁有 VoiceConnection、AudioPlayer、目前歌曲、待播序列與所有計時器；
  * 指令層只能透過公開函式操作狀態，UI 更新則由 hooks 反向通知 `commands/music.js`。
- * 播放序列與目前進度會寫入 musicQueueStore，讓 Bot 重啟後能從本機音訊續播。
+ * 播放序列與目前進度透過 hooks 寫入 runtime repository，讓 Bot 重啟後續播。
  */
 const path = require('path');
 const prism = require('prism-media');
@@ -13,7 +13,6 @@ const {
     createAudioPlayer, createAudioResource, entersState, joinVoiceChannel
 } = require('@discordjs/voice');
 const { deleteTrackFile } = require('./ytDlpManager');
-const { saveGuildQueue, deleteGuildQueue } = require('./musicQueueStore');
 
 const guildStates = new Map();
 
@@ -24,13 +23,15 @@ function createGuildState(guildID, options, hooks) {
         guildID, options, hooks, player, connection: null, voiceChannelID: null,
         current: null, queue: [], resource: null, panelMessage: null, panelChannel: null,
         progressTimer: null, recoveryTimer: null, inactivityTimer: null,
-        voiceChannel: null, starting: false, preparingTracks: 0,
+        voiceChannel: null, starting: false, preparingTracks: 0, playbackGeneration: 0,
         paused: false, resumeAfterRecovery: false, resumeOffsetSeconds: 0,
         shuttingDown: false
     };
-    player.on(AudioPlayerStatus.Idle, () => finishCurrent(state));
-    player.on('error', error => failCurrent(state, error));
-    player.on('stateChange', (_, nextState) => {
+    player.on('error', error => failCurrent(state, error, error?.resource?.metadata?.playbackGeneration));
+    player.on('stateChange', (oldState, nextState) => {
+        if (nextState.status === AudioPlayerStatus.Idle) {
+            void finishCurrent(state, oldState?.resource?.metadata?.playbackGeneration);
+        }
         // 若在 Buffering 階段收到無人／斷線暫停，進入 Playing 後再次落實暫停。
         if (state.paused && nextState.status === AudioPlayerStatus.Playing) player.pause(true);
     });
@@ -54,9 +55,9 @@ function elapsedSeconds(state) {
  * 保存足以重建播放的最小快照；序列完全為空時刪除舊檔，避免下次啟動誤恢復。
  * localPath 也會落盤，恢復時仍會再次確認檔案確實存在。
  */
-function persistState(state) {
-    if (!state.current && !state.queue.length) return deleteGuildQueue(state.guildID);
-    saveGuildQueue(state.guildID, {
+function persistState(state, immediate = false) {
+    const snapshot = !state.current && !state.queue.length ? null : {
+        guildID: state.guildID,
         voiceChannelID: state.voiceChannelID,
         panelChannelID: state.panelChannel?.id || state.panelMessage?.channelId || null,
         panelMessageID: state.panelMessage?.id || null,
@@ -64,7 +65,10 @@ function persistState(state) {
         progressSeconds: elapsedSeconds(state),
         current: state.current,
         queue: state.queue
-    });
+    };
+    const result = state.hooks.persistSnapshot?.(state, snapshot, { immediate });
+    if (!immediate) result?.catch?.(error => state.hooks.onPersistenceError?.(state, error));
+    return result;
 }
 
 /**
@@ -218,30 +222,43 @@ async function playNext(state) {
     }
     state.starting = true;
     state.current = track;
+    const generation = ++state.playbackGeneration;
     state.paused = false;
     state.resumeOffsetSeconds = Number(track.resumeSeconds) || 0;
     try {
         await state.hooks.replacePanel?.(state);
+        if (generation !== state.playbackGeneration || state.current !== track) return;
         if (!track.localPath || !fs.existsSync(track.localPath)) throw new Error('找不到已下載的音訊檔案。');
         if (state.resumeOffsetSeconds > 0) {
             const transcoder = new prism.FFmpeg({ args: ['-ss', String(state.resumeOffsetSeconds), '-i', track.localPath, '-analyzeduration', '0', '-loglevel', '0', '-f', 's16le', '-ar', '48000', '-ac', '2'] });
-            state.resource = createAudioResource(transcoder, { inputType: StreamType.Raw, metadata: track, inlineVolume: true });
-        } else state.resource = createAudioResource(track.localPath, { metadata: track, inlineVolume: true });
+            state.resource = createAudioResource(transcoder, {
+                inputType: StreamType.Raw,
+                metadata: { ...track, playbackGeneration: generation },
+                inlineVolume: true
+            });
+        } else {
+            state.resource = createAudioResource(track.localPath, {
+                metadata: { ...track, playbackGeneration: generation },
+                inlineVolume: true
+            });
+        }
         state.resource.volume?.setVolume((Number(state.options.volumePercent) || 0) / 100);
+        if (generation !== state.playbackGeneration || state.current !== track) return;
         state.player.play(state.resource);
         startProgressUpdates(state);
         persistState(state);
     } catch (error) {
         state.starting = false;
-        await failCurrent(state, error);
+        await failCurrent(state, error, generation);
         return;
     }
     state.starting = false;
 }
 
 /** 正常 Idle：清理音訊檔、重設 current，再消費下一首。 */
-async function finishCurrent(state) {
+async function finishCurrent(state, eventGeneration) {
     if (state.shuttingDown) return;
+    if (eventGeneration !== state.playbackGeneration) return;
     if (!state.current || state.starting) return;
     stopProgressUpdates(state);
     deleteTrackFile(state.current);
@@ -251,8 +268,9 @@ async function finishCurrent(state) {
 }
 
 /** 播放失敗不阻塞序列：通知面板、刪除失敗曲目後繼續下一首。 */
-async function failCurrent(state, error) {
+async function failCurrent(state, error, eventGeneration = state.playbackGeneration) {
     if (state.shuttingDown) return;
+    if (eventGeneration !== state.playbackGeneration) return;
     if (!state.current) return;
     const failed = state.current;
     stopProgressUpdates(state);
@@ -333,7 +351,20 @@ function clearQueue(state) {
     state.hooks.updatePanel?.(state);
     return removed;
 }
-function skipCurrent(state) { if (!state.current) return false; state.player.stop(true); return true; }
+function skipCurrent(state) {
+    if (!state.current) return false;
+    const skipped = state.current;
+    state.playbackGeneration += 1;
+    state.starting = false;
+    state.current = null;
+    state.resource = null;
+    stopProgressUpdates(state);
+    state.player.stop(true);
+    deleteTrackFile(skipped);
+    persistState(state);
+    playNext(state).catch(error => state.hooks.notifyError?.(state, skipped, error));
+    return true;
+}
 /** 定期保存播放秒數並更新面板；最短五秒以控制磁碟與 Discord API 負載。 */
 function startProgressUpdates(state) {
     stopProgressUpdates(state);
@@ -355,7 +386,7 @@ async function restoreGuildState(snapshot, voiceChannel, panelChannel, panelMess
         ...(Array.isArray(snapshot.queue) ? snapshot.queue : [])
     ].filter(track => track.localPath && fs.existsSync(track.localPath))
         .map(track => ({ ...track, queueID: track.queueID || path.basename(track.localPath) }));
-    if (!state.queue.length) { deleteGuildQueue(snapshot.guildID); return null; }
+    if (!state.queue.length) { await state.hooks.persistSnapshot?.(state, null, { immediate: true }); return null; }
     await connect(state, voiceChannel);
     await playNext(state);
     if (!state.current) throw new Error('保存的歌曲無法恢復播放。');
@@ -375,21 +406,22 @@ function cleanupState(state, remove = false) {
     state.player.stop(true); state.connection?.destroy(); state.connection = null;
     state.voiceChannel = null; state.voiceChannelID = null;
     deleteTrackFile(state.current); for (const track of state.queue) deleteTrackFile(track);
-    state.current = null; state.queue = []; state.resumeAfterRecovery = false; deleteGuildQueue(state.guildID);
+    state.current = null; state.queue = []; state.resumeAfterRecovery = false;
+    state.hooks.persistSnapshot?.(state, null, { immediate: true });
     if (remove) guildStates.delete(state.guildID);
 }
 
 /** 在關閉語音前同步保存所有 guild 的 current、queue 與播放進度。 */
-function snapshotAllGuildStates() {
-    for (const state of guildStates.values()) persistState(state);
+async function snapshotAllGuildStates() {
+    await Promise.all([...guildStates.values()].map(state => persistState(state, true)));
 }
 
 /**
  * 關機專用清理：先設 shuttingDown 阻止 AudioPlayer Idle 消費序列，再停止 timer、
  * player 與語音連線。此流程刻意保留 cache 與 snapshot，供下次啟動恢復。
  */
-function shutdownAllPlayers() {
-    snapshotAllGuildStates();
+async function shutdownAllPlayers() {
+    await snapshotAllGuildStates();
     for (const state of guildStates.values()) {
         state.shuttingDown = true;
         stopProgressUpdates(state);

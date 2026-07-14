@@ -1,121 +1,111 @@
-const path = require('path');
+'use strict';
+
 const { createLogTools } = require('../../../core/sendLog');
-const { deleteRaffle, drawWinners, getAllRaffles, updateRaffle } = require('../../../util/raffleStore');
+const { createRaffleRepository, drawWinners } = require('../../../util/raffleRepository');
 const { createRaffleViews } = require('../../../util/raffleViews');
 
-function createInitializer(config) {
-const { sendLog } = createLogTools(config);
-const { createRaffleEmbed, participationRow } = createRaffleViews(config);
+function createRaffleDeadlineCoordinator(config) {
+    const { sendLog } = createLogTools(config);
+    const { createRaffleEmbed, participationRow } = createRaffleViews(config);
+    const handles = new Map();
+    let context;
+    let repository;
 
-const CHECK_INTERVAL_MS = 30000;
-let isChecking = false;
-
-function isMissingDiscordResource(error) {
-    return error?.code === 10003 || error?.code === 10008;
-}
-
-async function announcementExists(client, raffle) {
-    try {
-        const channel = await client.channels.fetch(raffle.channelID);
-        if (!channel?.messages) return false;
-        await channel.messages.fetch(raffle.messageID);
-        return true;
-    } catch (error) {
-        if (isMissingDiscordResource(error)) return false;
-        throw error;
-    }
-}
-
-async function updateCompletedMessage(client, raffle) {
-    const channel = await client.channels.fetch(raffle.channelID).catch(() => null);
-    const message = await channel?.messages?.fetch(raffle.messageID).catch(() => null);
-    if (!message) throw new Error('找不到原抽選公告訊息。');
-    await message.edit({ embeds: [createRaffleEmbed(raffle, true)], components: participationRow(raffle, true) });
-    deleteRaffle(raffle.guildID, raffle.id);
-}
-
-async function finishRaffle(client, raffle) {
-    const winners = drawWinners(raffle.participants, raffle.winnerCount);
-    const completed = updateRaffle(raffle.guildID, raffle.id, current => {
-        if (current.status !== 'open') return;
-        current.winners = winners;
-        current.status = 'drawn';
-        current.drawnAt = new Date().toISOString();
-    });
-    if (!completed || completed.status !== 'drawn') return;
-    if (completed.participants.length < completed.winnerCount) {
-        sendLog(client, `⚠️ 抽選 ${completed.id} 參加人數不足，全部 ${completed.participants.length} 位參加者中選。`, 'WARN');
-    }
-    await updateCompletedMessage(client, completed);
-    sendLog(client, `✅ 抽選 ${completed.id} 已完成，共抽出 ${completed.winners.length} 位。`);
-}
-
-async function closeRegistration(client, raffle) {
-    const closed = updateRaffle(raffle.guildID, raffle.id, current => {
-        if (current.status === 'open') current.status = 'closed';
-    });
-    const channel = await client.channels.fetch(closed.channelID).catch(() => null);
-    const message = await channel?.messages?.fetch(closed.messageID).catch(() => null);
-    if (!message) throw new Error('找不到原抽選公告訊息。');
-    await message.edit({ embeds: [createRaffleEmbed(closed, false)], components: participationRow(closed, true) });
-    deleteRaffle(closed.guildID, closed.id);
-    sendLog(client, `✅ 抽選 ${closed.id} 已截止登記，自動抽選未啟用。`);
-}
-
-async function checkRaffles(client, signal) {
-    if (isChecking) return;
-    isChecking = true;
-    try {
-        const now = Math.floor(Date.now() / 1000);
-        const errors = [];
-        for (const raffle of getAllRaffles()) {
-            if (signal?.aborted) return;
-            try {
-                if (raffle.messageID) {
-                    if (!await announcementExists(client, raffle)) {
-                        deleteRaffle(raffle.guildID, raffle.id);
-                        sendLog(client, `⚠️ 抽選 ${raffle.id} 的公告已不存在，已刪除該筆抽選資料。`, 'WARN');
-                        continue;
-                    }
-                }
-                if (raffle.status === 'open' && now >= raffle.entryDeadline) {
-                    if (raffle.autoDraw === false) await closeRegistration(client, raffle);
-                    else await finishRaffle(client, raffle);
-                }
-                else if (raffle.status === 'drawn') {
-                    if (raffle.messageUpdatedAt) deleteRaffle(raffle.guildID, raffle.id);
-                    else await updateCompletedMessage(client, raffle);
-                }
-                else if (raffle.status === 'closed') {
-                    if (raffle.messageUpdatedAt) deleteRaffle(raffle.guildID, raffle.id);
-                    else await closeRegistration(client, raffle);
-                }
-            } catch (error) {
-                errors.push(error);
-                sendLog(client, `❌ 處理抽選 ${raffle.id} 時發生錯誤：`, 'ERROR', error);
-            }
+    async function fetchMessage(channelID, messageID) {
+        try {
+            const channel = await context.client.channels.fetch(channelID);
+            if (!channel?.messages) return null;
+            return await channel.messages.fetch(messageID);
+        } catch (error) {
+            if (error?.code === 10003 || error?.code === 10008) return null;
+            throw error;
         }
-        if (errors.length) throw new AggregateError(errors, '抽選排程有工作失敗。');
-    } finally {
-        isChecking = false;
     }
+
+    async function process(guildID, raffleID) {
+        let raffle = await repository.get(guildID, raffleID);
+        if (!raffle) return;
+        if (raffle.status === 'open') {
+            if (Date.now() < Number(raffle.entryDeadline) * 1000) return;
+            raffle = await repository.update(guildID, raffleID, current => {
+                if (current.status !== 'open') return current;
+                if (current.autoDraw === false) current.status = 'closedPendingSync';
+                else {
+                    current.winners = drawWinners(current.participants, current.winnerCount);
+                    current.status = 'drawnPendingSync';
+                    current.drawnAt = new Date().toISOString();
+                }
+                return current;
+            });
+        }
+        if (!['closedPendingSync', 'drawnPendingSync'].includes(raffle.status)) return;
+
+        const message = await fetchMessage(raffle.channelID, raffle.messageID);
+        if (!message) {
+            await repository.remove(guildID, raffleID);
+            sendLog(context.client, `⚠️ 抽選 ${raffleID} 的公告已不存在，已移除本機資料。`, 'WARN');
+            return;
+        }
+        const drawn = raffle.status === 'drawnPendingSync';
+        await message.edit({
+            embeds: [createRaffleEmbed(raffle, drawn)],
+            components: participationRow(raffle, true)
+        });
+        await repository.remove(guildID, raffleID);
+        sendLog(context.client, drawn
+            ? `✅ 抽選 ${raffleID} 已完成，共抽出 ${raffle.winners.length} 位。`
+            : `✅ 抽選 ${raffleID} 已截止登記，自動抽選未啟用。`);
+    }
+
+    function schedule(raffle) {
+        if (!context || !repository || !raffle?.id) return;
+        const name = `raffle.deadline.${raffle.guildID}.${raffle.id}`;
+        const deadlineAt = ['closedPendingSync', 'drawnPendingSync'].includes(raffle.status)
+            ? Date.now()
+            : Number(raffle.entryDeadline) * 1000;
+        const existing = handles.get(name);
+        if (existing) {
+            existing.reschedule(deadlineAt);
+            return existing;
+        }
+        const handle = context.scheduler.scheduleDeadline({
+            name,
+            deadlineAt,
+            timeoutMs: 25_000,
+            run: () => process(String(raffle.guildID), String(raffle.id))
+        });
+        handles.set(name, handle);
+        return handle;
+    }
+
+    async function start(nextContext) {
+        if (typeof nextContext.scheduler?.scheduleDeadline !== 'function') {
+            throw new Error('抽選 feature 缺少 deadline scheduler context。');
+        }
+        context = nextContext;
+        repository = createRaffleRepository(context.store.raffle);
+        for (const raffle of await repository.list()) {
+            if (['open', 'closedPendingSync', 'drawnPendingSync'].includes(raffle.status)) schedule(raffle);
+        }
+        sendLog(context.client, '✅ 抽選 deadline scheduler 已啟動。');
+        return stop;
+    }
+
+    async function stop() {
+        await Promise.all([...handles.values()].map(handle => handle.stop()));
+        handles.clear();
+        context = null;
+        repository = null;
+    }
+
+    return { start, stop, schedule, _test: { process } };
 }
 
-const initializer = (client, context = {}) => {
-    if (!context.scheduler) throw new Error('抽選 feature 缺少 scheduler context。');
-    const handle = context.scheduler.register({
-        name: 'raffle.check',
-        intervalMs: CHECK_INTERVAL_MS,
-        timeoutMs: 25000,
-        immediate: true,
-        run: ({ signal }) => checkRaffles(client, signal)
-    });
-    sendLog(client, '✅ 抽選系統排程已啟動，每 30 秒檢查一次。');
-    return () => handle.stop();
-};
-
-initializer._test = { finishRaffle };
-return initializer;
+function createInitializer(config) {
+    const coordinator = createRaffleDeadlineCoordinator(config);
+    const initializer = (_client, context) => coordinator.start(context);
+    initializer._test = coordinator._test;
+    return initializer;
 }
 
-module.exports = { createInitializer };
+module.exports = { createInitializer, createRaffleDeadlineCoordinator };

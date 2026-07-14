@@ -10,11 +10,19 @@ const crypto = require('crypto');
 const { pipeline } = require('stream/promises');
 const ffmpegPath = require('ffmpeg-static');
 const { http } = require('../core/http');
+const { PROJECT_ROOT } = require('../core/config');
 const { musicValidationError, toYtDlpQuery, normalizeTrack, validateTrack, validateYouTubeUrl } = require('./musicHelpers');
 
 const DOWNLOAD_URL = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux';
 let updatePromise = null;
 let processManager = null;
+let activeYtDlpProcesses = 0;
+const ytDlpWaiters = [];
+const protectedCachePaths = new Set();
+const MAX_YTDLP_PROCESSES = 2;
+
+const BINARY_PATH = path.join(PROJECT_ROOT, 'runtime', 'bin', 'yt-dlp');
+const CACHE_DIRECTORY = path.join(PROJECT_ROOT, 'runtime', 'cache', 'music');
 
 /** Runtime 注入集中程序管理器，確保 timeout、取消與關機都能終止完整程序樹。 */
 function setProcessManager(manager) {
@@ -27,8 +35,8 @@ function createYtDlpArgs(args) {
     return ['--ignore-config', ...args];
 }
 
-function resolveBinaryPath(value = 'assets/music/yt-dlp') {
-    return path.resolve(process.cwd(), value);
+function resolveBinaryPath() {
+    return BINARY_PATH;
 }
 
 /**
@@ -38,26 +46,105 @@ function resolveBinaryPath(value = 'assets/music/yt-dlp') {
 function runProcess(command, args, options = {}) {
     if (processManager) return processManager.run(command, args, options);
     return new Promise((resolve, reject) => {
-        const { timeout = 30000, onStdout, onStderr, ...spawnOptions } = options;
-        const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], ...spawnOptions });
+        const {
+            timeout = 30000, onStdout, onStderr, signal,
+            maxStdoutBytes = 8 * 1024 * 1024, maxStderrBytes = 8 * 1024 * 1024,
+            ...spawnOptions
+        } = options;
+        const child = spawn(command, args, {
+            stdio: ['ignore', 'pipe', 'pipe'], ...spawnOptions,
+            ...(process.platform === 'win32' ? {} : { detached: true })
+        });
         const stdout = [];
         const stderr = [];
-        const timeoutTimer = setTimeout(() => child.kill('SIGKILL'), timeout);
-        child.stdout?.on('data', chunk => { stdout.push(chunk); onStdout?.(chunk.toString()); });
-        child.stderr?.on('data', chunk => { stderr.push(chunk); onStderr?.(chunk.toString()); });
+        let stdoutBytes = 0;
+        let stderrBytes = 0;
+        let cancelError = null;
+        const terminate = error => {
+            cancelError ||= error;
+            try {
+                if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGTERM');
+                else child.kill('SIGTERM');
+            } catch {}
+            setTimeout(() => {
+                if (child.exitCode != null) return;
+                try {
+                    if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGKILL');
+                    else child.kill('SIGKILL');
+                } catch {}
+            }, 3000).unref?.();
+        };
+        const timeoutTimer = setTimeout(() => {
+            const error = new Error(`${command} 執行逾時。`);
+            error.code = 'ETIMEDOUT';
+            terminate(error);
+        }, timeout);
+        const abort = () => terminate(signal.reason || Object.assign(new Error('外部程序已取消。'), { code: 'ERR_CANCELED' }));
+        signal?.addEventListener('abort', abort, { once: true });
+        child.stdout?.on('data', chunk => {
+            stdoutBytes += chunk.length;
+            if (stdoutBytes > maxStdoutBytes) return terminate(Object.assign(new Error('stdout 超過上限。'), { code: 'MAX_BUFFER' }));
+            stdout.push(chunk); onStdout?.(chunk.toString());
+        });
+        child.stderr?.on('data', chunk => {
+            stderrBytes += chunk.length;
+            if (stderrBytes > maxStderrBytes) return terminate(Object.assign(new Error('stderr 超過上限。'), { code: 'MAX_BUFFER' }));
+            stderr.push(chunk); onStderr?.(chunk.toString());
+        });
         child.once('error', error => { clearTimeout(timeoutTimer); reject(error); });
         child.once('close', code => {
             clearTimeout(timeoutTimer);
+            signal?.removeEventListener('abort', abort);
             const result = { code, stdout: Buffer.concat(stdout).toString(), stderr: Buffer.concat(stderr).toString() };
+            if (cancelError) return reject(Object.assign(cancelError, result));
             if (code === 0) resolve(result);
             else reject(Object.assign(new Error(result.stderr.trim() || `${command} 結束，代碼 ${code}`), result));
         });
     });
 }
 
+async function acquireYtDlp(signal) {
+    if (signal?.aborted) throw signal.reason || new Error('yt-dlp 工作已取消。');
+    if (activeYtDlpProcesses < MAX_YTDLP_PROCESSES) {
+        activeYtDlpProcesses += 1;
+        return;
+    }
+    await new Promise((resolve, reject) => {
+        const waiter = { resolve, reject, signal, abort: null };
+        waiter.abort = () => {
+            const index = ytDlpWaiters.indexOf(waiter);
+            if (index >= 0) ytDlpWaiters.splice(index, 1);
+            reject(signal.reason || new Error('yt-dlp 工作已取消。'));
+        };
+        signal?.addEventListener('abort', waiter.abort, { once: true });
+        ytDlpWaiters.push(waiter);
+    });
+}
+
+function releaseYtDlp() {
+    const waiter = ytDlpWaiters.shift();
+    if (waiter) {
+        waiter.signal?.removeEventListener('abort', waiter.abort);
+        waiter.resolve();
+        return;
+    }
+    activeYtDlpProcesses = Math.max(activeYtDlpProcesses - 1, 0);
+}
+
+async function runYtDlp(binaryPath, args, options = {}) {
+    await acquireYtDlp(options.signal);
+    try { return await runProcess(binaryPath, args, options); }
+    finally { releaseYtDlp(); }
+}
+
+function getYtDlpConcurrencyStateForTests() {
+    return { active: activeYtDlpProcesses, waiting: ytDlpWaiters.length };
+}
+
 /** 下載到 `.download` 後才原子 rename，避免未完成檔案被當成可執行檔。 */
 async function downloadBinary(destination) {
     fs.mkdirSync(path.dirname(destination), { recursive: true });
+    if (process.platform !== 'win32') fs.chmodSync(path.dirname(destination), 0o700);
     const temporary = `${destination}.download`;
     try {
         const response = await http.get(DOWNLOAD_URL, { responseType: 'stream', maxRedirects: 5 });
@@ -91,13 +178,14 @@ async function ensureYtDlp(options = {}, force = false) {
         if (!fs.existsSync(binaryPath)) await downloadBinary(binaryPath);
         const intervalHours = Math.max(Number(options.updateHours) || 24, 1);
         if (force || shouldCheckUpdate(binaryPath, intervalHours)) {
-            try { await runProcess(binaryPath, createYtDlpArgs(['-U']), { timeout: 120000 }); }
+            try { await runYtDlp(binaryPath, createYtDlpArgs(['-U']), { timeout: 120000, signal: options.signal }); }
             catch (error) {
                 // 更新失敗時保留目前可執行版本；實際抽取仍會回報原始錯誤。
                 if (!fs.existsSync(binaryPath)) throw error;
             }
             finally {
-                fs.writeFileSync(getMetadataPath(binaryPath), JSON.stringify({ lastCheckedAt: Date.now() }, null, 2));
+                fs.writeFileSync(getMetadataPath(binaryPath), JSON.stringify({ lastCheckedAt: Date.now() }, null, 2), { mode: 0o600 });
+                if (process.platform !== 'win32') fs.chmodSync(getMetadataPath(binaryPath), 0o600);
             }
         }
         return binaryPath;
@@ -116,7 +204,7 @@ async function extractTrack(input, requestedBy, options = {}, retried = false) {
     const binaryPath = await ensureYtDlp(options);
     const { query } = toYtDlpQuery(input);
     try {
-        const result = await runProcess(binaryPath, createYtDlpArgs(['--dump-single-json', '--no-playlist', '--no-warnings', '--socket-timeout', '15', query]), { timeout: 45000 });
+        const result = await runYtDlp(binaryPath, createYtDlpArgs(['--dump-single-json', '--no-playlist', '--no-warnings', '--socket-timeout', '15', query]), { timeout: 45000, signal: options.signal });
         const data = JSON.parse(result.stdout);
         const item = data.entries?.[0] || data;
         return validateTrack(normalizeTrack(item, requestedBy), options.maxDurationSeconds, options.minDurationSeconds);
@@ -150,9 +238,9 @@ async function extractTracks(input, requestedBy, options = {}, retried = false) 
     if (!playlistInput) return [await extractTrack(input, requestedBy, options)];
     const binaryPath = await ensureYtDlp(options);
     try {
-        const result = await runProcess(binaryPath, createYtDlpArgs([
+        const result = await runYtDlp(binaryPath, createYtDlpArgs([
             '--dump-single-json', '--flat-playlist', '--yes-playlist', '--no-warnings', '--socket-timeout', '15', validateYouTubeUrl(input)
-        ]), { timeout: 60000 });
+        ]), { timeout: 60000, signal: options.signal });
         const data = JSON.parse(result.stdout);
         const entries = Array.isArray(data.entries) ? data.entries : [];
         if (!entries.length) throw musicValidationError('播放清單中沒有可加入的曲目。');
@@ -173,6 +261,51 @@ async function extractTracks(input, requestedBy, options = {}, retried = false) 
     }
 }
 
+function ensureCacheDirectory() {
+    fs.mkdirSync(CACHE_DIRECTORY, { recursive: true, mode: 0o700 });
+    if (process.platform !== 'win32') fs.chmodSync(CACHE_DIRECTORY, 0o700);
+}
+
+function cacheFiles() {
+    ensureCacheDirectory();
+    return fs.readdirSync(CACHE_DIRECTORY, { withFileTypes: true })
+        .filter(entry => entry.isFile())
+        .map(entry => {
+            const filePath = path.join(CACHE_DIRECTORY, entry.name);
+            const stat = fs.statSync(filePath);
+            return { path: filePath, size: stat.size, mtimeMs: stat.mtimeMs };
+        });
+}
+
+function setProtectedCachePaths(paths = []) {
+    protectedCachePaths.clear();
+    for (const value of paths) {
+        if (!value) continue;
+        const resolved = path.resolve(value);
+        if (resolved.startsWith(`${CACHE_DIRECTORY}${path.sep}`)) protectedCachePaths.add(resolved);
+    }
+}
+
+function cleanupOrphanedCache(referencedPaths = []) {
+    setProtectedCachePaths(referencedPaths);
+    for (const file of cacheFiles()) {
+        if (!protectedCachePaths.has(file.path)) fs.rmSync(file.path, { force: true });
+    }
+}
+
+function ensureCacheCapacity(options = {}, requiredBytes = 0) {
+    const maximum = Math.max(Number(options.maxCacheSizeBytes) || 2 * 1024 ** 3, 1);
+    const files = cacheFiles();
+    let used = files.reduce((sum, item) => sum + item.size, 0);
+    for (const file of files.sort((a, b) => a.mtimeMs - b.mtimeMs)) {
+        if (used + requiredBytes <= maximum) break;
+        if (protectedCachePaths.has(file.path)) continue;
+        fs.rmSync(file.path, { force: true });
+        used -= file.size;
+    }
+    if (used + requiredBytes > maximum) throw musicValidationError('音樂快取空間已達上限，且現有檔案仍被播放序列使用。');
+}
+
 /**
  * 下載最佳音訊到唯一 cache 路徑；進度從 stderr 解析。
  * 失敗時會清除同 UUID 的殘檔，成功後由播放器在不再需要時呼叫 deleteTrackFile。
@@ -180,16 +313,19 @@ async function extractTracks(input, requestedBy, options = {}, retried = false) 
 async function downloadTrack(track, options = {}, onProgress = null, retried = false) {
     validateYouTubeUrl(track?.url);
     const binaryPath = await ensureYtDlp(options);
-    const cacheDirectory = path.join(process.cwd(), 'assets', 'music', 'cache');
-    fs.mkdirSync(cacheDirectory, { recursive: true });
-    const outputTemplate = path.join(cacheDirectory, `${crypto.randomUUID()}.%(ext)s`);
+    ensureCacheDirectory();
+    const maximumFileBytes = Math.max(Number(options.maxFileSizeBytes) || 256 * 1024 ** 2, 1);
+    ensureCacheCapacity(options, maximumFileBytes);
+    const outputTemplate = path.join(CACHE_DIRECTORY, `${crypto.randomUUID()}.%(ext)s`);
     try {
-        const result = await runProcess(binaryPath, createYtDlpArgs([
+        const result = await runYtDlp(binaryPath, createYtDlpArgs([
             '--no-playlist', '--no-warnings', '--newline', '--progress', '--socket-timeout', '15',
+            '--max-filesize', String(maximumFileBytes),
             '--ffmpeg-location', ffmpegPath, '-f', 'bestaudio/best',
             '--print', 'after_move:filepath', '-o', outputTemplate, track.url
         ]), {
             timeout: 15 * 60 * 1000,
+            signal: options.signal,
             onStderr: output => {
                 const matches = [...output.matchAll(/\[download\]\s+([\d.]+)%/g)];
                 if (matches.length) onProgress?.(Math.min(Number(matches.at(-1)[1]) || 0, 100));
@@ -197,10 +333,15 @@ async function downloadTrack(track, options = {}, onProgress = null, retried = f
         });
         const localPath = result.stdout.trim().split(/\r?\n/).at(-1);
         if (!localPath || !fs.existsSync(localPath)) throw new Error('yt-dlp 未產生可播放的音訊檔案。');
+        const stat = fs.statSync(localPath);
+        if (stat.size > maximumFileBytes) throw musicValidationError('下載的音訊檔案超過設定上限。');
+        if (process.platform !== 'win32') fs.chmodSync(localPath, 0o600);
+        protectedCachePaths.add(path.resolve(localPath));
+        ensureCacheCapacity(options, 0);
         return { ...track, localPath, queueID: crypto.randomUUID() };
     } catch (error) {
-        for (const file of fs.readdirSync(cacheDirectory)) {
-            if (file.startsWith(path.basename(outputTemplate).split('.')[0])) fs.rmSync(path.join(cacheDirectory, file), { force: true });
+        for (const file of fs.readdirSync(CACHE_DIRECTORY)) {
+            if (file.startsWith(path.basename(outputTemplate).split('.')[0])) fs.rmSync(path.join(CACHE_DIRECTORY, file), { force: true });
         }
         if (!retried && isExtractorFailure(error)) {
             await ensureYtDlp(options, true);
@@ -212,6 +353,7 @@ async function downloadTrack(track, options = {}, onProgress = null, retried = f
 
 function deleteTrackFile(track) {
     if (!track?.localPath) return;
+    protectedCachePaths.delete(path.resolve(track.localPath));
     try { fs.rmSync(track.localPath, { force: true }); } catch {}
     track.localPath = null;
 }
@@ -227,4 +369,10 @@ async function checkFfmpeg() {
     return runProcess(ffmpegPath, ['-version'], { timeout: 10000 });
 }
 
-module.exports = { ffmpegPath, createYtDlpArgs, resolveBinaryPath, runProcess, setProcessManager, shouldCheckUpdate, ensureYtDlp, isExtractorFailure, extractTrack, extractTracks, downloadTrack, deleteTrackFile, checkFfmpeg };
+module.exports = {
+    ffmpegPath, CACHE_DIRECTORY, createYtDlpArgs, resolveBinaryPath, runProcess, runYtDlp,
+    setProcessManager, shouldCheckUpdate, ensureYtDlp, isExtractorFailure, extractTrack,
+    extractTracks, downloadTrack, deleteTrackFile, checkFfmpeg,
+    setProtectedCachePaths, cleanupOrphanedCache, ensureCacheCapacity,
+    getYtDlpConcurrencyStateForTests
+};

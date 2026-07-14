@@ -19,3 +19,6 @@ assets/twitch_stream/*.json
 assets/twitch_stream/*.tmp
 assets/raffle/*
 assets/dataCollection/*
+
+# Phase 3 runtime state, cache, downloaded binaries and temporary files
+runtime/

@@ -3,17 +3,25 @@ const { ChannelType, PermissionFlagsBits, SlashCommandBuilder } = require('disco
 const { createCommandPolicy } = require('../../../core/commandPolicy');
 const { createReplyTools } = require('../../../core/Reply');
 const { createLogTools } = require('../../../core/sendLog');
-const { createRaffle, deleteRaffle, getRaffle, updateRaffle } = require('../../../util/raffleStore');
+const { createRaffleRepository } = require('../../../util/raffleRepository');
 const { createRaffleViews } = require('../../../util/raffleViews');
 const {
     fetchSourceMessage, parseDeadline: parseDeadlineInput, parseMentionTargets, resolveMentionedUsers
 } = require('../../../util/discordCommandInput');
 
-function createCommand(config) {
+function createCommand(config, { scheduleRaffle = () => {} } = {}) {
 const { getAdminCommandPath } = createCommandPolicy(config);
 const { errorReply, infoReply, validationReply } = createReplyTools(config);
 const { sendLog } = createLogTools(config);
 const { createRaffleEmbed, participationRow } = createRaffleViews(config);
+const repositories = new WeakMap();
+
+function repository(context) {
+    const json = context?.store?.raffle;
+    if (!json) throw new Error('抽選功能缺少 raffle repository context。');
+    if (!repositories.has(json)) repositories.set(json, createRaffleRepository(json));
+    return repositories.get(json);
+}
 
 // 將專案時區預設值包在指令層，讓共用解析器不依賴全域設定。
 function parseDeadline(value, timezoneOffset = config.log.timezone) {
@@ -62,7 +70,7 @@ const command = {
 
             const image = source.attachments.find(attachment => attachment.contentType?.startsWith('image/'));
             const role = interaction.options.getRole('提及身分組');
-            const raffle = createRaffle(interaction.guildId, {
+            const raffle = await repository(context).create(interaction.guildId, {
                 creatorID: interaction.user.id,
                 sourceChannelID: source.channelId,
                 sourceMessageID: source.id,
@@ -84,9 +92,10 @@ const command = {
                     components: participationRow(raffle),
                     allowedMentions: { roles: role ? [role.id] : [] }
                 });
-                updateRaffle(interaction.guildId, raffle.id, current => { current.messageID = message.id; });
+                await repository(context).update(interaction.guildId, raffle.id, current => { current.messageID = message.id; });
+                scheduleRaffle({ ...raffle, messageID: message.id });
             } catch (error) {
-                deleteRaffle(interaction.guildId, raffle.id);
+                await repository(context).remove(interaction.guildId, raffle.id);
                 throw error;
             }
             return infoReply(interaction, `**已在 ${channel} 建立抽選。**\n抽選 ID：\`${raffle.id}\``);
@@ -97,10 +106,10 @@ const command = {
     },
 
     publicButtonHandlers: {
-        raffle_join: async interaction => {
+        raffle_join: async (interaction, context) => {
             const raffleID = interaction.customId.split(':')[1];
             if (interaction.user.bot) return validationReply(interaction, '**Bot 無法參加抽選。**', { ephemeral: true });
-            const raffle = getRaffle(interaction.guildId, raffleID);
+            const raffle = await repository(context).get(interaction.guildId, raffleID);
             if (!raffle) return validationReply(interaction, '**找不到這筆抽選。**', { ephemeral: true });
             if (raffle.status !== 'open' || Math.floor(Date.now() / 1000) >= raffle.entryDeadline) return validationReply(interaction, '**這筆抽選已截止。**', { ephemeral: true });
             const whitelist = raffle.whitelistUserIDs || raffle.qualifiedUserIDs || [];
@@ -109,7 +118,7 @@ const command = {
             if (blacklist.includes(interaction.user.id)) return validationReply(interaction, '**您在本次抽選的黑名單中，不可參與抽選。**', { ephemeral: true });
             let joined = false;
             let cancelled = false;
-            updateRaffle(interaction.guildId, raffleID, current => {
+            await repository(context).update(interaction.guildId, raffleID, current => {
                 if (current.status !== 'open' || Math.floor(Date.now() / 1000) >= current.entryDeadline) return;
                 const index = current.participants.indexOf(interaction.user.id);
                 if (index >= 0) {
@@ -121,7 +130,7 @@ const command = {
                 }
             });
             if (!joined && !cancelled) return validationReply(interaction, '**這筆抽選剛剛截止。**', { ephemeral: true });
-            const updated = getRaffle(interaction.guildId, raffleID);
+            const updated = await repository(context).get(interaction.guildId, raffleID);
             try {
                 await interaction.message.edit({ embeds: [createRaffleEmbed(updated)], components: participationRow(updated) });
             } catch (error) {

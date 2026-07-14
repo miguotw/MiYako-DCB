@@ -1,38 +1,45 @@
 const path = require('path');
 const { ActionRowBuilder, SlashCommandBuilder, StringSelectMenuBuilder } = require('discord.js');
-const { readGuildStore, writeGuildStore } = require('../../../util/twitchStreamStore');
+const { createTwitchStreamRepository } = require('../../../util/twitchStreamRepository');
 const { createCommandPolicy } = require('../../../core/commandPolicy');
 const { createLogTools } = require('../../../core/sendLog');
 const { createReplyTools } = require('../../../core/Reply');
 
-function createCommand(config, { requestTwitchCheck = async () => {} } = {}) {
+function createCommand(config, {
+    requestTwitchCheck = async () => {},
+    reconcileRemovedSubscription = async () => {}
+} = {}) {
 const { getAdminCommandPath } = createCommandPolicy(config);
 const { sendLog } = createLogTools(config);
 const { infoReply, validationReply } = createReplyTools(config);
+const repositories = new WeakMap();
+
+function repository(context) {
+    const json = context?.store?.twitchStream;
+    if (!json) throw new Error('Twitch 功能缺少 twitchStream repository context。');
+    if (!repositories.has(json)) repositories.set(json, createTwitchStreamRepository(json));
+    return repositories.get(json);
+}
 
 function normalizeTwitchLogin(value) {
     return String(value || '').trim().replace(/^https?:\/\/(?:www\.)?twitch\.tv\//i, '').split(/[/?#]/)[0].toLowerCase();
 }
 
-async function handleRemoveSelected(interaction) {
+async function handleRemoveSelected(interaction, context) {
     const [, ownerID] = interaction.customId.split(':');
     if (ownerID !== interaction.user.id) {
         return validationReply(interaction, '這不是你建立的移除選單。', { ephemeral: true });
     }
 
     const twitchUserLogin = normalizeTwitchLogin(interaction.values[0]);
-    const store = readGuildStore(interaction.guildId);
-    const originalLength = store.subscriptions.length;
-    store.subscriptions = store.subscriptions.filter(item => item.twitchUserLogin !== twitchUserLogin);
-
-    if (store.subscriptions.length === originalLength) {
+    const removed = await repository(context).removeSubscription(interaction.guildId, twitchUserLogin);
+    if (!removed.found) {
         return validationReply(interaction, '這個 Twitch 頻道已不在追蹤清單中。', {
             method: 'update', content: null, components: []
         });
     }
 
-    store.notifications = store.notifications.filter(item => item.twitchUserLogin !== twitchUserLogin);
-    writeGuildStore(interaction.guildId, store);
+    await reconcileRemovedSubscription(interaction.client, interaction.guildId, twitchUserLogin, removed.notifications);
     sendLog(interaction.client, `💾 ${interaction.user.tag} 移除 Twitch 直播通知：${twitchUserLogin}（所有設定）`);
     return infoReply(interaction, `已移除 **${twitchUserLogin}** 在此伺服器的所有直播通知設定。`, {
         method: 'update', content: null, components: []
@@ -56,14 +63,14 @@ const command = {
                 .setRequired(true))
             .addRoleOption(option => option
                 .setName('提及身分組')
-                .setDescription('開播通知要提及的身分組；未設定時提及 @everyone')
+                .setDescription('開播通知要提及的身分組；未設定時不提及任何人')
                 .setRequired(false)))
         .addSubcommand(subcommand => subcommand
             .setName('移除')
             .setDescription('從選單移除已追蹤的 Twitch 頻道')),
 
     async execute(interaction, context) {
-        const store = readGuildStore(interaction.guildId);
+        const store = await repository(context).readGuild(interaction.guildId);
         const subcommand = interaction.options.getSubcommand();
         const commandPath = getAdminCommandPath('直播通知', subcommand);
 
@@ -123,8 +130,8 @@ const command = {
             store.notifications = store.notifications.filter(item =>
                 item.twitchUserLogin !== twitchUserLogin || item.channelID === channel.id
             );
-            writeGuildStore(interaction.guildId, store);
-            await infoReply(interaction, `已${isOverwrite ? '覆寫' : '新增'}追蹤 **${twitchUserLogin}**，通知將發送至 ${channel}${role ? `，並提及 ${role}` : '，未指定身分組時將提及 @everyone'}。`, {
+            await repository(context).writeGuild(interaction.guildId, store);
+            await infoReply(interaction, `已${isOverwrite ? '覆寫' : '新增'}追蹤 **${twitchUserLogin}**，通知將發送至 ${channel}${role ? `，並提及 ${role}` : '，且不提及任何人'}。`, {
                 ephemeral: true
             });
             requestTwitchCheck().catch(error => {

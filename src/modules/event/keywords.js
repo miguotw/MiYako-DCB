@@ -1,74 +1,71 @@
-const path = require('path');
+'use strict';
+
 const { Events } = require('discord.js');
 const { createLogTools } = require('../../../core/sendLog');
 
 function createInitializer(config) {
 const { sendLog } = createLogTools(config);
-const configModules = config.modules;
+const settings = config.modules.keywords;
+const cooldowns = new Map();
+const pending = new Set();
 
-// 導入設定檔內容
-const COOLDOWN = configModules.keywords.cooldown;
-const WHITELIST = configModules.keywords.whitelist;
-const CHANNELS = configModules.keywords.channels;
-const TRIGGER_GROUPS = configModules.keywords.triggers;
-const ENABLE = configModules.keywords.enable;
+function cooldownKey(message, groupName) {
+    return `${message.guildId || 'dm'}:${message.channel.id}:${groupName}`;
+}
 
-const initializer = (client) => {
-    client.on(Events.MessageCreate, async (message) => {
+function shouldRespondInChannel(channelID) {
+    const listed = settings.channels.includes(channelID);
+    return settings.whitelist ? listed : !listed;
+}
+
+async function respond(message, groupName, group, foundKeyword) {
+    const key = cooldownKey(message, groupName);
+    const now = Date.now();
+    if (pending.has(key) || now < (cooldowns.get(key) || 0)) return false;
+
+    // 在第一個 await 前取得 slot；同一批 MessageCreate 不會同時進入同一回應組。
+    pending.add(key);
+    cooldowns.set(key, now + settings.cooldown);
+    let response = null;
+    try {
+        for (const emoji of group.reaction || []) await message.react(emoji).catch(() => {});
+        if (group.message?.length) {
+            response = group.message[Math.floor(Math.random() * group.message.length)];
+            await message.channel.send(response);
+        }
+        if (settings.enable) {
+            sendLog(message.client, `🔍 ${message.author.tag} 在「#${message.channel.name}」觸發「${groupName}」關鍵字組：${foundKeyword}(${response})`, 'INFO');
+        }
+        return true;
+    } finally {
+        pending.delete(key);
+        if (settings.cooldown === 0) cooldowns.delete(key);
+    }
+}
+
+const initializer = client => {
+    const listener = async message => {
         try {
-            // 忽略機器人發送的消息
-            if (message.author.bot) return;
-
-            // 檢查頻道是否符合白名單規則
-            const isInChannelList = CHANNELS.includes(message.channel.id);
-            const shouldRespond = WHITELIST ? isInChannelList : !isInChannelList;
-            if (!shouldRespond) return;
-
-            // 檢查所有觸發組
-            for (const [groupName, group] of Object.entries(TRIGGER_GROUPS)) {
-                const foundKeyword = group.keywords.find(keyword =>
-                    message.content.toLowerCase().includes(keyword.toLowerCase())
-                );
-
-                if (foundKeyword) {
-                    // 收集本次觸發的訊息與 emoji
-                    let response = null;
-                    let reactionsUsed = [];
-
-                    // 反應 emoji（允許 reaction 欄位為單一 emoji 或陣列）
-                    if (group.reaction) {
-                        const reactions = Array.isArray(group.reaction) ? group.reaction : [group.reaction];
-                        for (const emoji of reactions) {
-                            try {
-                                await new Promise(resolve => setTimeout(resolve, COOLDOWN));
-                                await message.react(emoji);
-                                reactionsUsed.push(emoji);
-                            } catch (e) {
-                                // 無法添加的 emoji 忽略
-                            }
-                        }
-                    }
-
-                    // 回覆訊息（允許 message 欄位為單一訊息或陣列）
-                    if (group.message) {
-                        const responses = Array.isArray(group.message) ? group.message : [group.message];
-                        response = responses[Math.floor(Math.random() * responses.length)];
-                        await new Promise(resolve => setTimeout(resolve, COOLDOWN));
-                        await message.channel.send(response);
-                    }
-
-                    // 傳送日誌
-                    if (ENABLE) {
-                        sendLog(client, `🔍 ${message.author.tag} 在「#${message.channel.name}」觸發「${groupName}」關鍵字組：${foundKeyword}(${response})`, "INFO");
-                    }
-                    break;
-                }
+            if (message.author.bot || !shouldRespondInChannel(message.channel.id)) return;
+            const content = message.content.toLowerCase();
+            for (const [groupName, group] of Object.entries(settings.triggers)) {
+                const found = group.keywords.find(keyword => content.includes(keyword.toLowerCase()));
+                if (!found) continue;
+                await respond(message, groupName, group, found);
+                break;
             }
         } catch (error) {
-            sendLog(client, `❌ 關鍵字回應失敗 (頻道: ${message.channel.name})`, "ERROR", error);
+            sendLog(client, `❌ 關鍵字回應失敗 (頻道: ${message.channel.name})`, 'ERROR', error);
         }
-    });
+    };
+    client.on(Events.MessageCreate, listener);
+    return () => {
+        client.off(Events.MessageCreate, listener);
+        cooldowns.clear();
+        pending.clear();
+    };
 };
+initializer._test = { cooldownKey, respond };
 return initializer;
 }
 

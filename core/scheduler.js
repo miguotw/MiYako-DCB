@@ -297,13 +297,187 @@ function createScheduler({
                 finishPendingWith({ status: 'stopped', name });
                 currentController?.abort(new Error(`排程工作 ${name} 已停止`));
                 if (currentExecution) await currentExecution;
-            })();
+            })().finally(() => {
+                if (jobs.get(name)?.stop === stopJob) jobs.delete(name);
+            });
             return jobStopPromise;
         }
 
         const job = { trigger, stop: stopJob };
         jobs.set(name, { stop: stopJob });
         schedule(immediate ? 0 : intervalMs);
+        return job;
+    }
+
+    /**
+     * 註冊單次 deadline 工作。成功後解除 armed 狀態；失敗則持續退避重試，直到
+     * 成功、reschedule 或 stop。重啟恢復由 feature 重新讀取持久狀態後註冊。
+     */
+    function scheduleDeadline({ name, deadlineAt, timeoutMs, run } = {}) {
+        if (stopping) throw new Error('Scheduler 已停止，不能再註冊工作');
+        if (typeof name !== 'string' || name.trim() === '') throw new TypeError('排程工作名稱不得為空');
+        if (jobs.has(name)) throw new Error(`排程工作名稱重複：${name}`);
+        if (!Number.isFinite(deadlineAt) || deadlineAt < 0) throw new TypeError('deadlineAt 必須是 epoch 毫秒');
+        if (timeoutMs !== undefined && timeoutMs !== null) assertPositiveInteger(timeoutMs, 'timeoutMs');
+        if (typeof run !== 'function') throw new TypeError('run 必須是函式');
+
+        const MAX_TIMER_MS = 2 ** 31 - 1;
+        const RETRY_MAX_MS = 60 * 60 * 1000;
+        let active = true;
+        let armed = true;
+        let stuck = false;
+        let running = false;
+        let scheduledAt = deadlineAt;
+        let timer;
+        let failures = 0;
+        let currentController;
+        let currentExecution;
+        let stopPromiseForJob;
+        let pending = false;
+        let pendingDeferred;
+        let rescheduledDuringRun = false;
+
+        const now = () => typeof clock.now === 'function'
+            ? clock.now()
+            : Number.isFinite(clock.now) ? clock.now : Date.now();
+
+        function clearTimer() {
+            if (timer === undefined) return;
+            clock.clearTimeout(timer);
+            timer = undefined;
+        }
+
+        function scheduleAtDeadline() {
+            clearTimer();
+            if (!active || !armed || stopping || running) return;
+            const remaining = Math.max(scheduledAt - now(), 0);
+            timer = clock.setTimeout(() => {
+                timer = undefined;
+                if (remaining > MAX_TIMER_MS) scheduleAtDeadline();
+                else startExecution();
+            }, Math.min(remaining, MAX_TIMER_MS));
+        }
+
+        function settlePending(result) {
+            if (!pendingDeferred) return;
+            const deferred = pendingDeferred;
+            pendingDeferred = null;
+            pending = false;
+            deferred.resolve(result);
+        }
+
+        async function execute() {
+            if (!active || stopping || running) return { status: stuck ? 'stuck' : 'stopped', name };
+            running = true;
+            rescheduledDuringRun = false;
+            const controller = new AbortController();
+            currentController = controller;
+            let timeoutTimer;
+            let timeoutError;
+            if (timeoutMs !== undefined && timeoutMs !== null) {
+                timeoutTimer = clock.setTimeout(() => {
+                    timeoutError = new SchedulerTimeoutError(name, timeoutMs);
+                    controller.abort(timeoutError);
+                }, timeoutMs);
+            }
+
+            const settled = Promise.resolve()
+                .then(() => run({ signal: controller.signal }))
+                .then(value => ({ type: 'fulfilled', value }), error => ({ type: 'rejected', error }));
+            const watcher = watchAbort(controller.signal);
+            let outcome = await Promise.race([settled, watcher.promise]);
+            if (outcome.type === 'aborted') {
+                const afterGrace = await waitForGrace(settled, cancellationGraceMs, clock);
+                if (afterGrace.type === 'grace-elapsed') {
+                    stuck = true;
+                    active = false;
+                    outcome = { type: 'stuck', error: timeoutError || outcome.reason };
+                    safeLog(logger, 'error', `Deadline 工作 ${name} 取消後仍未結束，已停用`, { error: outcome.error });
+                } else outcome = afterGrace;
+            }
+            watcher.dispose();
+            if (timeoutTimer !== undefined) clock.clearTimeout(timeoutTimer);
+            currentController = null;
+            running = false;
+
+            let result;
+            if (outcome.type === 'fulfilled') {
+                failures = 0;
+                if (!rescheduledDuringRun) armed = false;
+                result = { status: 'success', name, value: outcome.value };
+            } else if (outcome.type === 'stuck') {
+                result = { status: 'stuck', name, error: outcome.error };
+            } else if (!active || stopping) {
+                result = { status: 'stopped', name };
+            } else {
+                failures += 1;
+                const error = timeoutError || outcome.error;
+                const retryDelay = Math.min(DEFAULT_BACKOFF_INITIAL_MS * (2 ** (failures - 1)), RETRY_MAX_MS);
+                scheduledAt = now() + retryDelay;
+                armed = true;
+                safeLog(logger, 'error', `Deadline 工作 ${name} 執行失敗`, { error, retryDelay });
+                result = { status: timeoutError ? 'timeout' : 'failed', name, error };
+            }
+
+            if (active && !stopping) {
+                if (pending) {
+                    const deferred = pendingDeferred;
+                    pendingDeferred = null;
+                    pending = false;
+                    startExecution().then(deferred.resolve);
+                } else if (armed) scheduleAtDeadline();
+            } else settlePending({ status: stuck ? 'stuck' : 'stopped', name });
+            return result;
+        }
+
+        function startExecution() {
+            if (!active || stopping) return Promise.resolve({ status: stuck ? 'stuck' : 'stopped', name });
+            let execution;
+            execution = execute().finally(() => {
+                if (currentExecution === execution) currentExecution = null;
+            });
+            currentExecution = execution;
+            return execution;
+        }
+
+        function trigger() {
+            if (!active || stopping) return Promise.resolve({ status: stuck ? 'stuck' : 'stopped', name });
+            clearTimer();
+            armed = true;
+            if (!running) return startExecution();
+            pending = true;
+            if (!pendingDeferred) pendingDeferred = createDeferred();
+            return pendingDeferred.promise;
+        }
+
+        function reschedule(nextDeadlineAt) {
+            if (!Number.isFinite(nextDeadlineAt) || nextDeadlineAt < 0) throw new TypeError('deadlineAt 必須是 epoch 毫秒');
+            if (!active || stopping) return false;
+            scheduledAt = nextDeadlineAt;
+            armed = true;
+            if (running) rescheduledDuringRun = true;
+            else scheduleAtDeadline();
+            return true;
+        }
+
+        function stopJob() {
+            if (stopPromiseForJob) return stopPromiseForJob;
+            stopPromiseForJob = (async () => {
+                active = false;
+                armed = false;
+                clearTimer();
+                settlePending({ status: 'stopped', name });
+                currentController?.abort(new Error(`Deadline 工作 ${name} 已停止`));
+                if (currentExecution) await currentExecution;
+            })().finally(() => {
+                if (jobs.get(name)?.stop === stopJob) jobs.delete(name);
+            });
+            return stopPromiseForJob;
+        }
+
+        const job = { trigger, reschedule, stop: stopJob };
+        jobs.set(name, { stop: stopJob });
+        scheduleAtDeadline();
         return job;
     }
 
@@ -323,7 +497,7 @@ function createScheduler({
         signal.addEventListener('abort', appAbortListener, { once: true });
     }
 
-    return { register, stop };
+    return { register, scheduleDeadline, stop };
 }
 
 module.exports = {
