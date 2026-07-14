@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const command = require('../src/commands/ipQuery');
+const { loadConfig } = require('../core/config');
+const command = require('../src/commands/ipQuery').createCommand(loadConfig());
 const { getIPInfo } = require('../util/getIPInfo');
 
 test('IP provider 前置驗證拒絕 hostname 與 URL', async () => {

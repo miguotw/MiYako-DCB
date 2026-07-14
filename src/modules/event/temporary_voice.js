@@ -5,8 +5,7 @@ const path = require('path');
  * 落盤，因此 Bot 重啟後可對照 Discord 現況並恢復倒數。
  */
 const { ChannelType, Events } = require('discord.js');
-const { configModules } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
+const { createLogTools } = require('../../../core/sendLog');
 const {
     addManagedChannel,
     listStoredGuildIDs,
@@ -14,7 +13,11 @@ const {
     removeEntrance,
     removeManagedChannel,
     updateManagedChannel
-} = require(path.join(process.cwd(), 'util/temporaryVoiceStore'));
+} = require('../../../util/temporaryVoiceStore');
+
+function createInitializer(config) {
+const { sendLog } = createLogTools(config);
+const configModules = config.modules;
 
 const timers = new Map();
 const UNKNOWN_CHANNEL_ERROR_CODE = 10003;
@@ -224,27 +227,25 @@ async function handleVoiceStateUpdate(client, oldState, newState) {
     }
 }
 
-module.exports = client => {
-    client.once(Events.ClientReady, async () => {
-        for (const guildID of listStoredGuildIDs()) {
-            const guild = client.guilds.cache.get(guildID);
-            if (!guild) continue;
-            try {
-                await reconcileGuild(client, guild);
-            } catch (error) {
-                sendLog(client, `❌ 恢復伺服器 ${guildID} 的臨時語音頻道時發生錯誤：`, 'ERROR', error);
-            }
+const initializer = async client => {
+    for (const guildID of listStoredGuildIDs()) {
+        const guild = client.guilds.cache.get(guildID);
+        if (!guild) continue;
+        try {
+            await reconcileGuild(client, guild);
+        } catch (error) {
+            sendLog(client, `❌ 恢復伺服器 ${guildID} 的臨時語音頻道時發生錯誤：`, 'ERROR', error);
         }
-        sendLog(client, '✅ 臨時語音頻道管理已啟動。');
-    });
+    }
+    sendLog(client, '✅ 臨時語音頻道管理已啟動。');
 
-    client.on(Events.VoiceStateUpdate, (oldState, newState) => {
+    const voiceListener = (oldState, newState) => {
         handleVoiceStateUpdate(client, oldState, newState).catch(error => {
             sendLog(client, '❌ 處理臨時語音頻道事件時發生錯誤：', 'ERROR', error);
         });
-    });
+    };
 
-    client.on(Events.ChannelDelete, channel => {
+    const channelDeleteListener = channel => {
         if (!channel.guildId) return;
         try {
             const store = loadGuildStore(channel.guildId);
@@ -254,7 +255,20 @@ module.exports = client => {
         } catch (error) {
             sendLog(client, `❌ 同步已刪除的頻道 ${channel.id} 時發生錯誤：`, 'ERROR', error);
         }
-    });
+    };
+
+    client.on(Events.VoiceStateUpdate, voiceListener);
+    client.on(Events.ChannelDelete, channelDeleteListener);
+    return () => {
+        client.off(Events.VoiceStateUpdate, voiceListener);
+        client.off(Events.ChannelDelete, channelDeleteListener);
+        for (const timer of timers.values()) clearTimeout(timer);
+        timers.clear();
+    };
 };
 
-module.exports.buildChannelName = buildChannelName;
+initializer.buildChannelName = buildChannelName;
+return initializer;
+}
+
+module.exports = { createInitializer };

@@ -14,6 +14,13 @@ const { musicValidationError, toYtDlpQuery, normalizeTrack, validateTrack, valid
 
 const DOWNLOAD_URL = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux';
 let updatePromise = null;
+let processManager = null;
+
+/** Runtime 注入集中程序管理器，確保 timeout、取消與關機都能終止完整程序樹。 */
+function setProcessManager(manager) {
+    if (!manager || typeof manager.run !== 'function') throw new TypeError('processManager 必須提供 run。');
+    processManager = manager;
+}
 
 /** 所有 yt-dlp 呼叫都忽略主機與使用者設定，避免部署環境偷偷擴大 extractor 或 proxy 行為。 */
 function createYtDlpArgs(args) {
@@ -29,6 +36,7 @@ function resolveBinaryPath(value = 'assets/music/yt-dlp') {
  * 不回應的子程序。args 必須是陣列，刻意不經 shell 以避免輸入注入。
  */
 function runProcess(command, args, options = {}) {
+    if (processManager) return processManager.run(command, args, options);
     return new Promise((resolve, reject) => {
         const { timeout = 30000, onStdout, onStderr, ...spawnOptions } = options;
         const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], ...spawnOptions });
@@ -219,4 +227,4 @@ async function checkFfmpeg() {
     return runProcess(ffmpegPath, ['-version'], { timeout: 10000 });
 }
 
-module.exports = { ffmpegPath, createYtDlpArgs, resolveBinaryPath, runProcess, shouldCheckUpdate, ensureYtDlp, isExtractorFailure, extractTrack, extractTracks, downloadTrack, deleteTrackFile, checkFfmpeg };
+module.exports = { ffmpegPath, createYtDlpArgs, resolveBinaryPath, runProcess, setProcessManager, shouldCheckUpdate, ensureYtDlp, isExtractorFailure, extractTrack, extractTracks, downloadTrack, deleteTrackFile, checkFfmpeg };

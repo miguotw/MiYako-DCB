@@ -1,12 +1,15 @@
 const path = require('path');
-const { Events } = require('discord.js');
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
+const { createLogTools } = require('../../../core/sendLog');
 const {
     deleteDataCollection, getAllDataCollections, updateDataCollection, withCollectionLock
-} = require(path.join(process.cwd(), 'util/dataCollectionStore'));
+} = require('../../../util/dataCollectionStore');
+const { createDataCollectionViews } = require('../../../util/dataCollectionViews');
+
+function createInitializer(config) {
+const { sendLog } = createLogTools(config);
 const {
     createMentionBatches, createPublicEmbed, deleteAdminPanels, submitRow, syncAdminPanels
-} = require(path.join(process.cwd(), 'util/dataCollectionViews'));
+} = createDataCollectionViews(config);
 
 const CHECK_INTERVAL_MS = 30000;
 let isChecking = false;
@@ -105,24 +108,39 @@ async function processCollection(client, snapshot, now) {
     });
 }
 
-async function checkCollections(client) {
+async function checkCollections(client, signal) {
     if (isChecking) return;
     isChecking = true;
     try {
         const now = Math.floor(Date.now() / 1000);
+        const errors = [];
         for (const record of getAllDataCollections()) {
+            if (signal?.aborted) return;
             try { await processCollection(client, record, now); }
-            catch (error) { sendLog(client, `❌ 處理資料收集 ${record.id} 時發生錯誤：`, 'ERROR', error); }
+            catch (error) {
+                errors.push(error);
+                sendLog(client, `❌ 處理資料收集 ${record.id} 時發生錯誤：`, 'ERROR', error);
+            }
         }
+        if (errors.length) throw new AggregateError(errors, '資料收集排程有工作失敗。');
     } finally { isChecking = false; }
 }
 
-module.exports = client => {
-    client.once(Events.ClientReady, () => {
-        checkCollections(client);
-        setInterval(() => checkCollections(client), CHECK_INTERVAL_MS);
-        sendLog(client, '✅ 資料收集排程已啟動，每 30 秒檢查一次。');
+const initializer = (client, context = {}) => {
+    if (!context.scheduler) throw new Error('資料收集 feature 缺少 scheduler context。');
+    const handle = context.scheduler.register({
+        name: 'dataCollection.check',
+        intervalMs: CHECK_INTERVAL_MS,
+        timeoutMs: 25000,
+        immediate: true,
+        run: ({ signal }) => checkCollections(client, signal)
     });
+    sendLog(client, '✅ 資料收集排程已啟動，每 30 秒檢查一次。');
+    return () => handle.stop();
 };
 
-module.exports._test = { processCollection };
+initializer._test = { processCollection };
+return initializer;
+}
+
+module.exports = { createInitializer };

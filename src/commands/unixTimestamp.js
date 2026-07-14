@@ -1,15 +1,18 @@
 const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, ModalBuilder, TextInputBuilder, ActionRowBuilder, TextInputStyle } = require('discord.js');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply, validationReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { createLogTools } = require('../../core/sendLog');
+const { createReplyTools } = require('../../core/Reply');
 
 // 導入設定檔內容
+function createCommand(config) {
+const { sendLog } = createLogTools(config);
+const { errorReply, validationReply } = createReplyTools(config);
+const configCommands = config.commands;
 const EMBED_COLOR = config.embed.color.default;
 const EMBED_EMOJI = configCommands.unixTimestamp.emoji;
 const TIMEZONE = config.log.timezone;
 
-module.exports = {
+const command = {
     data: new SlashCommandBuilder()
         .setName('時間戳')
         .setDescription('時間戳相關的輔助功能')
@@ -22,7 +25,7 @@ module.exports = {
                 .setName('指定時間')
                 .setDescription('取得指定的 UNIX 時間戳')),
 
-async execute(interaction) {
+    async execute(interaction, context) {
     try {
         const subcommand = interaction.options.getSubcommand();
         if (subcommand === '現在時間') {
@@ -93,7 +96,7 @@ async execute(interaction) {
 };
 
 // 處理 Modal 提交的函式
-module.exports.modalSubmitHandlers = {
+command.modalSubmitHandlers = {
     unixTimestamp_modal: async (interaction) => {
         try {
             const date = interaction.fields.getTextInputValue('dateInput');
@@ -149,3 +152,8 @@ module.exports.modalSubmitHandlers = {
         }
     }
 };
+
+return command;
+}
+
+module.exports = { createCommand };

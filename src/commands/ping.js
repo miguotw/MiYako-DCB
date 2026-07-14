@@ -1,18 +1,21 @@
 const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { createLogTools } = require('../../core/sendLog');
+const { createReplyTools } = require('../../core/Reply');
 
 // 導入設定檔內容
+function createCommand(config) {
+const { sendLog } = createLogTools(config);
+const { errorReply } = createReplyTools(config);
+const configCommands = config.commands;
 const EMBED_COLOR = config.embed.color.default;
 const EMBED_EMOJI = configCommands.ping.emoji;
 
-module.exports = {
+const command = {
     data: new SlashCommandBuilder()
         .setName('延遲')
         .setDescription('測試機器人延遲'),
-    async execute(interaction) {
+    async execute(interaction, context) {
         
         //啟用延遲回覆
         await interaction.deferReply({ ephemeral: true });
@@ -41,3 +44,7 @@ module.exports = {
         }
     }
 };
+return command;
+}
+
+module.exports = { createCommand };

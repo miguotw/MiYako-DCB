@@ -1,7 +1,10 @@
 const path = require('path');
 const { Events } = require('discord.js');
-const { configModules } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
+const { createLogTools } = require('../../../core/sendLog');
+
+function createInitializer(config) {
+const { sendLog } = createLogTools(config);
+const configModules = config.modules;
 
 // 導入設定檔內容
 const COOLDOWN = configModules.keywords.cooldown;
@@ -10,7 +13,7 @@ const CHANNELS = configModules.keywords.channels;
 const TRIGGER_GROUPS = configModules.keywords.triggers;
 const ENABLE = configModules.keywords.enable;
 
-module.exports = (client) => {
+const initializer = (client) => {
     client.on(Events.MessageCreate, async (message) => {
         try {
             // 忽略機器人發送的消息
@@ -66,3 +69,7 @@ module.exports = (client) => {
         }
     });
 };
+return initializer;
+}
+
+module.exports = { createInitializer };

@@ -1,9 +1,12 @@
 const path = require('path');
-const { configModules } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
+const { createLogTools } = require('../../../core/sendLog');
+
+function createInitializer(config) {
+const { sendLog } = createLogTools(config);
+const configModules = config.modules;
 
 // 記錄成員身分組變更
-module.exports = (client) => {
+const initializer = (client) => {
     
     if (configModules.role.enable) {
         client.on('guildMemberUpdate', async (oldMember, newMember) => {
@@ -43,3 +46,7 @@ module.exports = (client) => {
         });
     }
 };
+return initializer;
+}
+
+module.exports = { createInitializer };

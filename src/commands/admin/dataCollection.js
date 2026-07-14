@@ -3,21 +3,27 @@ const {
     ActionRowBuilder, ChannelType, EmbedBuilder, ModalBuilder, PermissionFlagsBits, SlashCommandBuilder,
     TextInputBuilder, TextInputStyle
 } = require('discord.js');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
-const { getAdminCommandPath } = require(path.join(process.cwd(), 'core/commandPolicy'));
-const { errorReply, infoReply, validationReply } = require(path.join(process.cwd(), 'core/Reply'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
+const { createCommandPolicy } = require('../../../core/commandPolicy');
+const { createReplyTools } = require('../../../core/Reply');
+const { createLogTools } = require('../../../core/sendLog');
 const {
     createDataCollection, deleteDataCollection, findDataCollection, getDataCollection,
     updateDataCollection, withCollectionLock
-} = require(path.join(process.cwd(), 'util/dataCollectionStore'));
-const {
-    createMentionBatches, createPublicEmbed, deleteAdminPanels, submitRow, syncAdminPanels
-} = require(path.join(process.cwd(), 'util/dataCollectionViews'));
+} = require('../../../util/dataCollectionStore');
+const { createDataCollectionViews } = require('../../../util/dataCollectionViews');
 const {
     fetchSourceMessage, parseDeadline: parseDeadlineInput,
     parseMentionTargets: parseMentionTargetsInput, resolveMentionedUsers
-} = require(path.join(process.cwd(), 'util/discordCommandInput'));
+} = require('../../../util/discordCommandInput');
+
+function createCommand(config) {
+const { getAdminCommandPath } = createCommandPolicy(config);
+const { errorReply, infoReply, validationReply } = createReplyTools(config);
+const { sendLog } = createLogTools(config);
+const {
+    createMentionBatches, createPublicEmbed, deleteAdminPanels, submitRow, syncAdminPanels
+} = createDataCollectionViews(config);
+const configCommands = config.commands;
 
 function getDataCollectionLimits(settings = {}) {
     return {
@@ -74,7 +80,7 @@ function canManageCollection(interaction, record) {
 
 function privateReply(interaction) { return interaction.inGuild(); }
 
-module.exports = {
+const command = {
     data: new SlashCommandBuilder().setName('資料收集').setDescription('建立資料收集面板')
         .addStringOption(opt => opt.setName('訊息id或連結').setDescription('作為介紹內文的訊息 ID 或連結').setRequired(true))
         .addChannelOption(opt => opt.setName('選擇頻道').setDescription('發送資料收集消息的頻道').addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement).setRequired(true))
@@ -90,7 +96,7 @@ module.exports = {
         .addStringOption(opt => opt.setName('資料4').setDescription('第四個資料欄位的標題').setMinLength(1).setMaxLength(TITLE_MAX_LENGTH))
         .addStringOption(opt => opt.setName('資料5').setDescription('第五個資料欄位的標題').setMinLength(1).setMaxLength(TITLE_MAX_LENGTH)),
 
-    async execute(interaction) {
+    async execute(interaction, context) {
         await interaction.deferReply({ ephemeral: true });
         sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：${getAdminCommandPath('資料收集')}`);
         let record = null;
@@ -244,6 +250,10 @@ module.exports = {
     }
 };
 
-module.exports._test = {
+command._test = {
     buildWhitelist, getDataCollectionLimits, parseDeadline, parseMentionTargets
 };
+return command;
+}
+
+module.exports = { createCommand };

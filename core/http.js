@@ -9,8 +9,105 @@ const RETRYABLE_NETWORK_CODES = new Set([
     'ENOTFOUND', 'EHOSTUNREACH', 'EPIPE', 'ERR_NETWORK', 'ETIMEDOUT', 'ESOCKETTIMEDOUT'
 ]);
 
-function sleep(milliseconds) {
-    return new Promise(resolve => setTimeout(resolve, milliseconds));
+function sleep(milliseconds, signal) {
+    return new Promise((resolve, reject) => {
+        if (signal?.aborted) return reject(getAbortReason(signal));
+        const timer = setTimeout(finish, milliseconds);
+
+        function finish() {
+            signal?.removeEventListener('abort', abort);
+            resolve();
+        }
+
+        function abort() {
+            clearTimeout(timer);
+            signal.removeEventListener('abort', abort);
+            reject(getAbortReason(signal));
+        }
+
+        signal?.addEventListener('abort', abort, { once: true });
+    });
+}
+
+/** 將 AbortSignal 的 reason 正規化為可辨識的取消錯誤。 */
+function getAbortReason(signal) {
+    if (signal?.reason instanceof Error) return signal.reason;
+    const error = new Error('HTTP 請求已取消。');
+    error.name = 'AbortError';
+    error.code = 'ERR_CANCELED';
+    return error;
+}
+
+/**
+ * 合併應用層與單次請求的 AbortSignal，並提供清理函式，避免長時間執行時
+ * 在根 signal 上累積 listener。
+ */
+function mergeSignals(signals) {
+    const validSignals = signals.filter(Boolean);
+    if (validSignals.length === 0) return { signal: undefined, cleanup() {} };
+    if (validSignals.length === 1) return { signal: validSignals[0], cleanup() {} };
+
+    const controller = new AbortController();
+    const listeners = [];
+    const cleanup = () => {
+        for (const [signal, listener] of listeners) signal.removeEventListener('abort', listener);
+        listeners.length = 0;
+    };
+
+    for (const signal of validSignals) {
+        if (signal.aborted) {
+            controller.abort(signal.reason);
+            break;
+        }
+        const listener = () => controller.abort(signal.reason);
+        listeners.push([signal, listener]);
+        signal.addEventListener('abort', listener, { once: true });
+    }
+    if (controller.signal.aborted) cleanup();
+    else controller.signal.addEventListener('abort', cleanup, { once: true });
+    return { signal: controller.signal, cleanup };
+}
+
+/** 即使注入的 sleepFn 不支援 signal，取消也能立即結束邏輯等待。 */
+function waitForRetry(milliseconds, signal, sleepFn) {
+    if (signal?.aborted) return Promise.reject(getAbortReason(signal));
+    if (!signal) return Promise.resolve().then(() => sleepFn(milliseconds));
+
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = (callback, value) => {
+            if (settled) return;
+            settled = true;
+            signal.removeEventListener('abort', abort);
+            callback(value);
+        };
+        const abort = () => finish(reject, getAbortReason(signal));
+        signal.addEventListener('abort', abort, { once: true });
+        Promise.resolve()
+            .then(() => sleepFn(milliseconds, signal))
+            .then(value => finish(resolve, value), error => finish(reject, error));
+    });
+}
+
+/** 等待 transport，確保不合作的測試 adapter 也不會阻塞 HTTP client 關閉。 */
+function dispatchWithSignal(dispatch, config, signal) {
+    if (signal?.aborted) return Promise.reject(getAbortReason(signal));
+    if (!signal) return Promise.resolve().then(() => dispatch(config));
+
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = (callback, value) => {
+            if (settled) return;
+            settled = true;
+            signal.removeEventListener('abort', abort);
+            callback(value);
+        };
+        const abort = () => finish(reject, getAbortReason(signal));
+        signal.addEventListener('abort', abort, { once: true });
+        Promise.resolve()
+            .then(() => dispatch(config))
+            .then(value => finish(resolve, value), error => finish(reject, error));
+    });
 }
 
 function getHeader(headers, name) {
@@ -45,6 +142,7 @@ function createHttpClient({
     transport = axios,
     sleepFn = sleep,
     now = () => Date.now(),
+    signal: rootSignal,
     timeoutMs = DEFAULT_TIMEOUT_MS,
     maxGetRetries = DEFAULT_MAX_GET_RETRIES,
     maxRetryAfterMs = DEFAULT_MAX_RETRY_AFTER_MS
@@ -58,13 +156,22 @@ function createHttpClient({
         const retryLimit = method === 'GET' ? maxGetRetries : 0;
 
         for (let attempt = 0; ; attempt++) {
+            const merged = mergeSignals([rootSignal, requestConfig.signal]);
             try {
-                return await dispatch({ ...requestConfig, method, timeout: timeoutMs });
+                if (merged.signal?.aborted) throw getAbortReason(merged.signal);
+                return await dispatchWithSignal(
+                    dispatch,
+                    { ...requestConfig, method, timeout: timeoutMs, signal: merged.signal },
+                    merged.signal
+                );
             } catch (error) {
+                if (merged.signal?.aborted) throw getAbortReason(merged.signal);
                 if (attempt >= retryLimit || method !== 'GET' || !isRetryableGetError(error)) throw error;
                 const retryAfter = parseRetryAfter(getHeader(error.response?.headers, 'retry-after'), now());
                 if (retryAfter !== null && retryAfter > maxRetryAfterMs) throw error;
-                await sleepFn(retryAfter ?? 500 * (2 ** attempt));
+                await waitForRetry(retryAfter ?? 500 * (2 ** attempt), merged.signal, sleepFn);
+            } finally {
+                merged.cleanup();
             }
         }
     }
@@ -77,12 +184,25 @@ function createHttpClient({
     };
 }
 
-const http = createHttpClient();
+let defaultHttpClient = createHttpClient();
+const http = {
+    request(config) { return defaultHttpClient.request(config); },
+    get(url, config) { return defaultHttpClient.get(url, config); },
+    post(url, data, config) { return defaultHttpClient.post(url, data, config); },
+    patch(url, data, config) { return defaultHttpClient.patch(url, data, config); }
+};
+
+/** Runtime 在建立 root AbortSignal 後替換共用 client；穩定 facade 讓既有 adapter 同步受控。 */
+function setDefaultHttpClient(client) {
+    if (!client || typeof client.request !== 'function') throw new TypeError('預設 HTTP client 必須提供 request。');
+    defaultHttpClient = client;
+}
 
 module.exports = {
     DEFAULT_TIMEOUT_MS,
     createHttpClient,
     http,
     isRetryableGetError,
-    parseRetryAfter
+    parseRetryAfter,
+    setDefaultHttpClient
 };

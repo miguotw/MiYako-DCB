@@ -1,10 +1,14 @@
 const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
-const { getAdminCommandPath } = require(path.join(process.cwd(), 'core/commandPolicy'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply, infoReply, validationReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { createCommandPolicy } = require('../../../core/commandPolicy');
+const { createLogTools } = require('../../../core/sendLog');
+const { createReplyTools } = require('../../../core/Reply');
 
+function createCommand(config) {
+const { getAdminCommandPath } = createCommandPolicy(config);
+const { sendLog } = createLogTools(config);
+const { errorReply, infoReply, validationReply } = createReplyTools(config);
+const configCommands = config.commands;
 // 導入設定檔內容
 const EMBED_COLOR = config.embed.color.default;
 const LOADING_EMOJI = config.emoji.loading;
@@ -41,7 +45,7 @@ async function getMessageChannel(interaction) {
     return channel;
 }
 
-module.exports = {
+const command = {
     data: new SlashCommandBuilder()
         .setName('刪除訊息')
         .setDescription('批量刪除訊息')
@@ -50,7 +54,7 @@ module.exports = {
                 .setDescription(`要刪除的訊息數量 (1~${DELETE_LIMIT})`)
                 .setRequired(true)
         ),
-    async execute(interaction) {
+    async execute(interaction, context) {
 
         //啟用延遲回覆
         await interaction.deferReply({ ephemeral: true });
@@ -129,3 +133,7 @@ module.exports = {
         }
     }
 };
+return command;
+}
+
+module.exports = { createCommand };

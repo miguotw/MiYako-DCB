@@ -45,10 +45,10 @@ userInfo:
 stream:
 
   # Twitch Developer Console 中的 Client ID。
-  twitchClientID: " "
+  twitchClientId: ""
 
   # Twitch Developer Console 中的 Client Secret。
-  twitchClientSecret: " "
+  twitchClientSecret: ""
 
   # 檢查直播狀態的間隔，單位為分鐘。
   checkInterval: 1
@@ -65,6 +65,7 @@ stream:
     - "直播現在開始！別錯過，一起觀看吧！"
     - "開播啦！一起享受這場直播！"
 
+
 #-------------------------------
 # /關於 相關設定：
 about:
@@ -77,7 +78,7 @@ about:
   introduce: "みやこ機器人第三代！\n這是一個基於 discord.js 集合許多功能的綜合型機器人，\n本專案目前仍在積極開發中！"
 
   # 服務提供者，請填入您的 Discord 數字 ID
-  provider: " "
+  provider: "123456789012345678"
 
   # 專案連結
   repository: "https://github.com/miguotw/MiYako-DCB"
@@ -101,7 +102,7 @@ packageTracking:
   emoji: "📦"
 
   # Track.TW API Token，可至會員中心申請。
-  trackTwToken: " "
+  trackTwToken: ""
 
   # 包裹貨態檢查間隔，單位為分鐘。
   checkInterval: 30

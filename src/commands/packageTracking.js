@@ -18,9 +18,13 @@ const {
     TextInputBuilder,
     TextInputStyle
 } = require('discord.js');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply, validationReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { createLogTools } = require('../../core/sendLog');
+const { createReplyTools } = require('../../core/Reply');
+const { createPackageTrackingTools } = require('../../util/getPackageTracking');
+
+function createCommand(config) {
+const { sendLog } = createLogTools(config);
+const { errorReply, validationReply } = createReplyTools(config);
 const {
     getAvailableCarriers,
     detectCarrier,
@@ -42,8 +46,9 @@ const {
     createPackageRecord,
     createHistorySignature,
     createStoredPackageEmbed
-} = require(path.join(process.cwd(), 'util/getPackageTracking'));
+} = createPackageTrackingTools(config);
 
+const configCommands = config.commands;
 const EMBED_COLOR = config.embed.color.default;
 const EMBED_EMOJI = configCommands.packageTracking?.emoji || '📦';
 const MAX_SELECT_OPTIONS = 25;
@@ -624,12 +629,12 @@ async function handleCarrierSelected(interaction) {
 }
 
 // Handler key 必須與按鈕、選單及 Modal 的 customId 冒號前綴一致。
-module.exports = {
+const command = {
     data: new SlashCommandBuilder()
         .setName('物流追蹤')
         .setDescription('開啟物流追蹤管理面板'),
 
-    async execute(interaction) {
+    async execute(interaction, context) {
         return handlePanel(interaction);
     },
 
@@ -733,4 +738,8 @@ module.exports = {
     }
 };
 
-module.exports._test = { createArchivedActionsRows, getScopedUserPackageID, getTargetRecord };
+command._test = { createArchivedActionsRows, getScopedUserPackageID, getTargetRecord };
+return command;
+}
+
+module.exports = { createCommand };

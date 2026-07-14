@@ -1,9 +1,14 @@
 const path = require('path');
 const { ActionRowBuilder, SlashCommandBuilder, StringSelectMenuBuilder } = require('discord.js');
-const { readGuildStore, writeGuildStore } = require(path.join(process.cwd(), 'util/twitchStreamStore'));
-const { getAdminCommandPath } = require(path.join(process.cwd(), 'core/commandPolicy'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { infoReply, validationReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { readGuildStore, writeGuildStore } = require('../../../util/twitchStreamStore');
+const { createCommandPolicy } = require('../../../core/commandPolicy');
+const { createLogTools } = require('../../../core/sendLog');
+const { createReplyTools } = require('../../../core/Reply');
+
+function createCommand(config, { requestTwitchCheck = async () => {} } = {}) {
+const { getAdminCommandPath } = createCommandPolicy(config);
+const { sendLog } = createLogTools(config);
+const { infoReply, validationReply } = createReplyTools(config);
 
 function normalizeTwitchLogin(value) {
     return String(value || '').trim().replace(/^https?:\/\/(?:www\.)?twitch\.tv\//i, '').split(/[/?#]/)[0].toLowerCase();
@@ -34,7 +39,7 @@ async function handleRemoveSelected(interaction) {
     });
 }
 
-module.exports = {
+const command = {
     data: new SlashCommandBuilder()
         .setName('直播通知')
         .setDescription('管理 Twitch 直播通知')
@@ -57,7 +62,7 @@ module.exports = {
             .setName('移除')
             .setDescription('從選單移除已追蹤的 Twitch 頻道')),
 
-    async execute(interaction) {
+    async execute(interaction, context) {
         const store = readGuildStore(interaction.guildId);
         const subcommand = interaction.options.getSubcommand();
         const commandPath = getAdminCommandPath('直播通知', subcommand);
@@ -122,7 +127,7 @@ module.exports = {
             await infoReply(interaction, `已${isOverwrite ? '覆寫' : '新增'}追蹤 **${twitchUserLogin}**，通知將發送至 ${channel}${role ? `，並提及 ${role}` : '，未指定身分組時將提及 @everyone'}。`, {
                 ephemeral: true
             });
-            interaction.client.checkTwitchStreamStatus?.().catch(error => {
+            requestTwitchCheck().catch(error => {
                 sendLog(interaction.client, '❌ 新增設定後立即檢查 Twitch 直播狀態時發生錯誤：', 'ERROR', error);
             });
             return;
@@ -134,3 +139,7 @@ module.exports = {
         twitch_stream_remove: handleRemoveSelected
     }
 };
+return command;
+}
+
+module.exports = { createCommand };

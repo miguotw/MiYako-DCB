@@ -1,11 +1,11 @@
 # MiYako-DCB
 
-MiYako-DCB（みやこ機器人第三代）是以 [discord.js](https://discord.js.org/) v14 製作的多功能 Discord Bot。專案使用 CommonJS、單一 Node.js 程序與本機 JSON 持久化；啟動時會自動探索指令及事件模組，並覆寫全域 Application Commands。
+MiYako-DCB（みやこ機器人第三代）是以 [discord.js](https://discord.js.org/) v14 製作的多功能 Discord Bot。專案使用 CommonJS、單一 Node.js 程序與本機 JSON 持久化；功能由 manifest 載入，Bot runtime 與 Application Commands 發布已完全分離。
 
 這份文件同時是部署說明與後續需求的專案基礎知識。開始修改前，至少先閱讀「架構與載入流程」、「強制開發規範」和「共用工具索引」。
 
 > [!IMPORTANT]
-> - 所有命令都必須從儲存庫根目錄執行，否則設定與資料路徑會失效。
+> - 執行期資料目前仍以儲存庫根目錄為基準；設定檔則固定由專案根目錄解析，測試可用 `MIYAKO_CONFIG_DIR` 覆寫。
 > - 除指令本身用來呈現功能內容的 Embed 外，成功、失敗、驗證不通過與執行錯誤等狀態消息，一律使用 `core/Reply.js` 的樣式，以 Embed 回覆。
 > - 新增解析器、資料存取、API adapter、view builder 或播放器邏輯前，必須先搜尋 `util/`；已有能力應直接重用或擴充，不得重複實作。
 > - 新增設定欄位時同步更新 `config_example/`；新增或改變功能時同步更新測試與本文件。
@@ -32,7 +32,7 @@ MiYako-DCB（みやこ機器人第三代）是以 [discord.js](https://discord.j
 | `/admin 抽選系統` | 建立到期後可自動開獎的抽選公告 | 管理員建立，一般用戶操作公開按鈕 |
 | `/admin 資料收集` | 建立白名單限定、可覆寫提交的資料收集面板 | 管理員建立，一般用戶操作公開按鈕 |
 
-`/admin` 是 `config.yml` 的 `Startup.adminCommandName` 預設值，可依部署環境更名，因此程式不得硬編碼管理指令路徑。
+`/admin` 是 `config.yml` 的 `startup.adminCommandName` 預設值，可依部署環境更名，因此程式不得硬編碼管理指令路徑。
 
 ### 自動事件與日誌
 
@@ -53,7 +53,7 @@ MiYako-DCB（みやこ機器人第三代）是以 [discord.js](https://discord.j
 - Discord Bot Token 與 Application ID。
 - 視啟用功能需要：Twitch Developer 憑證、Track.TW API Token。
 
-Bot 使用下列 Gateway Intents：`Guilds`、`GuildMessages`、`MessageContent`、`GuildMembers`、`GuildVoiceStates`、`DirectMessages`。請在 Discord Developer Portal 啟用 **Server Members Intent** 與 **Message Content Intent**。
+Bot 依啟用的 feature 推導 Gateway Intents；預設完整功能使用 `Guilds`、`GuildMessages`、`MessageContent`、`GuildMembers`、`GuildVoiceStates`。請在 Discord Developer Portal 啟用 **Server Members Intent** 與 **Message Content Intent**。
 
 邀請 Bot 時需依功能授予檢視頻道、讀取歷史訊息、發送訊息、嵌入連結、附加檔案、加入／發言於語音頻道、管理訊息等權限。臨時語音功能另需管理頻道與移動成員權限。
 
@@ -65,19 +65,28 @@ cd MiYako-DCB
 nvm use
 npm install
 cp -R config_example config
+chmod 600 config/config.yml config/configCommands.yml config/configModules.yml
 ```
 
-接著編輯 `config/` 內三份 YAML，再從專案根目錄啟動：
+接著編輯 `config/` 內三份 YAML。先發布 Slash Commands：
 
 ```bash
-node index.js
+npm run deploy:commands -- --scope guild --guild-id <測試伺服器ID>
+# 或正式發布至全域
+npm run deploy:commands -- --scope global
 ```
 
-專案目前沒有 `npm start` 或開發伺服器腳本。`npm install` 會由 `ffmpeg-static` 安裝符合平台與架構的 FFmpeg；請勿跨平台複製 `node_modules`。
+再啟動只負責登入與執行功能的 Bot runtime：
+
+```bash
+npm start
+```
+
+`npm start` 不會新增、更新或刪除 Application Commands。`npm install` 會由 `ffmpeg-static` 安裝符合平台與架構的 FFmpeg；請勿跨平台複製 `node_modules`。
 
 音樂模組首次啟動會下載 yt-dlp 至 `assets/music/yt-dlp`，並定期執行更新檢查。內建下載網址目前是 Linux binary；非 Linux 部署應先準備相容的 yt-dlp 執行檔，並以 `configCommands.yml` 的 `music.ytDlpPath` 指向它。`assets/music/` 必須可寫。
 
-啟動會對 `Routes.applicationCommands(clientID)` PUT 完整指令清單，也就是覆寫全域指令；更新可能不會立即出現在所有伺服器。不要把 `node index.js` 當成無副作用的本機檢查命令。
+全域發布可能不會立即出現在所有伺服器；開發時優先使用 guild scope。部署 CLI 僅更新指定 scope，不會登入 Bot 或啟動排程。
 
 ## 設定檔
 
@@ -89,9 +98,11 @@ node index.js
 | `configCommands.yml` | 各 Slash Command、音樂、Twitch、Track.TW 與其他第三方服務設定 |
 | `configModules.yml` | 成員事件、訊息／身分組／語音日誌、關鍵字規則、臨時語音清理時間 |
 
-`core/config.js` 會在模組載入時同步讀取 `./config/*.yml`，因此：
+`core/config.js` 會從專案根目錄一次讀取、以 Zod 驗證三份 YAML，並合併為 `{ startup, log, embed, emoji, commands, modules }`：
 
-- 工作目錄必須是儲存庫根目錄。
+- 所有區段與鍵使用 camelCase，未知鍵、錯誤型別及超界值會拒絕啟動。
+- POSIX 上三份檔案權限必須精確為 `0600`。
+- 測試使用 `MIYAKO_CONFIG_DIR` 指向臨時 fixture，不讀取真正 secrets。
 - 修改設定後必須重新啟動程序。
 - 新增設定時必須同時提供安全、可理解的 `config_example/` 預設值與註解。
 - `config/`、Token、API Token 與 Secret 不得提交；專案目前沒有從 `.env` 載入設定。
@@ -101,13 +112,17 @@ node index.js
 ```text
 MiYako-DCB/
 ├── .nvmrc                         # 開發用 Node.js 版本
-├── index.js                       # Client、載入器、全域指令註冊、互動分派、登入
+├── index.js                       # Runtime entrypoint 與 signal handler
 ├── core/
-│   ├── config.js                  # 同步解析三份 YAML
+│   ├── config.js                  # Zod 設定載入與 0600 檢查
+│   ├── runtime.js                 # Client 啟動、回滾與 graceful shutdown
+│   ├── router.js                  # O(1) Interaction registries
+│   ├── scheduler.js               # 可取消、無重疊的共用排程器
 │   ├── Reply.js                   # 統一成功／失敗／錯誤狀態 Embed
 │   ├── commandPolicy.js           # 管理指令聚合、權限政策與動態路徑
 │   └── sendLog.js                 # 終端與 Discord 頻道日誌
 ├── src/
+│   ├── features/                  # Manifest、Intents 與功能生命週期
 │   ├── commands/                  # 一般 Slash Commands
 │   │   └── admin/                 # 聚合到可設定的 /admin 根指令
 │   └── modules/
@@ -131,32 +146,33 @@ MiYako-DCB/
 
 ## 架構與載入流程
 
-1. `index.js` 設定 `global.crypto`、載入 core/util，並以必要 Intents 建立 Discord `Client`。
-2. `loadModules('./src/modules')` 遞迴 `require` 每個 `.js`，呼叫其匯出的 `module(client)` 註冊事件或 ready 排程。
-3. `loadCommands('./src/commands')` 遞迴載入指令；一般指令加入 `client.commands` 與 REST 註冊清單，Modal handlers 合併至 Client。
-4. `src/commands/admin/` 中的指令先套用管理員政策，再聚合成一個可設定名稱的根指令。
-5. 程式啟動全域指令註冊的非同步工作，安裝 `interactionCreate`／`ready` listeners，接著呼叫 `client.login()`；登入不會等待 REST 註冊先完成。
-6. `interactionCreate` 依 Slash Command、Modal、Button、String Select Menu 分派至對應 handler；最外層例外由 `errorReply` 回覆。
-7. Client ready 後設定 Hitokoto 活動狀態，各事件模組也啟動恢復工作與輪詢排程。
-
-`src/modules/` 與 `src/commands/` 沒有集中式功能開關：放入其中的每個 `.js` 都會在啟動時載入。功能停用條件必須由設定與模組本身處理。
+1. `loadConfig()` 由專案根目錄讀取並嚴格驗證設定。
+2. Feature manifests 宣告 commands、interaction descriptors、Intents、`start()` 與 `stop()`。
+3. Command catalog 在建立 Client 前檢查重複名稱與 handler namespace 衝突，並聚合 `/admin`。
+4. Runtime 以 enabled manifests 的最小 Intents 建立 Client，中央 Router 以 O(1) registry 分派 Slash、Modal、Button 與 Select。
+5. Client ready 後依序啟動 features；任何啟動錯誤會反向停止已啟動功能。
+6. SIGINT／SIGTERM 會停止新互動、取消 HTTP、停止 scheduler、終止子程序樹、保存音樂快照，再反向停止 features、關閉語音與 Discord Client。
 
 ### 指令模組契約
 
-一般指令至少匯出：
+一般指令以 factory 接收已驗證設定，避免在 module scope 讀取真實設定：
 
 ```js
-module.exports = {
-    data: new SlashCommandBuilder()
-        .setName('範例')
-        .setDescription('範例指令'),
-    async execute(interaction) {
-        // 指令處理
-    }
-};
+function createCommand(config) {
+    return {
+        data: new SlashCommandBuilder()
+            .setName('範例')
+            .setDescription('範例指令'),
+        async execute(interaction, context) {
+            // 指令處理
+        }
+    };
+}
+
+module.exports = { createCommand };
 ```
 
-同一匯出物件可選擇加入 handler map：
+既有 command 模組仍可匯出下列 handler map，由 feature manifest 轉成中央 Router descriptor：
 
 | 欄位 | 互動類型 |
 | --- | --- |
@@ -164,11 +180,11 @@ module.exports = {
 | `buttonHandlers` | Button |
 | `componentHandlers` | String Select Menu |
 
-每個 map 的格式為 `{ [customId]: async interaction => {} }`。分派器會先比對完整 `customId`，再退回冒號前綴，因此 `feature_action:<recordID>` 應以 `feature_action` 作為 handler key。所有指令共享互動 ID 命名空間；新功能應使用明確的功能前綴並避免碰撞。
+新功能應直接在 manifest 宣告 `{ kind, id, match: 'exact'|'prefix', access: 'public'|'admin', execute }`。Prefix 只匹配 `id:<非空 payload>`；同 interaction 類型的重複、exact/prefix 覆蓋或 admin/public namespace 衝突都會讓啟動失敗。
 
 ### 管理指令政策
 
-`core/commandPolicy.js` 對 `src/commands/admin/` 套用下列規則：
+`core/commandCatalog.js` 對管理指令套用下列規則；`core/commandPolicy.js` 只負責依設定組合顯示路徑：
 
 - 沒有子指令的模組聚合成 `/<adminName> <command>`。
 - 已包含子指令的模組聚合成 `/<adminName> <group> <subcommand>`，只允許一層子指令。
@@ -190,14 +206,20 @@ module.exports = {
 標準 Interaction 回覆：
 
 ```js
-const path = require('path');
-const { errorReply, infoReply, validationReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { createReplyTools } = require('../../core/Reply');
 
-try {
-    if (!isValid) return validationReply(interaction, '**設定內容不正確。**', { ephemeral: true });
-    return infoReply(interaction, '**設定已儲存。**');
-} catch (error) {
-    return errorReply(interaction, error, { context: '儲存設定' });
+function createCommand(config) {
+    const { errorReply, infoReply, validationReply } = createReplyTools(config);
+    return {
+        async execute(interaction, context) {
+            try {
+                if (!isValid) return validationReply(interaction, '**設定內容不正確。**', { ephemeral: true });
+                return infoReply(interaction, '**設定已儲存。**');
+            } catch (error) {
+                return errorReply(interaction, error, { context: '儲存設定' });
+            }
+        }
+    };
 }
 ```
 
@@ -213,7 +235,8 @@ try {
 需要元件的狀態回覆仍應使用 builder，而不是重新製作樣式：
 
 ```js
-const { infoReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { createReplyTools } = require('../../core/Reply');
+const { infoReply } = createReplyTools(config);
 
 return infoReply(interaction, '**設定已移除。**', {
     method: 'update',
@@ -339,9 +362,11 @@ Reply 的互動生命週期注意事項：
 
 ## 開發與驗證
 
-專案唯一的 npm script 是：
+常用 npm scripts：
 
 ```bash
+npm start
+npm run deploy:commands -- --scope guild --guild-id <ID>
 npm test
 ```
 
@@ -357,7 +382,7 @@ find . -path ./node_modules -prune -o -name '*.js' -print -exec node --check {} 
 npm test
 ```
 
-只有在確定可以覆寫測試 Application 的全域指令、連線 Discord 並啟動排程時，才以 `node index.js` 做整合驗證。
+`npm start` 會連線 Discord 並啟動排程，但不會改動 Application Commands；發布指令仍須明確執行 `deploy:commands`。
 
 ## 授權
 

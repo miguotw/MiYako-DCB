@@ -1,16 +1,20 @@
 const path = require('path');
 const { ChannelType, SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
-const { getAdminCommandPath } = require(path.join(process.cwd(), 'core/commandPolicy'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply, infoReply, validationReply } = require(path.join(process.cwd(), 'core/Reply'));
-const { fetchSourceMessage } = require(path.join(process.cwd(), 'util/discordCommandInput'));
+const { createCommandPolicy } = require('../../../core/commandPolicy');
+const { createLogTools } = require('../../../core/sendLog');
+const { createReplyTools } = require('../../../core/Reply');
+const { fetchSourceMessage } = require('../../../util/discordCommandInput');
 
+function createCommand(config) {
+const { getAdminCommandPath } = createCommandPolicy(config);
+const { sendLog } = createLogTools(config);
+const { errorReply, infoReply, validationReply } = createReplyTools(config);
+const configCommands = config.commands;
 // 導入設定檔內容
 const EMBED_COLOR = config.embed.color.default;
 const EMBED_EMOJI = configCommands.announcement.emoji;
 
-module.exports = {
+const command = {
     data: new SlashCommandBuilder()
         .setName('發送公告')
         .setDescription('發送公告到指定頻道並提及指定身分組')
@@ -31,7 +35,7 @@ module.exports = {
                 .setDescription('請選擇要提及的身分組')
                 .setRequired(false) // 設為非必填
         ),
-    async execute(interaction) {
+    async execute(interaction, context) {
         
         // 公告本體會發送到目標頻道；操作結果僅需讓執行指令的管理員看見。
         await interaction.deferReply({ ephemeral: true });
@@ -88,3 +92,7 @@ module.exports = {
         }
     }
 };
+return command;
+}
+
+module.exports = { createCommand };

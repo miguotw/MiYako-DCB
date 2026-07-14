@@ -1,9 +1,12 @@
 const path = require('path');
-const { configModules } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
+const { createLogTools } = require('../../../core/sendLog');
+
+function createInitializer(config) {
+const { sendLog } = createLogTools(config);
+const configModules = config.modules;
 
 // 記錄訊息
-module.exports = (client) => {
+const initializer = (client) => {
     // 記錄新訊息
     if (configModules.message.enable.create) {
         client.on('messageCreate', (message) => {
@@ -31,3 +34,7 @@ module.exports = (client) => {
         });
     }
 };
+return initializer;
+}
+
+module.exports = { createInitializer };

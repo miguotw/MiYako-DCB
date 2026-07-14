@@ -1,8 +1,11 @@
 const path = require('path');
-const { Events } = require('discord.js');
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { deleteRaffle, drawWinners, getAllRaffles, updateRaffle } = require(path.join(process.cwd(), 'util/raffleStore'));
-const { createRaffleEmbed, participationRow } = require(path.join(process.cwd(), 'util/raffleViews'));
+const { createLogTools } = require('../../../core/sendLog');
+const { deleteRaffle, drawWinners, getAllRaffles, updateRaffle } = require('../../../util/raffleStore');
+const { createRaffleViews } = require('../../../util/raffleViews');
+
+function createInitializer(config) {
+const { sendLog } = createLogTools(config);
+const { createRaffleEmbed, participationRow } = createRaffleViews(config);
 
 const CHECK_INTERVAL_MS = 30000;
 let isChecking = false;
@@ -59,12 +62,14 @@ async function closeRegistration(client, raffle) {
     sendLog(client, `✅ 抽選 ${closed.id} 已截止登記，自動抽選未啟用。`);
 }
 
-async function checkRaffles(client) {
+async function checkRaffles(client, signal) {
     if (isChecking) return;
     isChecking = true;
     try {
         const now = Math.floor(Date.now() / 1000);
+        const errors = [];
         for (const raffle of getAllRaffles()) {
+            if (signal?.aborted) return;
             try {
                 if (raffle.messageID) {
                     if (!await announcementExists(client, raffle)) {
@@ -86,20 +91,31 @@ async function checkRaffles(client) {
                     else await closeRegistration(client, raffle);
                 }
             } catch (error) {
+                errors.push(error);
                 sendLog(client, `❌ 處理抽選 ${raffle.id} 時發生錯誤：`, 'ERROR', error);
             }
         }
+        if (errors.length) throw new AggregateError(errors, '抽選排程有工作失敗。');
     } finally {
         isChecking = false;
     }
 }
 
-module.exports = client => {
-    client.once(Events.ClientReady, () => {
-        checkRaffles(client);
-        setInterval(() => checkRaffles(client), CHECK_INTERVAL_MS);
-        sendLog(client, '✅ 抽選系統排程已啟動，每 30 秒檢查一次。');
+const initializer = (client, context = {}) => {
+    if (!context.scheduler) throw new Error('抽選 feature 缺少 scheduler context。');
+    const handle = context.scheduler.register({
+        name: 'raffle.check',
+        intervalMs: CHECK_INTERVAL_MS,
+        timeoutMs: 25000,
+        immediate: true,
+        run: ({ signal }) => checkRaffles(client, signal)
     });
+    sendLog(client, '✅ 抽選系統排程已啟動，每 30 秒檢查一次。');
+    return () => handle.stop();
 };
 
-module.exports._test = { finishRaffle };
+initializer._test = { finishRaffle };
+return initializer;
+}
+
+module.exports = { createInitializer };

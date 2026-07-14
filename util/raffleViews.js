@@ -1,6 +1,7 @@
-const path = require('path');
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
+
+function createRaffleViews(config) {
+const configCommands = config.commands;
 
 const EMOJI = configCommands.raffle?.emoji || '🎁';
 const COLOR = config.embed.color.default;
@@ -52,4 +53,7 @@ function createRaffleEmbed(raffle, closed = false) {
     return embed;
 }
 
-module.exports = { createRaffleEmbed, participationRow };
+return { createRaffleEmbed, participationRow };
+}
+
+module.exports = { createRaffleViews };

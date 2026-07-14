@@ -83,3 +83,66 @@ test('Retry-After 支援秒數與 HTTP 日期', () => {
     assert.equal(parseRetryAfter('Thu, 01 Jan 1970 00:00:05 GMT', 1000), 4000);
     assert.equal(parseRetryAfter('invalid', 0), null);
 });
+
+test('HTTP client 合併根層與單次請求 signal，任一取消都會中止等待中的 transport', async () => {
+    const root = new AbortController();
+    const request = new AbortController();
+    let receivedConfig;
+    let markStarted;
+    const started = new Promise(resolve => { markStarted = resolve; });
+    const client = createHttpClient({
+        signal: root.signal,
+        transport: config => {
+            receivedConfig = config;
+            markStarted();
+            return new Promise(() => {});
+        }
+    });
+
+    const pending = client.get('https://example.test', { signal: request.signal });
+    await started;
+    assert.notEqual(receivedConfig.signal, root.signal);
+    assert.notEqual(receivedConfig.signal, request.signal);
+
+    const reason = new Error('request shutdown');
+    request.abort(reason);
+    await assert.rejects(pending, error => error === reason);
+    assert.equal(root.signal.aborted, false);
+});
+
+test('根層 signal 已取消時不送出請求', async () => {
+    const root = new AbortController();
+    const reason = new Error('application shutdown');
+    root.abort(reason);
+    let attempts = 0;
+    const client = createHttpClient({
+        signal: root.signal,
+        transport: async () => { attempts += 1; }
+    });
+
+    await assert.rejects(client.get('https://example.test'), error => error === reason);
+    assert.equal(attempts, 0);
+});
+
+test('Retry-After／退避 sleep 可被 request signal 立即取消', async () => {
+    const controller = new AbortController();
+    let attempts = 0;
+    let markSleeping;
+    const sleeping = new Promise(resolve => { markSleeping = resolve; });
+    const client = createHttpClient({
+        transport: async () => {
+            attempts += 1;
+            throw Object.assign(new Error('reset'), { code: 'ECONNRESET' });
+        },
+        sleepFn: async () => {
+            markSleeping();
+            return new Promise(() => {});
+        }
+    });
+
+    const pending = client.get('https://example.test', { signal: controller.signal });
+    await sleeping;
+    controller.abort();
+    await assert.rejects(pending, error => error.name === 'AbortError');
+    assert.equal(attempts, 1);
+});

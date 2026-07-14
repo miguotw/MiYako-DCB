@@ -1,17 +1,20 @@
 const path = require('path');
 const fs = require('fs');
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply, validationReply } = require(path.join(process.cwd(), 'core/Reply'));
-const { getServerStatus } = require(path.join(process.cwd(), 'util/getServerStatus'));
+const { createLogTools } = require('../../core/sendLog');
+const { createReplyTools } = require('../../core/Reply');
+const { getServerStatus } = require('../../util/getServerStatus');
 
 // 導入設定檔內容
+function createCommand(config) {
+const { sendLog } = createLogTools(config);
+const { errorReply, validationReply } = createReplyTools(config);
+const configCommands = config.commands;
 const EMBED_COLOR = config.embed.color.default;
 const EMBED_EMOJI = configCommands.minecraft.emoji;
 const DEFAULT_SERVERS = configCommands.minecraft.defaultServer;
 
-module.exports = {
+const command = {
     data: new SlashCommandBuilder()
         .setName('麥塊')
         .setDescription('麥塊相關的輔助功能')
@@ -43,7 +46,7 @@ module.exports = {
                             .setDescription('手動輸入伺服器 IP 位址')
                             .setRequired(false))),
 
-    async execute(interaction) {
+    async execute(interaction, context) {
         const subcommand = interaction.options.getSubcommand();
 
         //啟用延遲回覆
@@ -161,3 +164,7 @@ module.exports = {
         }
     }
 };
+return command;
+}
+
+module.exports = { createCommand };

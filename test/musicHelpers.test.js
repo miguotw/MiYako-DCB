@@ -9,6 +9,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { saveGuildQueue, loadAllGuildQueues, deleteGuildQueue } = require('../util/musicQueueStore');
+const { getGuildState, guildStates, shutdownAllPlayers } = require('../util/musicPlayer');
 
 test('網址原樣傳入，標題使用 ytsearch1', () => {
     assert.deepEqual(toYtDlpQuery('https://youtu.be/abc'), { query: 'https://youtu.be/abc', isUrl: true });
@@ -98,5 +99,21 @@ test('每個伺服器使用獨立的序列 JSON', () => {
     saveGuildQueue(guildID, { current: { title: 'Test' }, queue: [] });
     const snapshot = loadAllGuildQueues().find(item => item.guildID === guildID);
     assert.equal(snapshot.current.title, 'Test');
+    deleteGuildQueue(guildID);
+});
+
+test('graceful shutdown 保留目前歌曲與序列快照', () => {
+    const guildID = '888888888888888888';
+    const state = getGuildState(guildID, {}, {});
+    state.voiceChannelID = '777777777777777777';
+    state.current = { title: 'Current', url: 'https://youtu.be/current', localPath: '/tmp/current.webm' };
+    state.queue = [{ title: 'Next', url: 'https://youtu.be/next', localPath: '/tmp/next.webm' }];
+
+    shutdownAllPlayers();
+    const snapshot = loadAllGuildQueues().find(item => item.guildID === guildID);
+    assert.equal(snapshot.current.title, 'Current');
+    assert.equal(snapshot.queue[0].title, 'Next');
+
+    guildStates.delete(guildID);
     deleteGuildQueue(guildID);
 });

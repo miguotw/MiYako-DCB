@@ -25,7 +25,8 @@ function createGuildState(guildID, options, hooks) {
         current: null, queue: [], resource: null, panelMessage: null, panelChannel: null,
         progressTimer: null, recoveryTimer: null, inactivityTimer: null,
         voiceChannel: null, starting: false, preparingTracks: 0,
-        paused: false, resumeAfterRecovery: false, resumeOffsetSeconds: 0
+        paused: false, resumeAfterRecovery: false, resumeOffsetSeconds: 0,
+        shuttingDown: false
     };
     player.on(AudioPlayerStatus.Idle, () => finishCurrent(state));
     player.on('error', error => failCurrent(state, error));
@@ -240,6 +241,7 @@ async function playNext(state) {
 
 /** 正常 Idle：清理音訊檔、重設 current，再消費下一首。 */
 async function finishCurrent(state) {
+    if (state.shuttingDown) return;
     if (!state.current || state.starting) return;
     stopProgressUpdates(state);
     deleteTrackFile(state.current);
@@ -250,6 +252,7 @@ async function finishCurrent(state) {
 
 /** 播放失敗不阻塞序列：通知面板、刪除失敗曲目後繼續下一首。 */
 async function failCurrent(state, error) {
+    if (state.shuttingDown) return;
     if (!state.current) return;
     const failed = state.current;
     stopProgressUpdates(state);
@@ -375,5 +378,30 @@ function cleanupState(state, remove = false) {
     state.current = null; state.queue = []; state.resumeAfterRecovery = false; deleteGuildQueue(state.guildID);
     if (remove) guildStates.delete(state.guildID);
 }
+
+/** 在關閉語音前同步保存所有 guild 的 current、queue 與播放進度。 */
+function snapshotAllGuildStates() {
+    for (const state of guildStates.values()) persistState(state);
+}
+
+/**
+ * 關機專用清理：先設 shuttingDown 阻止 AudioPlayer Idle 消費序列，再停止 timer、
+ * player 與語音連線。此流程刻意保留 cache 與 snapshot，供下次啟動恢復。
+ */
+function shutdownAllPlayers() {
+    snapshotAllGuildStates();
+    for (const state of guildStates.values()) {
+        state.shuttingDown = true;
+        stopProgressUpdates(state);
+        if (state.recoveryTimer) clearTimeout(state.recoveryTimer);
+        state.recoveryTimer = null;
+        clearInactivityTimer(state);
+        state.player.stop(true);
+        state.resource?.playStream?.destroy?.();
+        state.connection?.destroy();
+        state.connection = null;
+        state.voiceChannel = null;
+    }
+}
 function isCurrentPanel(state, messageID) { return Boolean(state.panelMessage?.id && state.panelMessage.id === messageID); }
-module.exports = { guildStates, getGuildState, enqueue, togglePause, skipCurrent, cleanupState, isCurrentPanel, elapsedSeconds, restoreGuildState, handleVoiceStateUpdate, removeQueuedTracks, clearQueue, beginTrackPreparation, endTrackPreparation };
+module.exports = { guildStates, getGuildState, enqueue, togglePause, skipCurrent, cleanupState, snapshotAllGuildStates, shutdownAllPlayers, isCurrentPanel, elapsedSeconds, restoreGuildState, handleVoiceStateUpdate, removeQueuedTracks, clearQueue, beginTrackPreparation, endTrackPreparation };

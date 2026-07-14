@@ -10,18 +10,21 @@ const {
     SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
     ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, StringSelectMenuBuilder
 } = require('discord.js');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
-const { errorReply, validationReply } = require(path.join(process.cwd(), 'core/Reply'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { extractTracks, downloadTrack, deleteTrackFile } = require(path.join(process.cwd(), 'util/ytDlpManager'));
-const { getGuildState, enqueue, togglePause, skipCurrent, isCurrentPanel, elapsedSeconds, restoreGuildState, removeQueuedTracks, clearQueue, beginTrackPreparation, endTrackPreparation } = require(path.join(process.cwd(), 'util/musicPlayer'));
-const { loadAllGuildQueues } = require(path.join(process.cwd(), 'util/musicQueueStore'));
+const { createReplyTools } = require('../../core/Reply');
+const { createLogTools } = require('../../core/sendLog');
+const { extractTracks, downloadTrack, deleteTrackFile } = require('../../util/ytDlpManager');
+const { getGuildState, enqueue, togglePause, skipCurrent, isCurrentPanel, elapsedSeconds, restoreGuildState, removeQueuedTracks, clearQueue, beginTrackPreparation, endTrackPreparation } = require('../../util/musicPlayer');
+const { loadAllGuildQueues } = require('../../util/musicQueueStore');
 const {
     formatDuration, getUploadYear, createProgressBar, paginateQueue,
     isMusicValidationError, musicValidationError
-} = require(path.join(process.cwd(), 'util/musicHelpers'));
-const { getLatestMusicPanel, getAllLatestMusicPanels, saveLatestMusicPanel } = require(path.join(process.cwd(), 'util/musicPanelStore'));
+} = require('../../util/musicHelpers');
+const { getLatestMusicPanel, getAllLatestMusicPanels, saveLatestMusicPanel } = require('../../util/musicPanelStore');
 
+function createCommand(config) {
+const { errorReply, validationReply } = createReplyTools(config);
+const { sendLog } = createLogTools(config);
+const configCommands = config.commands;
 const MUSIC_CONFIG = configCommands.music || {};
 const configuredMaxDurationMinutes = Number(MUSIC_CONFIG.maxDurationMinutes);
 const configuredMinDurationMinutes = Number(MUSIC_CONFIG.minDurationMinutes);
@@ -263,11 +266,11 @@ async function handleQueuePage(interaction) {
 }
 
 // `index.js` 依下列 handler map 的 customId（冒號前綴）分派互動。
-module.exports = {
+const command = {
     data: new SlashCommandBuilder().setName('音樂').setDescription('音樂播放相關功能')
         .setDMPermission(false)
         .addSubcommand(command => command.setName('管理面板').setDescription('開啟音樂管理面板')),
-    async execute(interaction) {
+    async execute(interaction, context) {
         try {
             requireGuildVoice(interaction);
             const state = getState(interaction.guildId, interaction.client);
@@ -410,3 +413,7 @@ module.exports = {
     },
     restorePersistedPlayback
 };
+return command;
+}
+
+module.exports = { createCommand };

@@ -1,7 +1,9 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const command = require('../src/commands/packageTracking');
-const { createPackageNotificationActionsRows } = require('../util/getPackageTracking');
+const { loadConfig } = require('../core/config');
+const config = loadConfig();
+const command = require('../src/commands/packageTracking').createCommand(config);
+const { createPackageNotificationActionsRows } = require('../util/getPackageTracking').createPackageTrackingTools(config);
 
 test('所有既有包裹操作按鈕都攜帶 package ID', () => {
     const record = { userPackageID: 'package-1' };

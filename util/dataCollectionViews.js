@@ -2,8 +2,10 @@ const path = require('path');
 const {
     ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, escapeMarkdown
 } = require('discord.js');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
-const { updateDataCollection } = require(path.join(process.cwd(), 'util/dataCollectionStore'));
+const { updateDataCollection } = require('./dataCollectionStore');
+
+function createDataCollectionViews(config) {
+const configCommands = config.commands;
 
 const COLOR = config.embed.color.default;
 const EMOJI = configCommands.dataCollection?.emoji || '📝';
@@ -133,7 +135,10 @@ async function deleteAdminPanels(client, record) {
     }
 }
 
-module.exports = {
+return {
     createMentionBatches, createPublicEmbed, createSubmissionLines, deleteAdminPanels, paginateLines,
     sanitizeCell, submitRow, syncAdminPanels
 };
+}
+
+module.exports = { createDataCollectionViews };

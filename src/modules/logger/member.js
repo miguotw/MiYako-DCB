@@ -1,10 +1,13 @@
 const path = require('path');
 const { Events } = require('discord.js');
-const { configModules } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
+const { createLogTools } = require('../../../core/sendLog');
+
+function createInitializer(config) {
+const { sendLog } = createLogTools(config);
+const configModules = config.modules;
 
 // 成員加入與離開
-module.exports = (client) => {
+const initializer = (client) => {
 
     if (configModules.member.enable) {
         //成員加入
@@ -27,3 +30,7 @@ module.exports = (client) => {
 
     }
 };
+return initializer;
+}
+
+module.exports = { createInitializer };

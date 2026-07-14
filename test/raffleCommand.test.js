@@ -1,8 +1,10 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { _test } = require('../src/commands/admin/raffle');
-const { createRaffleEmbed, participationRow } = require('../util/raffleViews');
-const command = require('../src/commands/admin/raffle');
+const { loadConfig } = require('../core/config');
+const config = loadConfig();
+const command = require('../src/commands/admin/raffle').createCommand(config);
+const { _test } = command;
+const { createRaffleEmbed, participationRow } = require('../util/raffleViews').createRaffleViews(config);
 
 test('抽選系統本身沒有建立抽選子指令', () => {
     const json = command.data.toJSON();

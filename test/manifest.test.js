@@ -1,0 +1,137 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+const { GatewayIntentBits } = require('discord.js');
+const { buildCommandCatalog } = require('../core/commandCatalog');
+const { loadConfig } = require('../core/config');
+const { createFeatureManifests } = require('../src/features');
+
+function disabledLoggerConfig() {
+    const config = structuredClone(loadConfig());
+    config.modules.member.enable = false;
+    config.modules.message.enable.create = false;
+    config.modules.message.enable.update = false;
+    config.modules.message.enable.delete = false;
+    config.modules.role.enable = false;
+    config.modules.voice.enable = false;
+    return config;
+}
+
+const FEATURE_FILES = [
+    'about', 'hitokoto', 'ipQuery', 'minecraft', 'ping', 'unixTimestamp',
+    'announcement', 'messageDelete', 'userInfo', 'music', 'packageTracking',
+    'dataCollection', 'raffle', 'temporaryVoice', 'twitchStream', 'keywords',
+    'memberLifecycle', 'memberLogger', 'messageLogger', 'roleLogger', 'voiceLogger', 'presence'
+];
+
+test('每個 feature 模組各自匯出 createManifest(config)', () => {
+    for (const file of FEATURE_FILES) {
+        const feature = require(`../src/features/${file}`);
+        assert.equal(typeof feature.createManifest, 'function', file);
+    }
+});
+
+test('實際 feature manifest 名稱唯一，重複名稱會在 catalog 建立時失敗', () => {
+    const config = loadConfig();
+    const manifests = createFeatureManifests(config);
+    const names = manifests.map(manifest => manifest.name);
+    assert.equal(new Set(names).size, names.length);
+
+    const duplicate = { ...manifests[0], commands: [], interactions: [] };
+    assert.throws(
+        () => buildCommandCatalog([...manifests, duplicate], { adminCommandName: config.startup.adminCommandName }),
+        /Feature manifest 名稱重複/
+    );
+});
+
+test('runtime/deploy 共用 catalog 的 command JSON 與 enabled command descriptor 一致', () => {
+    const config = loadConfig();
+    const catalog = buildCommandCatalog(createFeatureManifests(config), {
+        adminCommandName: config.startup.adminCommandName
+    });
+
+    assert.deepEqual(
+        catalog.commandJson,
+        catalog.commands.map(command => command.data.toJSON())
+    );
+    assert.equal(catalog.commandJson.length, catalog.commands.length);
+    assert.deepEqual(
+        catalog.commandJson.map(command => command.name),
+        ['關於みやこ', '一言', '網際協定位址資訊', '麥塊', '延遲', '時間戳', '音樂', '物流追蹤', config.startup.adminCommandName]
+    );
+
+    const admin = catalog.commands.find(command => command.name === config.startup.adminCommandName);
+    assert.equal(admin.access, 'admin');
+    assert.equal(admin.data.toJSON().options.length, 7);
+});
+
+test('manifest factory 完全使用呼叫端注入的 config 建立指令', () => {
+    const config = structuredClone(loadConfig());
+    config.commands.about.botNickname = '測試機器人';
+    const catalog = buildCommandCatalog(createFeatureManifests(config), {
+        adminCommandName: config.startup.adminCommandName
+    });
+    assert.equal(catalog.commandJson[0].name, '關於測試機器人');
+    assert.equal(catalog.commandJson.some(command => command.name === '關於みやこ'), false);
+});
+
+test('實際 enabled manifests 推導出預設最小 Gateway Intents 聯集', () => {
+    const config = loadConfig();
+    const catalog = buildCommandCatalog(createFeatureManifests(config), {
+        adminCommandName: config.startup.adminCommandName
+    });
+    const minimumIntents = [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildVoiceStates
+    ];
+
+    assert.deepEqual(new Set(catalog.intents), new Set(minimumIntents));
+    assert.equal(catalog.intents.includes(GatewayIntentBits.DirectMessages), false);
+});
+
+test('停用四種 logger 後不會加入 manifest 或額外 Gateway Intent', () => {
+    const config = disabledLoggerConfig();
+    const manifests = createFeatureManifests(config);
+    const loggerNames = ['memberLogger', 'messageLogger', 'roleLogger', 'voiceLogger'];
+    for (const name of loggerNames) {
+        assert.equal(manifests.find(manifest => manifest.name === name).enabled, false);
+    }
+
+    const catalog = buildCommandCatalog(manifests, {
+        adminCommandName: config.startup.adminCommandName
+    });
+    for (const name of loggerNames) {
+        assert.equal(catalog.manifests.some(manifest => manifest.name === name), false);
+    }
+
+    const enabledIntentUnion = new Set(
+        manifests
+            .filter(manifest => manifest.enabled !== false)
+            .flatMap(manifest => manifest.intents || [])
+    );
+    assert.deepEqual(new Set(catalog.intents), enabledIntentUnion);
+
+    const disabledOnlyIntent = GatewayIntentBits.GuildModeration;
+    const isolatedCatalog = buildCommandCatalog([
+        {
+            name: 'enabled',
+            enabled: true,
+            intents: [GatewayIntentBits.Guilds],
+            commands: [],
+            interactions: []
+        },
+        {
+            name: 'disabledLogger',
+            enabled: false,
+            intents: [disabledOnlyIntent],
+            commands: [],
+            interactions: []
+        }
+    ], { adminCommandName: config.startup.adminCommandName });
+    assert.deepEqual(isolatedCatalog.intents, [GatewayIntentBits.Guilds]);
+    assert.equal(isolatedCatalog.intents.includes(disabledOnlyIntent), false);
+});

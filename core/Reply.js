@@ -1,8 +1,9 @@
 const crypto = require('crypto');
-const path = require('path');
 const { EmbedBuilder, MessageFlags } = require('discord.js');
-const { config } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
+const { createLogTools } = require('./sendLog');
+
+function createReplyTools(config) {
+const { sendLog } = createLogTools(config);
 
 const STATUS_STYLE = {
     success: {
@@ -108,4 +109,7 @@ function errorReply(interaction, error, options = {}) {
     );
 }
 
-module.exports = { createStatusEmbed, errorReply, infoReply, validationReply };
+return { createStatusEmbed, errorReply, infoReply, validationReply };
+}
+
+module.exports = { createReplyTools };

@@ -1,10 +1,13 @@
 const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { createLogTools } = require('../../core/sendLog');
+const { createReplyTools } = require('../../core/Reply');
 
 // 導入設定檔內容
+function createCommand(config) {
+const { sendLog } = createLogTools(config);
+const { errorReply } = createReplyTools(config);
+const configCommands = config.commands;
 const EMBED_COLOR = config.embed.color.default;
 const EMBED_EMOJI = configCommands.about.emoji;
 const BOTNICKNAME = configCommands.about.botNickname;
@@ -12,7 +15,7 @@ const INTRODUCE = configCommands.about.introduce;
 const PROVIDER = configCommands.about.provider;
 const REPOSITORY = configCommands.about.repository;
 
-module.exports = {
+const command = {
     data: new SlashCommandBuilder()
         .setName(`關於${BOTNICKNAME}`)
         .setDescription('查詢機器人的相關資訊與介紹')
@@ -21,7 +24,7 @@ module.exports = {
                     .setDescription('選擇顯示伺服器 ID')
                     .setRequired(false)), // 讓顯示伺服器 ID 成為可選項
 
-    async execute(interaction) {
+    async execute(interaction, context) {
 
         //啟用延遲回覆
         await interaction.deferReply({ ephemeral: false });
@@ -41,8 +44,9 @@ module.exports = {
             const guilds = interaction.client.guilds.cache;
 
             // 獲取目前擁有的指令列表
-            const commandCount = interaction.client.commands.size;
-            const commands = interaction.client.commands.map(command => `\`${command.data.name}\``).join(' | ');
+            const commandNames = context?.router?.commandNames || [];
+            const commandCount = commandNames.length;
+            const commands = commandNames.map(name => `\`${name}\``).join(' | ');
 
             // 計算所有伺服器的成員總數
             let totalMembers = 0;
@@ -77,3 +81,7 @@ module.exports = {
         }
     }
 };
+return command;
+}
+
+module.exports = { createCommand };

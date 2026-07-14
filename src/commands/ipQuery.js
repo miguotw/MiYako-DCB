@@ -1,12 +1,15 @@
 const path = require('path');
 const net = require('net');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply, validationReply } = require(path.join(process.cwd(), 'core/Reply'));
-const { getIPInfo } = require(path.join(process.cwd(), 'util/getIPInfo'));
+const { createLogTools } = require('../../core/sendLog');
+const { createReplyTools } = require('../../core/Reply');
+const { getIPInfo } = require('../../util/getIPInfo');
 
 // 導入設定檔內容
+function createCommand(config) {
+const { sendLog } = createLogTools(config);
+const { errorReply, validationReply } = createReplyTools(config);
+const configCommands = config.commands;
 const EMBED_COLOR = config.embed.color.default;
 const EMBED_EMOJI = configCommands.ipQuery.emoji;
 const IP_RATE_LIMIT_WINDOW_MS = 60000;
@@ -42,7 +45,7 @@ function releaseIPRequest(userID) {
     pendingIPRequests.delete(userID);
 }
 
-module.exports = {
+const command = {
     data: new SlashCommandBuilder()
         .setName('網際協定位址資訊')
         .setDescription('查詢 IPv4 或 IPv6 位址的相關資訊')
@@ -51,7 +54,7 @@ module.exports = {
                 .setDescription('輸入 IPv4 或 IPv6 位址')
                 .setRequired(true)),
 
-    async execute(interaction) {
+    async execute(interaction, context) {
         const address = interaction.options.getString('位址').trim();
         if (!net.isIP(address)) {
             return validationReply(interaction, '**請輸入有效的 IPv4 或 IPv6 位址。**', { ephemeral: true });
@@ -104,4 +107,8 @@ module.exports = {
     }
 };
 
-module.exports._test = { releaseIPRequest, reserveIPRequest };
+command._test = { releaseIPRequest, reserveIPRequest };
+return command;
+}
+
+module.exports = { createCommand };

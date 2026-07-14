@@ -1,7 +1,9 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const command = require('../src/commands/admin/dataCollection');
-const { createMentionBatches, paginateLines, sanitizeCell } = require('../util/dataCollectionViews');
+const { loadConfig } = require('../core/config');
+const config = loadConfig();
+const command = require('../src/commands/admin/dataCollection').createCommand(config);
+const { createMentionBatches, paginateLines, sanitizeCell } = require('../util/dataCollectionViews').createDataCollectionViews(config);
 
 test('/admin 資料收集參數結構正確', () => {
     const json = command.data.toJSON();

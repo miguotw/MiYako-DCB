@@ -14,7 +14,8 @@ const {
     ButtonStyle,
     EmbedBuilder
 } = require('discord.js');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
+function createPackageTrackingTools(config) {
+const configCommands = config.commands;
 
 const PACKAGE_CONFIG = configCommands.packageTracking || {};
 const DATA_DIR = path.join(process.cwd(), 'assets', 'packageTracking');
@@ -231,8 +232,11 @@ async function importPackage(carrierID, trackingNumber, note = '', extraFields =
     return response.data;
 }
 
-async function trackingPackage(userPackageID) {
-    const response = await http.get(`${API_BASE_URL}/package/tracking/${encodeURIComponent(userPackageID)}`, createTrackTwRequestConfig());
+async function trackingPackage(userPackageID, { signal } = {}) {
+    const response = await http.get(`${API_BASE_URL}/package/tracking/${encodeURIComponent(userPackageID)}`, {
+        ...createTrackTwRequestConfig(),
+        signal
+    });
     return response.data;
 }
 
@@ -504,7 +508,7 @@ function createPackageRecord({ interaction, carrier, trackingNumber, note, userP
     };
 }
 
-module.exports = {
+return {
     getPackageTrackingConfig,
     hasTrackTwToken,
     getAvailableCarriers,
@@ -530,3 +534,6 @@ module.exports = {
     getPackageRecords,
     createPackageRecord
 };
+}
+
+module.exports = { createPackageTrackingTools };

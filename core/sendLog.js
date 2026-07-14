@@ -1,9 +1,9 @@
-const path = require('path');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
-
 const CONTROL_CHARACTERS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g;
 const DISCORD_TOKEN = /(?:mfa\.[\w-]{20,}|[\w-]{20,30}\.[\w-]{6}\.[\w-]{20,})/g;
 const REDACTED = '[已遮罩]';
+
+function createLogTools(config) {
+const configCommands = config.commands;
 
 const getTimePrefix = (level) => {
     const now = new Date();
@@ -16,7 +16,7 @@ const getTimePrefix = (level) => {
 
 function getConfiguredSecrets() {
     return [
-        config.Startup?.token,
+        config.startup?.token,
         configCommands.packageTracking?.trackTwToken,
         configCommands.stream?.twitchClientSecret
     ];
@@ -93,4 +93,7 @@ const sendLog = (client, message, level = 'INFO', error = null, options = {}) =>
     }
 };
 
-module.exports = { sanitizeLogText, sendLog };
+return { sanitizeLogText, sendLog };
+}
+
+module.exports = { createLogTools };

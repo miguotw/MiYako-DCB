@@ -1,6 +1,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { sanitizeLogText, sendLog } = require('../core/sendLog');
+const { loadConfig } = require('../core/config');
+const { createLogTools } = require('../core/sendLog');
+const { sanitizeLogText, sendLog } = createLogTools(loadConfig());
 
 test('Logger 清理 code fence、控制字元、Token 與呼叫端敏感值', () => {
     const token = 'abcdefghijklmnopqrstuvwx.abcdef.abcdefghijklmnopqrstuvwxyz';

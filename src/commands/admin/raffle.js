@@ -1,21 +1,26 @@
 const path = require('path');
 const { ChannelType, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
-const { config } = require(path.join(process.cwd(), 'core/config'));
-const { getAdminCommandPath } = require(path.join(process.cwd(), 'core/commandPolicy'));
-const { errorReply, infoReply, validationReply } = require(path.join(process.cwd(), 'core/Reply'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { createRaffle, deleteRaffle, getRaffle, updateRaffle } = require(path.join(process.cwd(), 'util/raffleStore'));
-const { createRaffleEmbed, participationRow } = require(path.join(process.cwd(), 'util/raffleViews'));
+const { createCommandPolicy } = require('../../../core/commandPolicy');
+const { createReplyTools } = require('../../../core/Reply');
+const { createLogTools } = require('../../../core/sendLog');
+const { createRaffle, deleteRaffle, getRaffle, updateRaffle } = require('../../../util/raffleStore');
+const { createRaffleViews } = require('../../../util/raffleViews');
 const {
     fetchSourceMessage, parseDeadline: parseDeadlineInput, parseMentionTargets, resolveMentionedUsers
-} = require(path.join(process.cwd(), 'util/discordCommandInput'));
+} = require('../../../util/discordCommandInput');
+
+function createCommand(config) {
+const { getAdminCommandPath } = createCommandPolicy(config);
+const { errorReply, infoReply, validationReply } = createReplyTools(config);
+const { sendLog } = createLogTools(config);
+const { createRaffleEmbed, participationRow } = createRaffleViews(config);
 
 // 將專案時區預設值包在指令層，讓共用解析器不依賴全域設定。
 function parseDeadline(value, timezoneOffset = config.log.timezone) {
     return parseDeadlineInput(value, timezoneOffset);
 }
 
-module.exports = {
+const command = {
     data: new SlashCommandBuilder()
         .setName('抽選系統')
         .setDescription('建立與管理抽選')
@@ -30,7 +35,7 @@ module.exports = {
         .addStringOption(opt => opt.setName('白名單').setDescription('使用 @用戶 或 @身分組；白名單用戶無須參與抽選').setMaxLength(6000))
         .addStringOption(opt => opt.setName('黑名單').setDescription('使用 @用戶 或 @身分組；黑名單用戶不可參與抽選').setMaxLength(6000)),
 
-    async execute(interaction) {
+    async execute(interaction, context) {
         if (!interaction.inGuild() || !interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
             return validationReply(interaction, '**此指令僅限伺服器管理員使用。**', { ephemeral: true });
         }
@@ -127,4 +132,8 @@ module.exports = {
     }
 };
 
-module.exports._test = { parseDeadline, parseMentionTargets };
+command._test = { parseDeadline, parseMentionTargets };
+return command;
+}
+
+module.exports = { createCommand };

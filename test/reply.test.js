@@ -1,7 +1,9 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { MessageFlags } = require('discord.js');
-const { createStatusEmbed, errorReply, infoReply, validationReply } = require('../core/Reply');
+const { loadConfig } = require('../core/config');
+const { createReplyTools } = require('../core/Reply');
+const { createStatusEmbed, errorReply, infoReply, validationReply } = createReplyTools(loadConfig());
 
 function createInteraction(state = {}) {
     const calls = [];

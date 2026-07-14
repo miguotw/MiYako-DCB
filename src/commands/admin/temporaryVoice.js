@@ -4,14 +4,14 @@ const {
     PermissionFlagsBits,
     SlashCommandBuilder
 } = require('discord.js');
-const { getAdminCommandPath } = require(path.join(process.cwd(), 'core/commandPolicy'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply, infoReply, validationReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { createCommandPolicy } = require('../../../core/commandPolicy');
+const { createLogTools } = require('../../../core/sendLog');
+const { createReplyTools } = require('../../../core/Reply');
 const {
     loadGuildStore,
     removeEntrance,
     setEntrance
-} = require(path.join(process.cwd(), 'util/temporaryVoiceStore'));
+} = require('../../../util/temporaryVoiceStore');
 
 const REQUIRED_BOT_PERMISSIONS = [
     PermissionFlagsBits.ViewChannel,
@@ -20,7 +20,12 @@ const REQUIRED_BOT_PERMISSIONS = [
     PermissionFlagsBits.MoveMembers
 ];
 
-module.exports = {
+function createCommand(config) {
+const { getAdminCommandPath } = createCommandPolicy(config);
+const { sendLog } = createLogTools(config);
+const { errorReply, infoReply, validationReply } = createReplyTools(config);
+
+const command = {
     data: new SlashCommandBuilder()
         .setName('臨時語音頻道')
         .setDescription('管理自動建立的臨時語音頻道入口')
@@ -51,7 +56,7 @@ module.exports = {
                         .addChannelTypes(ChannelType.GuildVoice)
                         .setRequired(true))),
 
-    async execute(interaction) {
+    async execute(interaction, context) {
         await interaction.deferReply({ ephemeral: true });
 
         const subcommand = interaction.options.getSubcommand();
@@ -92,3 +97,7 @@ module.exports = {
         }
     }
 };
+return command;
+}
+
+module.exports = { createCommand };
