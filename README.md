@@ -26,7 +26,9 @@ nvm use
 npm ci
 ```
 
-`ffmpeg-static` 會安裝目前平台適用的 FFmpeg。yt-dlp 不由 npm 管理；音樂功能首次需要時會下載 Linux binary 至 `runtime/bin/yt-dlp`，之後依設定週期檢查更新。`music.ytDlpPath` 已移除，若設定檔仍含此舊鍵，strict schema 會拒絕啟動。
+`ffmpeg-static` 會透過 dependency install script 下載目前平台適用的 FFmpeg；`package.json` 只批准 lockfile 鎖定的 `ffmpeg-static@5.3.0` 執行該腳本，以相容預設封鎖 dependency install scripts 的 npm 版本。若主機曾在未批准腳本時安裝依賴，套件目錄會存在但缺少執行檔，部署新版後需在主機執行一次 `npm rebuild ffmpeg-static`（或重新執行乾淨的 `npm ci`）。不要使用 `--ignore-scripts`，它會覆蓋 allowlist 並再次略過 binary 下載。
+
+yt-dlp 不由 npm 管理；音樂功能首次需要時會下載 Linux binary 至 `runtime/bin/yt-dlp`，之後依設定週期檢查更新。`music.ytDlpPath` 已移除，若設定檔仍含此舊鍵，strict schema 會拒絕啟動。
 
 ## 設定檔
 
