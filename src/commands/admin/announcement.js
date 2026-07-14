@@ -1,4 +1,3 @@
-const path = require('path');
 const { ChannelType, SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { createCommandPolicy } = require('../../../core/commandPolicy');
 const { createLogTools } = require('../../../core/sendLog');
@@ -35,7 +34,7 @@ const command = {
                 .setDescription('請選擇要提及的身分組')
                 .setRequired(false) // 設為非必填
         ),
-    async execute(interaction, context) {
+    async execute(interaction, _context) {
         
         // 公告本體會發送到目標頻道；操作結果僅需讓執行指令的管理員看見。
         await interaction.deferReply({ ephemeral: true });

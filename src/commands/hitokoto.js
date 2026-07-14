@@ -1,4 +1,3 @@
-const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { createLogTools } = require('../../core/sendLog');
 const { createReplyTools } = require('../../core/Reply');

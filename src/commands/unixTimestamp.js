@@ -1,5 +1,4 @@
-const path = require('path');
-const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, ModalBuilder, TextInputBuilder, ActionRowBuilder, TextInputStyle } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ModalBuilder, TextInputBuilder, ActionRowBuilder, TextInputStyle } = require('discord.js');
 const { createLogTools } = require('../../core/sendLog');
 const { createReplyTools } = require('../../core/Reply');
 
@@ -25,7 +24,7 @@ const command = {
                 .setName('指定時間')
                 .setDescription('取得指定的 UNIX 時間戳')),
 
-    async execute(interaction, context) {
+    async execute(interaction, _context) {
     try {
         const subcommand = interaction.options.getSubcommand();
         if (subcommand === '現在時間') {

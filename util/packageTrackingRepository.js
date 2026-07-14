@@ -2,10 +2,6 @@
 
 const crypto = require('node:crypto');
 
-function emptyOwnerStore() {
-    return { packages: [], reservations: [], outbox: [] };
-}
-
 function normalizeOwnerStore(value) {
     return {
         packages: Array.isArray(value?.packages) ? value.packages : [],

@@ -1,4 +1,3 @@
-const path = require('path');
 const {
     ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, escapeMarkdown
 } = require('discord.js');

@@ -1,4 +1,3 @@
-const path = require('path');
 const net = require('net');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { createLogTools } = require('../../core/sendLog');
@@ -54,7 +53,7 @@ const command = {
                 .setDescription('輸入 IPv4 或 IPv6 位址')
                 .setRequired(true)),
 
-    async execute(interaction, context) {
+    async execute(interaction, _context) {
         const address = interaction.options.getString('位址').trim();
         if (!net.isIP(address)) {
             return validationReply(interaction, '**請輸入有效的 IPv4 或 IPv6 位址。**', { ephemeral: true });

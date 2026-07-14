@@ -1,4 +1,3 @@
-const path = require('path');
 const { Events } = require('discord.js');
 const { createLogTools } = require('../../../core/sendLog');
 

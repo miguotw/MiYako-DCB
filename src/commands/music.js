@@ -1,4 +1,3 @@
-const path = require('path');
 /**
  * 音樂功能的 Discord 互動層。
  *

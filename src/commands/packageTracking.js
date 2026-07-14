@@ -1,4 +1,3 @@
-const path = require('path');
 /**
  * Track.TW 物流功能的 Discord 互動層。
  *
@@ -106,7 +105,7 @@ function getUserRecordByID(context, userID, userPackageID) {
     return getRepository(context).getPackage(userID, userPackageID);
 }
 
-function createPanelEmbed(interaction) {
+function createPanelEmbed() {
     const embed = new EmbedBuilder()
         .setColor(EMBED_COLOR)
         .setTitle(`${EMBED_EMOJI} ┃ 物流追蹤 - 包裹管理面板`)
@@ -180,7 +179,7 @@ function createNoteModal(record) {
         );
 }
 
-function createCarrierChoiceEmbed(carrierIDs, carriers) {
+function createCarrierChoiceEmbed(carrierIDs) {
     const shownCount = Math.min(carrierIDs.length, MAX_CARRIER_SELECT_OPTIONS);
     const description = [
         '**偵測到多個可能的物流商，請從下方選單選擇。**',
@@ -399,7 +398,7 @@ async function continuePackageImport(interaction, pending, context, sessionID = 
 
 async function handlePanel(interaction) {
     await interaction.reply({
-        embeds: [createPanelEmbed(interaction)],
+        embeds: [createPanelEmbed()],
         components: createPanelRows()
     });
 }
@@ -428,7 +427,7 @@ async function handleAddModalSubmit(interaction, context) {
                 data: { stage: 'carrier', pending: { trackingNumber, note }, carrierIDs, carriers }
             });
             await interaction.editReply({
-                embeds: [createCarrierChoiceEmbed(carrierIDs, carriers)],
+                embeds: [createCarrierChoiceEmbed(carrierIDs)],
                 components: withAddPackageRow(createCarrierChoiceRows(carrierIDs, carriers, session.id))
             });
             return;
@@ -692,7 +691,7 @@ const command = {
         .setName('物流追蹤')
         .setDescription('開啟物流追蹤管理面板'),
 
-    async execute(interaction, context) {
+    async execute(interaction, _context) {
         return handlePanel(interaction);
     },
 

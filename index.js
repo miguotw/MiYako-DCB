@@ -11,29 +11,33 @@ function forceExit(error, {
     exit(1);
 }
 
-async function main() {
-    const runtime = createRuntime();
+async function main({
+    runtime = createRuntime(),
+    processApi = process,
+    forceExitFn = forceExit
+} = {}) {
     let signalCount = 0;
 
     const onSignal = signal => {
         signalCount += 1;
         if (signalCount > 1) {
-            process.exitCode = 1;
-            process.exit(1);
+            processApi.exitCode = 1;
+            processApi.exit(1);
+            return;
         }
         runtime.shutdown(new Error(`收到 ${signal}，開始 graceful shutdown。`))
             .then(() => {
-                process.exitCode = 0;
-                process.off('SIGINT', onSigint);
-                process.off('SIGTERM', onSigterm);
+                processApi.exitCode = 0;
+                processApi.off('SIGINT', onSigint);
+                processApi.off('SIGTERM', onSigterm);
             })
-            .catch(error => forceExit(error));
+            .catch(error => forceExitFn(error));
     };
 
     const onSigint = () => onSignal('SIGINT');
     const onSigterm = () => onSignal('SIGTERM');
-    process.on('SIGINT', onSigint);
-    process.on('SIGTERM', onSigterm);
+    processApi.on('SIGINT', onSigint);
+    processApi.on('SIGTERM', onSigterm);
     await runtime.start();
     return runtime;
 }

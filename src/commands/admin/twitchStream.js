@@ -1,4 +1,3 @@
-const path = require('path');
 const { ActionRowBuilder, SlashCommandBuilder, StringSelectMenuBuilder } = require('discord.js');
 const { createTwitchStreamRepository } = require('../../../util/twitchStreamRepository');
 const { createCommandPolicy } = require('../../../core/commandPolicy');

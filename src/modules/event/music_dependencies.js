@@ -1,4 +1,3 @@
-const path = require('path');
 /**
  * 音樂子系統的啟動橋接器。
  * VoiceStateUpdate 交給 player 維護連線；ClientReady 才檢查外部執行檔，

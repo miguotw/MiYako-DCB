@@ -1,4 +1,3 @@
-const path = require('path');
 const { ChannelType, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
 const { createCommandPolicy } = require('../../../core/commandPolicy');
 const { createReplyTools } = require('../../../core/Reply');

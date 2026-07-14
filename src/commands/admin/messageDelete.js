@@ -1,4 +1,3 @@
-const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { createCommandPolicy } = require('../../../core/commandPolicy');
 const { createLogTools } = require('../../../core/sendLog');
@@ -54,7 +53,7 @@ const command = {
                 .setDescription(`要刪除的訊息數量 (1~${DELETE_LIMIT})`)
                 .setRequired(true)
         ),
-    async execute(interaction, context) {
+    async execute(interaction, _context) {
 
         //啟用延遲回覆
         await interaction.deferReply({ ephemeral: true });

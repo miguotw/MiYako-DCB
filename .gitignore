@@ -1,6 +1,5 @@
-# Node modules and lock files
+# Node modules
 node_modules/
-package-lock.json
 
 # IDE config files
 .vscode/

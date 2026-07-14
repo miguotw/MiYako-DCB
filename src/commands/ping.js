@@ -1,4 +1,3 @@
-const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { createLogTools } = require('../../core/sendLog');
 const { createReplyTools } = require('../../core/Reply');
@@ -15,7 +14,7 @@ const command = {
     data: new SlashCommandBuilder()
         .setName('延遲')
         .setDescription('測試機器人延遲'),
-    async execute(interaction, context) {
+    async execute(interaction, _context) {
         
         //啟用延遲回覆
         await interaction.deferReply({ ephemeral: true });

@@ -1,4 +1,3 @@
-const path = require('path');
 const { createLogTools } = require('../../../core/sendLog');
 
 function createInitializer(config) {

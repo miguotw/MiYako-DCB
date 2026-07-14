@@ -1,4 +1,3 @@
-const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { createLogTools } = require('../../core/sendLog');
 const { createReplyTools } = require('../../core/Reply');
@@ -40,7 +39,6 @@ const command = {
             const botUser = interaction.client.user;
             const botUsername = botUser.username;
             const botAvatar = botUser.displayAvatarURL({ format: 'png', dynamic: true, size: 1024 });
-            const botID = botUser.id;
             const guilds = interaction.client.guilds.cache;
 
             // 獲取目前擁有的指令列表

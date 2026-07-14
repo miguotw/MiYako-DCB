@@ -3,6 +3,7 @@ const fs = require('fs');
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { createLogTools } = require('../../core/sendLog');
 const { createReplyTools } = require('../../core/Reply');
+const { PROJECT_ROOT } = require('../../core/config');
 const { getServerStatus } = require('../../util/getServerStatus');
 
 // 導入設定檔內容
@@ -46,7 +47,7 @@ const command = {
                             .setDescription('手動輸入伺服器 IP 位址')
                             .setRequired(false))),
 
-    async execute(interaction, context) {
+    async execute(interaction, _context) {
         const subcommand = interaction.options.getSubcommand();
 
         //啟用延遲回覆
@@ -134,7 +135,7 @@ const command = {
                 let iconPath = ServerStatusIcon;
                 if (!iconPath || !fs.existsSync(iconPath)) {
                     // 使用預設圖標
-                    iconPath = path.join(process.cwd(), 'assets', 'minecraft', 'default_icon.png');
+                    iconPath = path.join(PROJECT_ROOT, 'assets', 'minecraft', 'default_icon.png');
                     if (!fs.existsSync(iconPath)) {
                         throw new Error('預設圖標文件不存在！');
                     }

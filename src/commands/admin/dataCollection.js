@@ -1,4 +1,3 @@
-const path = require('path');
 const {
     ActionRowBuilder, ChannelType, EmbedBuilder, ModalBuilder, PermissionFlagsBits, SlashCommandBuilder,
     TextInputBuilder, TextInputStyle

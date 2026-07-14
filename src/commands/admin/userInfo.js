@@ -1,4 +1,3 @@
-const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder, escapeMarkdown } = require('discord.js');
 const { createCommandPolicy } = require('../../../core/commandPolicy');
 const { createLogTools } = require('../../../core/sendLog');
@@ -25,7 +24,7 @@ const command = {
                 .setDescription('請選擇或提及要查詢的用戶')
                 .setRequired(true)),
 
-    async execute(interaction, context) {
+    async execute(interaction, _context) {
         await interaction.deferReply();
 
         const selectedUser = interaction.options.getUser('用戶', true);
