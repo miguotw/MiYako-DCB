@@ -8,6 +8,9 @@ startup:
   # 機器人的 ID
   clientId: "123456789012345678"
 
+  # 測試用伺服器 ID；只有 deploy:guild／undeploy:guild 需要，正式環境可省略。
+  # guildId: "234567890123456789"
+
   # 管理聚合指令的前綴名稱，例如設定為 admin 時會註冊 /admin。
   # 需符合 Discord Slash Command 名稱規則，長度為 1～32 個字元且英文必須為小寫。
   adminCommandName: "admin"

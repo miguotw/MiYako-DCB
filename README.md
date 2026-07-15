@@ -43,6 +43,8 @@ chmod 600 config/config.yml config/configCommands.yml config/configModules.yml
 
 設定路徑預設為專案根目錄的 `config/`。可用 `MIYAKO_CONFIG_DIR` 指定其他目錄；相對路徑仍以專案根目錄解析，不受啟動 CWD 影響。
 
+`startup.guildId` 是選填的測試伺服器 ID，只有 `deploy:guild` 與 `undeploy:guild` 會使用；只操作全域指令的正式環境可以省略。若有填寫，必須是有效的 Discord Snowflake。
+
 重要容量設定：
 
 - `packageTracking.maxActivePackages`：每位使用者 active 加 reserved 包裹上限，預設 20，範圍 1–100。
@@ -63,19 +65,19 @@ Bot runtime 與 Application Commands 發布是兩個獨立流程：
 npm start
 
 # 發布全域指令
-npm run deploy:commands -- --scope global
+npm run deploy:global
 
-# 發布單一測試伺服器指令
-npm run deploy:commands -- --scope guild --guild-id 123456789012345678
+# 發布 startup.guildId 指定的測試伺服器指令
+npm run deploy:guild
 
 # 撤銷全部全域指令
-npm run undeploy:commands -- --scope global
+npm run undeploy:global
 
-# 撤銷單一伺服器的全部指令
-npm run undeploy:commands -- --scope guild --guild-id 123456789012345678
+# 撤銷 startup.guildId 指定伺服器的全部指令
+npm run undeploy:guild
 ```
 
-部署與撤銷 CLI 共用嚴格 scope 驗證；guild scope 必須提供 Guild ID，global scope 不接受 Guild ID。部署以單次 PUT 原子取代同 scope 的 catalog，因此會移除該 scope 的過時指令；撤銷則 PUT 空 catalog。global 與 guild 不會互相清除，兩者同時發布時 Discord 可能顯示重複指令，應先明確撤銷不需要的 scope。兩種流程都不建立 Discord Client、不登入、不啟動 feature 或 scheduler；REST 失敗會以非零狀態結束。
+四個 CLI 都不接受參數；global 入口不需要 `startup.guildId`，guild 入口缺少該設定時會直接失敗。部署以單次 PUT 原子取代固定 scope 的 catalog，因此會移除該 scope 的過時指令；撤銷則 PUT 空 catalog。global 與 guild 不會互相清除，兩者同時發布時 Discord 可能顯示重複指令，應先明確撤銷不需要的 scope。所有流程都不建立 Discord Client、不登入、不啟動 feature 或 scheduler；REST 失敗會以非零狀態結束。
 
 ## 專案結構
 
@@ -98,8 +100,11 @@ npm run undeploy:commands -- --scope guild --guild-id 123456789012345678
 │   └── modules/                 # event controller、scheduler job 與 logger
 ├── util/                        # 功能 repository、service、view、player 與 adapter
 ├── scripts/
-│   ├── deployCommands.js        # 獨立指令發布 CLI
-│   ├── undeployCommands.js      # 獨立指令撤銷 CLI
+│   ├── commandDeployment.js     # global/guild deploy/undeploy 共用核心
+│   ├── deployGlobalCommands.js  # 無參數全域發布 CLI
+│   ├── deployGuildCommands.js   # 無參數 Guild 發布 CLI
+│   ├── undeployGlobalCommands.js # 無參數全域撤銷 CLI
+│   ├── undeployGuildCommands.js # 無參數 Guild 撤銷 CLI
 │   └── verifyCoverage.js        # 完整 coverage gate
 ├── test/                        # node:test 單元、整合、smoke 與 lifecycle 測試
 ├── config_example/              # 無 secret 的 strict 設定範例

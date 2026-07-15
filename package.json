@@ -4,8 +4,10 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "deploy:commands": "node scripts/deployCommands.js",
-    "undeploy:commands": "node scripts/undeployCommands.js",
+    "deploy:global": "node scripts/deployGlobalCommands.js",
+    "deploy:guild": "node scripts/deployGuildCommands.js",
+    "undeploy:global": "node scripts/undeployGlobalCommands.js",
+    "undeploy:guild": "node scripts/undeployGuildCommands.js",
     "test": "node --require ./test/setupConfig.js --test test/*.test.js",
     "lint": "eslint .",
     "test:smoke": "node --require ./test/setupConfig.js --test test/requireAll.test.js",

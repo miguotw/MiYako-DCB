@@ -39,14 +39,14 @@ npm run lint
 npm run test:smoke
 npm run test:coverage
 npm run check
-npm run deploy:commands -- --scope global
-npm run deploy:commands -- --scope guild --guild-id <snowflake>
-npm run undeploy:commands -- --scope global
-npm run undeploy:commands -- --scope guild --guild-id <snowflake>
+npm run deploy:global
+npm run deploy:guild
+npm run undeploy:global
+npm run undeploy:guild
 ```
 
 - `npm start` 會登入 Discord 並可能啟動外部工作；只在使用者明確要求且已確認安全設定時執行。
-- deploy 會以單次 PUT 取代指定 scope 的 command catalog；undeploy 會 PUT 空陣列。兩者都會改變真實 Discord 狀態，不得作為一般驗證命令。
+- 四個 command deploy/undeploy 指令都不接受參數；guild 入口使用選填的 `startup.guildId`。deploy 會以單次 PUT 取代固定 scope 的 command catalog；undeploy 會 PUT 空陣列。兩者都會改變真實 Discord 狀態，不得作為一般驗證命令。
 - 儲存庫沒有 build、dev-server 或格式化 script，也沒有 Prettier、TypeScript、Docker 或資料庫設定；不要捏造對應流程。
 
 ## 程式碼風格與命名
@@ -77,7 +77,7 @@ npm run undeploy:commands -- --scope guild --guild-id <snowflake>
 ## 設定、環境變數與執行資料
 
 - 唯一由 production 讀取的環境變數是 `MIYAKO_CONFIG_DIR`。相對值仍以專案根目錄解析；沒有已確認的 `.env` loader。
-- `core/config.js` 使用 Zod strict schema。新增或修改設定時，同步更新 schema、`config_example/`、config tests，以及受影響的 README 說明。
+- `core/config.js` 使用 Zod strict schema。選填的 `startup.guildId` 只供 guild command deploy/undeploy 使用，runtime 不依賴它。新增或修改設定時，同步更新 schema、`config_example/`、config tests，以及受影響的 README 說明。
 - 不得讀取、列印、修改或提交 `config/` 中的 token、secret、ID 或部署值；除非使用者明確授權針對本機設定的操作。POSIX 上三份實際 YAML 必須精確為 `0600`。
 - 測試一律透過 `MIYAKO_CONFIG_DIR` 使用由 `test/helpers/configFixture.js` 建立的臨時 `0600` fixture，不得讀真實設定。
 - `runtime/data/` 是唯一持久資料來源；repository 目錄／檔案權限為 `0700`／`0600`。cache、binary、tmp 可重建，但仍不得在一般修改中任意清除。

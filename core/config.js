@@ -60,6 +60,7 @@ const baseConfigSchema = strictObject({
     startup: strictObject({
         token: trimmedText('startup.token', 512),
         clientId: snowflake('startup.clientId'),
+        guildId: snowflake('startup.guildId').optional(),
         adminCommandName: commandName('startup.adminCommandName'),
         activityType: z.union([
             z.literal(0),
