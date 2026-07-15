@@ -1,10 +1,13 @@
-const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder, escapeMarkdown } = require('discord.js');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
-const { getAdminCommandPath } = require(path.join(process.cwd(), 'core/commandPolicy'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { createCommandPolicy } = require('../../../core/commandPolicy');
+const { createLogTools } = require('../../../core/sendLog');
+const { createReplyTools } = require('../../../core/Reply');
 
+function createCommand(config) {
+const { getAdminCommandPath } = createCommandPolicy(config);
+const { sendLog } = createLogTools(config);
+const { errorReply } = createReplyTools(config);
+const configCommands = config.commands;
 const EMBED_COLOR = config.embed.color.default;
 const EMBED_EMOJI = configCommands.userInfo.emoji;
 
@@ -12,7 +15,7 @@ function displayValue(value) {
     return escapeMarkdown(String(value));
 }
 
-module.exports = {
+const command = {
     data: new SlashCommandBuilder()
         .setName('擷取用戶資料')
         .setDescription('透過 Discord 用戶選項查詢用戶基本資料')
@@ -21,7 +24,7 @@ module.exports = {
                 .setDescription('請選擇或提及要查詢的用戶')
                 .setRequired(true)),
 
-    async execute(interaction) {
+    async execute(interaction, _context) {
         await interaction.deferReply();
 
         const selectedUser = interaction.options.getUser('用戶', true);
@@ -56,9 +59,11 @@ module.exports = {
             if (bannerURL) embed.setImage(bannerURL);
             await interaction.editReply({ embeds: [embed] });
         } catch (error) {
-            sendLog(interaction.client, `❌ 在執行 ${getAdminCommandPath('擷取用戶資料')} 指令時發生錯誤：`, 'ERROR', error);
-
-            await errorReply(interaction, '**無法取得該用戶的資料，請稍後再試一次。**');
+            await errorReply(interaction, error, { context: '取得 Discord 用戶資料' });
         }
     }
 };
+return command;
+}
+
+module.exports = { createCommand };

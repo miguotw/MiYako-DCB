@@ -4,7 +4,7 @@ const fs = require('fs');
  *
  * 本模組擁有 VoiceConnection、AudioPlayer、目前歌曲、待播序列與所有計時器；
  * 指令層只能透過公開函式操作狀態，UI 更新則由 hooks 反向通知 `commands/music.js`。
- * 播放序列與目前進度會寫入 musicQueueStore，讓 Bot 重啟後能從本機音訊續播。
+ * 播放序列與目前進度透過 hooks 寫入 runtime repository，讓 Bot 重啟後續播。
  */
 const path = require('path');
 const prism = require('prism-media');
@@ -13,7 +13,7 @@ const {
     createAudioPlayer, createAudioResource, entersState, joinVoiceChannel
 } = require('@discordjs/voice');
 const { deleteTrackFile } = require('./ytDlpManager');
-const { saveGuildQueue, deleteGuildQueue } = require('./musicQueueStore');
+const { musicValidationError } = require('./musicHelpers');
 
 const guildStates = new Map();
 
@@ -24,12 +24,15 @@ function createGuildState(guildID, options, hooks) {
         guildID, options, hooks, player, connection: null, voiceChannelID: null,
         current: null, queue: [], resource: null, panelMessage: null, panelChannel: null,
         progressTimer: null, recoveryTimer: null, inactivityTimer: null,
-        voiceChannel: null, starting: false, preparingTracks: 0,
-        paused: false, resumeAfterRecovery: false, resumeOffsetSeconds: 0
+        voiceChannel: null, starting: false, preparingTracks: 0, playbackGeneration: 0,
+        paused: false, resumeAfterRecovery: false, resumeOffsetSeconds: 0,
+        shuttingDown: false
     };
-    player.on(AudioPlayerStatus.Idle, () => finishCurrent(state));
-    player.on('error', error => failCurrent(state, error));
-    player.on('stateChange', (_, nextState) => {
+    player.on('error', error => failCurrent(state, error, error?.resource?.metadata?.playbackGeneration));
+    player.on('stateChange', (oldState, nextState) => {
+        if (nextState.status === AudioPlayerStatus.Idle) {
+            void finishCurrent(state, oldState?.resource?.metadata?.playbackGeneration);
+        }
         // 若在 Buffering 階段收到無人／斷線暫停，進入 Playing 後再次落實暫停。
         if (state.paused && nextState.status === AudioPlayerStatus.Playing) player.pause(true);
     });
@@ -53,9 +56,9 @@ function elapsedSeconds(state) {
  * 保存足以重建播放的最小快照；序列完全為空時刪除舊檔，避免下次啟動誤恢復。
  * localPath 也會落盤，恢復時仍會再次確認檔案確實存在。
  */
-function persistState(state) {
-    if (!state.current && !state.queue.length) return deleteGuildQueue(state.guildID);
-    saveGuildQueue(state.guildID, {
+function persistState(state, immediate = false) {
+    const snapshot = !state.current && !state.queue.length ? null : {
+        guildID: state.guildID,
         voiceChannelID: state.voiceChannelID,
         panelChannelID: state.panelChannel?.id || state.panelMessage?.channelId || null,
         panelMessageID: state.panelMessage?.id || null,
@@ -63,7 +66,10 @@ function persistState(state) {
         progressSeconds: elapsedSeconds(state),
         current: state.current,
         queue: state.queue
-    });
+    };
+    const result = state.hooks.persistSnapshot?.(state, snapshot, { immediate });
+    if (!immediate) result?.catch?.(error => state.hooks.onPersistenceError?.(state, error));
+    return result;
 }
 
 /**
@@ -71,11 +77,18 @@ function persistState(state) {
  * 五秒一次的應用層 recovery；播放會先暫停，防止連線恢復後進度已經漂移。
  */
 async function connect(state, voiceChannel) {
-    if (state.connection && state.voiceChannelID === voiceChannel.id) return state.connection;
+    const waitForState = state.options.entersState || entersState;
+    if (state.connection && state.voiceChannelID === voiceChannel.id) {
+        state.voiceChannel = voiceChannel;
+        await waitForState(state.connection, VoiceConnectionStatus.Ready, 20000);
+        refreshInactivityTimer(state);
+        return state.connection;
+    }
     if (state.connection) state.connection.destroy();
     // 閒置退出後若先前已開啟的點播流程才完成下載，重新連線時要把狀態放回索引。
     guildStates.set(state.guildID, state);
-    state.connection = joinVoiceChannel({ channelId: voiceChannel.id, guildId: voiceChannel.guild.id, adapterCreator: voiceChannel.guild.voiceAdapterCreator, selfDeaf: true });
+    const join = state.options.joinVoiceChannel || joinVoiceChannel;
+    state.connection = join({ channelId: voiceChannel.id, guildId: voiceChannel.guild.id, adapterCreator: voiceChannel.guild.voiceAdapterCreator, selfDeaf: true });
     state.voiceChannelID = voiceChannel.id;
     state.voiceChannel = voiceChannel;
     state.connection.subscribe(state.player);
@@ -84,10 +97,10 @@ async function connect(state, voiceChannel) {
         pauseForRecovery(state);
         try {
             await Promise.race([
-                entersState(disconnectedConnection, VoiceConnectionStatus.Signalling, 5000),
-                entersState(disconnectedConnection, VoiceConnectionStatus.Connecting, 5000)
+                waitForState(disconnectedConnection, VoiceConnectionStatus.Signalling, 5000),
+                waitForState(disconnectedConnection, VoiceConnectionStatus.Connecting, 5000)
             ]);
-            await entersState(disconnectedConnection, VoiceConnectionStatus.Ready, 20000);
+            await waitForState(disconnectedConnection, VoiceConnectionStatus.Ready, 20000);
             const resumed = resumeRecoveredPlayback(state);
             await state.hooks.notifyPlaybackStatus?.(
                 state,
@@ -100,10 +113,29 @@ async function connect(state, voiceChannel) {
             scheduleRecovery(state);
         }
     });
-    await entersState(state.connection, VoiceConnectionStatus.Ready, 20000);
+    await waitForState(state.connection, VoiceConnectionStatus.Ready, 20000);
     persistState(state);
     refreshInactivityTimer(state);
     return state.connection;
+}
+
+/**
+ * 從管理面板主動召喚 Bot。跨頻道搬移只允許完全空閒的播放器，避免其他頻道的
+ * 播放或下載流程被使用者搶走；同頻道則等待現有連線 Ready 後冪等成功。
+ */
+async function summonToVoiceChannel(state, voiceChannel) {
+    if (!state || !voiceChannel?.id || !voiceChannel.guild?.id) {
+        throw new TypeError('召喚音樂播放器缺少有效的語音頻道。');
+    }
+    const previousChannelID = state.voiceChannelID;
+    const movingChannels = Boolean(previousChannelID && previousChannelID !== voiceChannel.id);
+    const busy = Boolean(state.current || state.starting || state.preparingTracks > 0 || state.queue.length);
+    if (movingChannels && busy) {
+        throw musicValidationError('Bot 正在其他語音頻道播放或準備歌曲，請先加入 Bot 所在的語音頻道。');
+    }
+    await connect(state, voiceChannel);
+    if (previousChannelID === voiceChannel.id) return 'alreadyConnected';
+    return previousChannelID ? 'moved' : 'joined';
 }
 
 /** Bot 不計入聽眾；頻道內至少一位真人才視為有人使用。 */
@@ -217,29 +249,43 @@ async function playNext(state) {
     }
     state.starting = true;
     state.current = track;
+    const generation = ++state.playbackGeneration;
     state.paused = false;
     state.resumeOffsetSeconds = Number(track.resumeSeconds) || 0;
     try {
         await state.hooks.replacePanel?.(state);
+        if (generation !== state.playbackGeneration || state.current !== track) return;
         if (!track.localPath || !fs.existsSync(track.localPath)) throw new Error('找不到已下載的音訊檔案。');
         if (state.resumeOffsetSeconds > 0) {
             const transcoder = new prism.FFmpeg({ args: ['-ss', String(state.resumeOffsetSeconds), '-i', track.localPath, '-analyzeduration', '0', '-loglevel', '0', '-f', 's16le', '-ar', '48000', '-ac', '2'] });
-            state.resource = createAudioResource(transcoder, { inputType: StreamType.Raw, metadata: track, inlineVolume: true });
-        } else state.resource = createAudioResource(track.localPath, { metadata: track, inlineVolume: true });
+            state.resource = createAudioResource(transcoder, {
+                inputType: StreamType.Raw,
+                metadata: { ...track, playbackGeneration: generation },
+                inlineVolume: true
+            });
+        } else {
+            state.resource = createAudioResource(track.localPath, {
+                metadata: { ...track, playbackGeneration: generation },
+                inlineVolume: true
+            });
+        }
         state.resource.volume?.setVolume((Number(state.options.volumePercent) || 0) / 100);
+        if (generation !== state.playbackGeneration || state.current !== track) return;
         state.player.play(state.resource);
         startProgressUpdates(state);
         persistState(state);
     } catch (error) {
         state.starting = false;
-        await failCurrent(state, error);
+        await failCurrent(state, error, generation);
         return;
     }
     state.starting = false;
 }
 
 /** 正常 Idle：清理音訊檔、重設 current，再消費下一首。 */
-async function finishCurrent(state) {
+async function finishCurrent(state, eventGeneration) {
+    if (state.shuttingDown) return;
+    if (eventGeneration !== state.playbackGeneration) return;
     if (!state.current || state.starting) return;
     stopProgressUpdates(state);
     deleteTrackFile(state.current);
@@ -249,7 +295,9 @@ async function finishCurrent(state) {
 }
 
 /** 播放失敗不阻塞序列：通知面板、刪除失敗曲目後繼續下一首。 */
-async function failCurrent(state, error) {
+async function failCurrent(state, error, eventGeneration = state.playbackGeneration) {
+    if (state.shuttingDown) return;
+    if (eventGeneration !== state.playbackGeneration) return;
     if (!state.current) return;
     const failed = state.current;
     stopProgressUpdates(state);
@@ -330,7 +378,20 @@ function clearQueue(state) {
     state.hooks.updatePanel?.(state);
     return removed;
 }
-function skipCurrent(state) { if (!state.current) return false; state.player.stop(true); return true; }
+function skipCurrent(state) {
+    if (!state.current) return false;
+    const skipped = state.current;
+    state.playbackGeneration += 1;
+    state.starting = false;
+    state.current = null;
+    state.resource = null;
+    stopProgressUpdates(state);
+    state.player.stop(true);
+    deleteTrackFile(skipped);
+    persistState(state);
+    playNext(state).catch(error => state.hooks.notifyError?.(state, skipped, error));
+    return true;
+}
 /** 定期保存播放秒數並更新面板；最短五秒以控制磁碟與 Discord API 負載。 */
 function startProgressUpdates(state) {
     stopProgressUpdates(state);
@@ -352,7 +413,7 @@ async function restoreGuildState(snapshot, voiceChannel, panelChannel, panelMess
         ...(Array.isArray(snapshot.queue) ? snapshot.queue : [])
     ].filter(track => track.localPath && fs.existsSync(track.localPath))
         .map(track => ({ ...track, queueID: track.queueID || path.basename(track.localPath) }));
-    if (!state.queue.length) { deleteGuildQueue(snapshot.guildID); return null; }
+    if (!state.queue.length) { await state.hooks.persistSnapshot?.(state, null, { immediate: true }); return null; }
     await connect(state, voiceChannel);
     await playNext(state);
     if (!state.current) throw new Error('保存的歌曲無法恢復播放。');
@@ -372,8 +433,34 @@ function cleanupState(state, remove = false) {
     state.player.stop(true); state.connection?.destroy(); state.connection = null;
     state.voiceChannel = null; state.voiceChannelID = null;
     deleteTrackFile(state.current); for (const track of state.queue) deleteTrackFile(track);
-    state.current = null; state.queue = []; state.resumeAfterRecovery = false; deleteGuildQueue(state.guildID);
+    state.current = null; state.queue = []; state.resumeAfterRecovery = false;
+    state.hooks.persistSnapshot?.(state, null, { immediate: true });
     if (remove) guildStates.delete(state.guildID);
 }
+
+/** 在關閉語音前同步保存所有 guild 的 current、queue 與播放進度。 */
+async function snapshotAllGuildStates() {
+    await Promise.all([...guildStates.values()].map(state => persistState(state, true)));
+}
+
+/**
+ * 關機專用清理：先設 shuttingDown 阻止 AudioPlayer Idle 消費序列，再停止 timer、
+ * player 與語音連線。此流程刻意保留 cache 與 snapshot，供下次啟動恢復。
+ */
+async function shutdownAllPlayers() {
+    await snapshotAllGuildStates();
+    for (const state of guildStates.values()) {
+        state.shuttingDown = true;
+        stopProgressUpdates(state);
+        if (state.recoveryTimer) clearTimeout(state.recoveryTimer);
+        state.recoveryTimer = null;
+        clearInactivityTimer(state);
+        state.player.stop(true);
+        state.resource?.playStream?.destroy?.();
+        state.connection?.destroy();
+        state.connection = null;
+        state.voiceChannel = null;
+    }
+}
 function isCurrentPanel(state, messageID) { return Boolean(state.panelMessage?.id && state.panelMessage.id === messageID); }
-module.exports = { guildStates, getGuildState, enqueue, togglePause, skipCurrent, cleanupState, isCurrentPanel, elapsedSeconds, restoreGuildState, handleVoiceStateUpdate, removeQueuedTracks, clearQueue, beginTrackPreparation, endTrackPreparation };
+module.exports = { guildStates, getGuildState, enqueue, summonToVoiceChannel, togglePause, skipCurrent, cleanupState, snapshotAllGuildStates, shutdownAllPlayers, isCurrentPanel, elapsedSeconds, restoreGuildState, handleVoiceStateUpdate, removeQueuedTracks, clearQueue, beginTrackPreparation, endTrackPreparation };

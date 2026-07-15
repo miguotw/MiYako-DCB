@@ -53,6 +53,7 @@ voice:
 #-------------------------------
 # 臨時語音頻道 相關設定：
 temporaryVoice:
+  enable: true
 
   # 臨時頻道沒有任何成員後，等待多久自動刪除（分鐘，最低 1 分鐘）。
   deleteAfterMinutes: 5

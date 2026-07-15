@@ -1,7 +1,9 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const command = require('../src/commands/admin/dataCollection');
-const { createMentionBatches, paginateLines, sanitizeCell } = require('../util/dataCollectionViews');
+const { loadConfig } = require('../core/config');
+const config = loadConfig();
+const command = require('../src/commands/admin/dataCollection').createCommand(config);
+const { createMentionBatches, paginateLines, sanitizeCell } = require('../util/dataCollectionViews').createDataCollectionViews(config);
 
 test('/admin 資料收集參數結構正確', () => {
     const json = command.data.toJSON();
@@ -32,10 +34,11 @@ test('資料標題與提交長度設定會套用安全範圍', () => {
     });
 });
 
-test('截止時間使用本機時間及小時偏移', () => {
+test('截止時間先按主機本機時間解析，再扣除人工校正量', () => {
     const base = command._test.parseDeadline('2026-08-01 20:30', 0);
-    assert.equal(command._test.parseDeadline('2026-08-01 20:30', 1) - base, 3600);
-    assert.equal(command._test.parseDeadline('2026-08-01 20:30', -2) - base, -7200);
+    assert.equal(base, new Date(2026, 7, 1, 20, 30).getTime() / 1000);
+    assert.equal(command._test.parseDeadline('2026-08-01 20:30', 1) - base, -3600);
+    assert.equal(command._test.parseDeadline('2026-08-01 20:30', -2) - base, 7200);
     assert.equal(command._test.parseDeadline('2026-02-30 20:30', 0), null);
 });
 
@@ -44,7 +47,7 @@ test('白名單只接受提及並去重', () => {
         { type: 'user', id: '12345678901234567' },
         { type: 'role', id: '23456789012345678' }
     ]);
-    assert.throws(() => command._test.parseMentionTargets('12345678901234567'), /不接受純數字 ID/);
+    assert.throws(() => command._test.parseMentionTargets('12345678901234567'), /僅接受 @用戶 或 @身分組/);
 });
 
 test('建立流程同時保留原始提及目標與展開後用戶', async () => {

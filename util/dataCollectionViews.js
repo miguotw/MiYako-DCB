@@ -1,9 +1,9 @@
-const path = require('path');
 const {
     ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, escapeMarkdown
 } = require('discord.js');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
-const { updateDataCollection } = require(path.join(process.cwd(), 'util/dataCollectionStore'));
+
+function createDataCollectionViews(config) {
+const configCommands = config.commands;
 
 const COLOR = config.embed.color.default;
 const EMOJI = configCommands.dataCollection?.emoji || '📝';
@@ -95,7 +95,8 @@ function createAdminEmbed(record, description, page, totalPages) {
         .setTimestamp();
 }
 
-async function syncAdminPanels(client, record) {
+async function syncAdminPanels(client, record, repository) {
+    if (!repository) throw new Error('同步資料收集面板缺少 repository。');
     const channel = await client.channels.fetch(record.adminChannelID).catch(() => null);
     if (!channel || typeof channel.send !== 'function') throw new Error('找不到資料收集管理面板頻道。');
     const pages = paginateLines(createSubmissionLines(record));
@@ -112,13 +113,13 @@ async function syncAdminPanels(client, record) {
             : null;
         const message = existing ? await existing.edit(payload) : await channel.send(payload);
         nextIDs.push(message.id);
-        updateDataCollection(record.guildID, record.id, current => { current.adminPageMessageIDs = [...nextIDs]; });
+        await repository.update(record.guildID, record.id, current => { current.adminPageMessageIDs = [...nextIDs]; });
     }
     for (const obsoleteID of oldIDs.slice(pages.length)) {
         const message = await channel.messages?.fetch(obsoleteID).catch(() => null);
         if (message) await message.delete().catch(() => {});
     }
-    updateDataCollection(record.guildID, record.id, current => {
+    await repository.update(record.guildID, record.id, current => {
         current.adminPageMessageIDs = nextIDs;
         current.adminSyncPending = false;
     });
@@ -133,7 +134,10 @@ async function deleteAdminPanels(client, record) {
     }
 }
 
-module.exports = {
+return {
     createMentionBatches, createPublicEmbed, createSubmissionLines, deleteAdminPanels, paginateLines,
     sanitizeCell, submitRow, syncAdminPanels
 };
+}
+
+module.exports = { createDataCollectionViews };

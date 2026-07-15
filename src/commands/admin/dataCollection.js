@@ -1,23 +1,43 @@
-const path = require('path');
 const {
     ActionRowBuilder, ChannelType, EmbedBuilder, ModalBuilder, PermissionFlagsBits, SlashCommandBuilder,
     TextInputBuilder, TextInputStyle
 } = require('discord.js');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
-const { getAdminCommandPath } = require(path.join(process.cwd(), 'core/commandPolicy'));
-const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const {
-    createDataCollection, deleteDataCollection, findDataCollection, getDataCollection,
-    updateDataCollection, withCollectionLock
-} = require(path.join(process.cwd(), 'util/dataCollectionStore'));
-const {
-    createMentionBatches, createPublicEmbed, deleteAdminPanels, submitRow, syncAdminPanels
-} = require(path.join(process.cwd(), 'util/dataCollectionViews'));
+const { createCommandPolicy } = require('../../../core/commandPolicy');
+const { createReplyTools } = require('../../../core/Reply');
+const { createLogTools } = require('../../../core/sendLog');
+const { createDataCollectionRepository } = require('../../../util/dataCollectionRepository');
+const { createDataCollectionViews } = require('../../../util/dataCollectionViews');
 const {
     fetchSourceMessage, parseDeadline: parseDeadlineInput,
     parseMentionTargets: parseMentionTargetsInput, resolveMentionedUsers
-} = require(path.join(process.cwd(), 'util/discordCommandInput'));
+} = require('../../../util/discordCommandInput');
+
+function createCommand(config, { scheduleCollection = () => {} } = {}) {
+const { getAdminCommandPath } = createCommandPolicy(config);
+const { errorReply, infoReply, validationReply } = createReplyTools(config);
+const { sendLog } = createLogTools(config);
+const {
+    createMentionBatches, createPublicEmbed, deleteAdminPanels, submitRow, syncAdminPanels
+} = createDataCollectionViews(config);
+const configCommands = config.commands;
+const repositories = new WeakMap();
+const operationLocks = new Map();
+
+function repository(context) {
+    const json = context?.store?.dataCollection;
+    if (!json) throw new Error('資料收集功能缺少 dataCollection repository context。');
+    if (!repositories.has(json)) repositories.set(json, createDataCollectionRepository(json));
+    return repositories.get(json);
+}
+
+async function withCollectionLock(collectionID, operation) {
+    const key = String(collectionID);
+    const previous = operationLocks.get(key) || Promise.resolve();
+    const current = previous.catch(() => {}).then(operation);
+    operationLocks.set(key, current);
+    try { return await current; }
+    finally { if (operationLocks.get(key) === current) operationLocks.delete(key); }
+}
 
 function getDataCollectionLimits(settings = {}) {
     return {
@@ -74,7 +94,7 @@ function canManageCollection(interaction, record) {
 
 function privateReply(interaction) { return interaction.inGuild(); }
 
-module.exports = {
+const command = {
     data: new SlashCommandBuilder().setName('資料收集').setDescription('建立資料收集面板')
         .addStringOption(opt => opt.setName('訊息id或連結').setDescription('作為介紹內文的訊息 ID 或連結').setRequired(true))
         .addChannelOption(opt => opt.setName('選擇頻道').setDescription('發送資料收集消息的頻道').addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement).setRequired(true))
@@ -90,7 +110,7 @@ module.exports = {
         .addStringOption(opt => opt.setName('資料4').setDescription('第四個資料欄位的標題').setMinLength(1).setMaxLength(TITLE_MAX_LENGTH))
         .addStringOption(opt => opt.setName('資料5').setDescription('第五個資料欄位的標題').setMinLength(1).setMaxLength(TITLE_MAX_LENGTH)),
 
-    async execute(interaction) {
+    async execute(interaction, context) {
         await interaction.deferReply({ ephemeral: true });
         sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：${getAdminCommandPath('資料收集')}`);
         let record = null;
@@ -98,13 +118,13 @@ module.exports = {
         const mentionMessages = [];
         try {
             const source = await fetchSourceMessage(interaction, interaction.options.getString('訊息id或連結', true));
-            if (!source.content.trim()) return errorReply(interaction, '**來源訊息沒有可作為介紹的文字內容。**');
-            if (source.content.length > 4096) return errorReply(interaction, '**來源訊息超過 Embed 介紹內文的 4096 字元上限。**');
+            if (!source.content.trim()) return validationReply(interaction, '**來源訊息沒有可作為介紹的文字內容。**');
+            if (source.content.length > 4096) return validationReply(interaction, '**來源訊息超過 Embed 介紹內文的 4096 字元上限。**');
             const publicChannel = interaction.options.getChannel('選擇頻道', true);
-            if (!publicChannel.isTextBased() || typeof publicChannel.send !== 'function') return errorReply(interaction, '**請選擇可發送訊息的文字頻道。**');
-            if (!interaction.channel?.isTextBased() || typeof interaction.channel.send !== 'function') return errorReply(interaction, '**目前頻道無法建立管理面板。**');
+            if (!publicChannel.isTextBased() || typeof publicChannel.send !== 'function') return validationReply(interaction, '**請選擇可發送訊息的文字頻道。**');
+            if (!interaction.channel?.isTextBased() || typeof interaction.channel.send !== 'function') return validationReply(interaction, '**目前頻道無法建立管理面板。**');
             const deadline = parseDeadline(interaction.options.getString('截止時間', true));
-            if (!deadline || deadline <= Math.floor(Date.now() / 1000)) return errorReply(interaction, '**截止時間格式錯誤或已過期，請使用 yyyy-mm-dd hh:mm。**');
+            if (!deadline || deadline <= Math.floor(Date.now() / 1000)) return validationReply(interaction, '**截止時間格式錯誤或已過期，請使用 yyyy-mm-dd hh:mm。**');
             const whitelist = await buildWhitelist(interaction, interaction.options.getString('白名單', true));
             const whitelistTargets = whitelist.targets;
             const whitelistUserIDs = whitelist.userIDs;
@@ -115,10 +135,10 @@ module.exports = {
                 ? await interaction.user.createDM()
                 : interaction.channel;
             if (!adminChannel?.isTextBased() || typeof adminChannel.send !== 'function') {
-                return errorReply(interaction, '**無法建立管理面板頻道；若選擇私信我，請確認 Bot 可以私訊您。**');
+                return validationReply(interaction, '**無法建立管理面板頻道；若選擇私信我，請確認 Bot 可以私訊您。**');
             }
 
-            record = createDataCollection(interaction.guildId, {
+            record = await repository(context).create(interaction.guildId, {
                 creatorID: interaction.user.id,
                 sourceChannelID: source.channelId,
                 sourceMessageID: source.id,
@@ -147,21 +167,21 @@ module.exports = {
                 components: submitRow(record),
                 allowedMentions: { users: finalBatch.userIDs, roles: finalBatch.roleIDs }
             });
-            record = updateDataCollection(interaction.guildId, record.id, current => {
+            record = await repository(context).update(interaction.guildId, record.id, current => {
                 current.publicMessageID = publicMessage.id;
                 current.publicMentionMessageIDs = mentionMessages.map(message => message.id);
             });
-            await syncAdminPanels(interaction.client, record);
+            await syncAdminPanels(interaction.client, record, repository(context));
+            scheduleCollection(await repository(context).get(interaction.guildId, record.id));
             return infoReply(interaction, `**已在 ${publicChannel} 建立資料收集面板。**\n唯一 ID：\`${record.id}\``);
         } catch (error) {
-            sendLog(interaction.client, '❌ 建立資料收集面板時發生錯誤：', 'ERROR', error);
             if (publicMessage) await publicMessage.delete().catch(() => {});
             for (const message of mentionMessages) await message.delete().catch(() => {});
             if (record) {
-                await deleteAdminPanels(interaction.client, getDataCollection(interaction.guildId, record.id) || record);
-                deleteDataCollection(interaction.guildId, record.id);
+                await deleteAdminPanels(interaction.client, await repository(context).get(interaction.guildId, record.id) || record);
+                await repository(context).remove(interaction.guildId, record.id);
             }
-            return errorReply(interaction, `**${error.message || '無法建立資料收集面板。'}**`);
+            return errorReply(interaction, error, { context: '建立資料收集面板' });
         }
     },
 
@@ -170,11 +190,11 @@ module.exports = {
     modalSubmitHandlers: {},
 
     publicButtonHandlers: {
-        data_collection_delete: async interaction => {
+        data_collection_delete: async (interaction, context) => {
             const collectionID = interaction.customId.split(':')[1];
-            const record = findDataCollection(collectionID);
-            if (!record) return errorReply(interaction, '**找不到這筆資料收集。**', [], privateReply(interaction));
-            if (!canManageCollection(interaction, record)) return errorReply(interaction, '**只有資料收集建立者或伺服器管理員可以刪除資料。**', [], privateReply(interaction));
+            const record = await repository(context).find(collectionID);
+            if (!record) return validationReply(interaction, '**找不到這筆資料收集。**', { ephemeral: privateReply(interaction) });
+            if (!canManageCollection(interaction, record)) return validationReply(interaction, '**只有資料收集建立者或伺服器管理員可以刪除資料。**', { ephemeral: privateReply(interaction) });
             const modal = new ModalBuilder().setCustomId(`data_collection_delete_modal:${collectionID}`).setTitle('確認刪除資料收集')
                 .addComponents(new ActionRowBuilder().addComponents(
                     new TextInputBuilder().setCustomId('confirmation').setLabel('輸入 y 以刪除所有收集資料')
@@ -182,54 +202,57 @@ module.exports = {
                 ));
             return interaction.showModal(modal);
         },
-        data_collection_submit: async interaction => {
+        data_collection_submit: async (interaction, context) => {
             const collectionID = interaction.customId.split(':')[1];
-            const record = getDataCollection(interaction.guildId, collectionID);
-            if (!record) return errorReply(interaction, '**找不到這筆資料收集。**', [], true);
-            if (record.status !== 'open' || Math.floor(Date.now() / 1000) >= record.deadline) return errorReply(interaction, '**資料提交已截止。**', [], true);
-            if (!record.whitelistUserIDs.includes(interaction.user.id)) return errorReply(interaction, '**您不在本次資料收集的白名單中。**', [], true);
+            const record = await repository(context).get(interaction.guildId, collectionID);
+            if (!record) return validationReply(interaction, '**找不到這筆資料收集。**', { ephemeral: true });
+            if (record.status !== 'open' || Math.floor(Date.now() / 1000) >= record.deadline) return validationReply(interaction, '**資料提交已截止。**', { ephemeral: true });
+            if (!record.whitelistUserIDs.includes(interaction.user.id)) return validationReply(interaction, '**您不在本次資料收集的白名單中。**', { ephemeral: true });
             return interaction.showModal(createSubmitModal(record, interaction.user.id));
         }
     },
 
     publicModalSubmitHandlers: {
-        data_collection_delete_modal: async interaction => {
+        data_collection_delete_modal: async (interaction, context) => {
             const collectionID = interaction.customId.split(':')[1];
             await interaction.deferReply({ ephemeral: privateReply(interaction) });
             if (interaction.fields.getTextInputValue('confirmation').trim().toLowerCase() !== 'y') {
-                return errorReply(interaction, '**確認文字不正確，未刪除資料。**');
+                return validationReply(interaction, '**確認文字不正確，未刪除資料。**');
             }
             return withCollectionLock(collectionID, async () => {
-                const record = findDataCollection(collectionID);
-                if (!record) return errorReply(interaction, '**找不到這筆資料收集。**');
-                if (!canManageCollection(interaction, record)) return errorReply(interaction, '**只有資料收集建立者或伺服器管理員可以刪除資料。**');
+                const record = await repository(context).find(collectionID);
+                if (!record) return validationReply(interaction, '**找不到這筆資料收集。**');
+                if (!canManageCollection(interaction, record)) return validationReply(interaction, '**只有資料收集建立者或伺服器管理員可以刪除資料。**');
                 await disablePublicPanel(interaction.client, record);
                 await deleteAdminPanels(interaction.client, record);
-                deleteDataCollection(record.guildID, collectionID);
+                await repository(context).remove(record.guildID, collectionID);
                 sendLog(interaction.client, `💾 ${interaction.user.tag} 刪除資料收集 ${collectionID} 及全部提交資料。`);
                 return infoReply(interaction, '**已停用公開面板並刪除所有收集資料。**');
             });
         },
-        data_collection_modal: async interaction => {
+        data_collection_modal: async (interaction, context) => {
             const collectionID = interaction.customId.split(':')[1];
             await interaction.deferReply({ ephemeral: true });
             return withCollectionLock(collectionID, async () => {
-                let record = getDataCollection(interaction.guildId, collectionID);
-                if (!record) return errorReply(interaction, '**找不到這筆資料收集。**', [], true);
-                if (record.status !== 'open' || Math.floor(Date.now() / 1000) >= record.deadline) return errorReply(interaction, '**資料提交已截止。**', [], true);
-                if (!record.whitelistUserIDs.includes(interaction.user.id)) return errorReply(interaction, '**您不在本次資料收集的白名單中。**', [], true);
+                let record = await repository(context).get(interaction.guildId, collectionID);
+                if (!record) return validationReply(interaction, '**找不到這筆資料收集。**');
+                if (record.status !== 'open' || Math.floor(Date.now() / 1000) >= record.deadline) return validationReply(interaction, '**資料提交已截止。**');
+                if (!record.whitelistUserIDs.includes(interaction.user.id)) return validationReply(interaction, '**您不在本次資料收集的白名單中。**');
                 const values = record.fieldLabels.map((_, index) => interaction.fields.getTextInputValue(`data_${index + 1}`).trim());
-                if (values.some(value => !value)) return errorReply(interaction, '**所有資料欄位皆為必填。**', [], true);
+                if (values.some(value => !value)) return validationReply(interaction, '**所有資料欄位皆為必填。**');
                 const previous = record.submissions?.[interaction.user.id];
                 const now = new Date().toISOString();
-                record = updateDataCollection(interaction.guildId, collectionID, current => {
+                record = await repository(context).update(interaction.guildId, collectionID, current => {
                     current.submissions[interaction.user.id] = {
                         values, submittedAt: previous?.submittedAt || now, updatedAt: now
                     };
                     current.adminSyncPending = true;
                 });
-                try { await syncAdminPanels(interaction.client, record); }
-                catch (error) { sendLog(interaction.client, `❌ 更新資料收集 ${collectionID} 管理面板失敗：`, 'ERROR', error); }
+                try { await syncAdminPanels(interaction.client, record, repository(context)); }
+                catch (error) {
+                    sendLog(interaction.client, `❌ 更新資料收集 ${collectionID} 管理面板失敗：`, 'ERROR', error);
+                    scheduleCollection(record);
+                }
 
                 const copy = new EmbedBuilder().setColor(config.embed.color.default).setTitle('📝 ┃ 您提交的資料副本（BETA）')
                     .addFields(record.fieldLabels.map((label, index) => ({ name: label, value: values[index] })))
@@ -244,6 +267,10 @@ module.exports = {
     }
 };
 
-module.exports._test = {
+command._test = {
     buildWhitelist, getDataCollectionLimits, parseDeadline, parseMentionTargets
 };
+return command;
+}
+
+module.exports = { createCommand };

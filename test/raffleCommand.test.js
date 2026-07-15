@@ -1,8 +1,10 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { _test } = require('../src/commands/admin/raffle');
-const { createRaffleEmbed, participationRow } = require('../util/raffleViews');
-const command = require('../src/commands/admin/raffle');
+const { loadConfig } = require('../core/config');
+const config = loadConfig();
+const command = require('../src/commands/admin/raffle').createCommand(config);
+const { _test } = command;
+const { createRaffleEmbed, participationRow } = require('../util/raffleViews').createRaffleViews(config);
 
 test('抽選系統本身沒有建立抽選子指令', () => {
     const json = command.data.toJSON();
@@ -12,16 +14,15 @@ test('抽選系統本身沒有建立抽選子指令', () => {
     assert.equal(json.options.find(option => option.name === '提及身分組').required, false);
 });
 
-test('截止日期與時間先以本機時間解讀', () => {
+test('timezone 0 保留主機本機時間的原始解析結果', () => {
     const timestamp = _test.parseDeadline('2026-08-01 20:30', 0);
-    assert.equal(timestamp, 1785587400);
-    assert.equal(new Date(timestamp * 1000).toISOString(), '2026-08-01T12:30:00.000Z');
+    assert.equal(timestamp, new Date(2026, 7, 1, 20, 30).getTime() / 1000);
 });
 
-test('log.timezone 以小時加減截止時間', () => {
+test('正校正量會從主機解析結果扣除指定小時', () => {
     const base = _test.parseDeadline('2026-08-01 20:30', 0);
-    assert.equal(_test.parseDeadline('2026-08-01 20:30', 1) - base, 3600);
-    assert.equal(_test.parseDeadline('2026-08-01 20:30', -2) - base, -7200);
+    assert.equal(_test.parseDeadline('2026-08-01 20:30', 1) - base, -3600);
+    assert.equal(_test.parseDeadline('2026-08-01 20:30', -2) - base, 7200);
 });
 
 test('截止日期拒絕不存在的日期與錯誤格式', () => {
@@ -35,7 +36,7 @@ test('白黑名單只接受用戶或身分組提及並移除重複項目', () =>
         _test.parseMentionTargets('<@12345678901234567>, <@12345678901234567> <@&23456789012345678>', '白名單'),
         [{ type: 'user', id: '12345678901234567' }, { type: 'role', id: '23456789012345678' }]
     );
-    assert.throws(() => _test.parseMentionTargets('12345678901234567', '黑名單'), /不接受純數字 ID/);
+    assert.throws(() => _test.parseMentionTargets('12345678901234567', '黑名單'), /僅接受 @用戶 或 @身分組/);
 });
 
 test('公開公告以 footer 顯示唯一 ID 與時間，並顯示登記名單', () => {

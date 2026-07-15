@@ -1,9 +1,11 @@
-const path = require('path');
-const { configModules } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
+const { createLogTools } = require('../../../core/sendLog');
+
+function createInitializer(config) {
+const { sendLog } = createLogTools(config);
+const configModules = config.modules;
 
 // 記錄語音頻道進出
-module.exports = (client) => {
+const initializer = (client) => {
 
     if (configModules.voice.enable) {
         client.on('voiceStateUpdate', (oldState, newState) => {
@@ -26,3 +28,7 @@ module.exports = (client) => {
         });
     }
 };
+return initializer;
+}
+
+module.exports = { createInitializer };

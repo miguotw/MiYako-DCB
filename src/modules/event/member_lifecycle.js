@@ -1,7 +1,9 @@
-const path = require('path');
 const { Events, EmbedBuilder } = require('discord.js');
-const { config, configModules } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
+const { createLogTools } = require('../../../core/sendLog');
+
+function createInitializer(config) {
+const { sendLog } = createLogTools(config);
+const configModules = config.modules;
 
 const EMBED_COLOR = config.embed.color.default;
 
@@ -37,7 +39,11 @@ function registerMemberEvent(client, event, type, actionName) {
     });
 }
 
-module.exports = client => {
+const initializer = client => {
     registerMemberEvent(client, Events.GuildMemberAdd, 'join', '歡迎');
     registerMemberEvent(client, Events.GuildMemberRemove, 'leave', '離開');
 };
+return initializer;
+}
+
+module.exports = { createInitializer };

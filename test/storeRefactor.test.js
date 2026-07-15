@@ -1,37 +1,55 @@
+'use strict';
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { createJsonRepository } = require('../core/jsonRepository');
+const { createStoreRegistry } = require('../core/storeRegistry');
+const { PROJECT_ROOT } = require('../core/config');
+const { createTemporaryVoiceRepository } = require('../util/temporaryVoiceRepository');
+const { createTwitchStreamRepository } = require('../util/twitchStreamRepository');
 
-// 讓 Store 將測試資料寫到獨立暫存目錄，不碰觸正式 assets 資料。
-const originalCwd = process.cwd();
-const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'miyako-store-refactor-'));
-process.chdir(temporaryRoot);
-const temporaryVoiceStore = require('../util/temporaryVoiceStore');
-const twitchStreamStore = require('../util/twitchStreamStore');
-process.chdir(originalCwd);
-
-test.after(() => fs.rmSync(temporaryRoot, { recursive: true, force: true }));
-
-test('臨時語音 Store 遷移後仍可建立、更新與列舉 Guild 資料', () => {
-    const guildID = '12345678901234567';
-    temporaryVoiceStore.setEntrance(guildID, '23456789012345678', '臨時');
-    temporaryVoiceStore.addManagedChannel(guildID, '34567890123456789', {
+test('臨時語音 repository 可建立、更新與列舉 Guild 資料', async t => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'miyako-store-refactor-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const json = createJsonRepository({ directory: path.join(root, 'voice') });
+    const repository = createTemporaryVoiceRepository(json);
+    await repository.setEntrance('12345678901234567', '23456789012345678', '臨時');
+    await repository.addChannel('12345678901234567', '34567890123456789', {
         entranceChannelID: '23456789012345678', ownerID: '45678901234567890'
     });
-    assert.equal(temporaryVoiceStore.loadGuildStore(guildID).entrances['23456789012345678'].prefix, '臨時');
-    assert.deepEqual(temporaryVoiceStore.listStoredGuildIDs(), [guildID]);
+    assert.equal((await repository.readGuild('12345678901234567')).entrances['23456789012345678'].prefix, '臨時');
+    assert.deepEqual(await repository.listGuildIDs(), ['12345678901234567']);
 });
 
-test('Twitch Store 部分更新不會清除另一類既有資料', () => {
-    const guildID = '56789012345678901';
-    twitchStreamStore.writeGuildStore(guildID, {
-        subscriptions: [{ twitchUserLogin: 'example' }],
-        notifications: [{ messageID: '1' }]
+test('Twitch repository 部分更新不會清除通知資料', async t => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'miyako-twitch-store-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const repository = createTwitchStreamRepository(createJsonRepository({ directory: path.join(root, 'twitch') }));
+    await repository.writeGuild('56789012345678901', {
+        subscriptions: [{ twitchUserLogin: 'example' }], notifications: [{ messageID: '1' }]
     });
-    twitchStreamStore.writeGuildStore(guildID, { subscriptions: [{ twitchUserLogin: 'updated' }] });
-    const stored = twitchStreamStore.readGuildStore(guildID);
+    await repository.updateGuild('56789012345678901', store => {
+        store.subscriptions = [{ twitchUserLogin: 'updated' }];
+    });
+    const stored = await repository.readGuild('56789012345678901');
     assert.equal(stored.subscriptions[0].twitchUserLogin, 'updated');
     assert.equal(stored.notifications[0].messageID, '1');
+});
+
+test('非專案 CWD 仍使用專案根目錄下的固定 runtime 路徑', t => {
+    const previous = process.cwd();
+    const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'miyako-other-cwd-'));
+    t.after(() => {
+        process.chdir(previous);
+        fs.rmSync(elsewhere, { recursive: true, force: true });
+    });
+    process.chdir(elsewhere);
+    const store = createStoreRegistry();
+    assert.equal(store.packageTracking.directory,
+        path.join(PROJECT_ROOT, 'runtime', 'data', 'package-tracking'));
+    assert.equal(store.musicQueue.directory,
+        path.join(PROJECT_ROOT, 'runtime', 'data', 'music', 'queues'));
 });

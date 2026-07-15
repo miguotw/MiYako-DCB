@@ -1,12 +1,15 @@
 #-------------------------------
 # 啟動設定：
-Startup:
+startup:
 
   # 機器人的 token
-  token: " "
+  token: "請替換為 Discord Bot Token"
 
   # 機器人的 ID
-  clientID: " "
+  clientId: "123456789012345678"
+
+  # 測試用伺服器 ID；只有 deploy:guild／undeploy:guild 需要，正式環境可省略。
+  # guildId: "234567890123456789"
 
   # 管理聚合指令的前綴名稱，例如設定為 admin 時會註冊 /admin。
   # 需符合 Discord Slash Command 名稱規則，長度為 1～32 個字元且英文必須為小寫。
@@ -16,7 +19,7 @@ Startup:
   activityType: 0
 
   # 機器人的線上狀態，可參考：online (線上)、idle (閒置/離開)、dnd (請勿打擾)、invisible (隱身)
-  StatusType: "online"
+  statusType: "online"
 
 
 #-------------------------------
@@ -24,7 +27,7 @@ Startup:
 log:
 
   # 日誌頻道 ID
-  channel: " "
+  channel: "123456789012345678"
 
   # 時區偏移
   timezone: 0

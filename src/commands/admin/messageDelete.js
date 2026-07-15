@@ -1,10 +1,13 @@
-const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
-const { getAdminCommandPath } = require(path.join(process.cwd(), 'core/commandPolicy'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { createCommandPolicy } = require('../../../core/commandPolicy');
+const { createLogTools } = require('../../../core/sendLog');
+const { createReplyTools } = require('../../../core/Reply');
 
+function createCommand(config) {
+const { getAdminCommandPath } = createCommandPolicy(config);
+const { sendLog } = createLogTools(config);
+const { errorReply, infoReply, validationReply } = createReplyTools(config);
+const configCommands = config.commands;
 // 導入設定檔內容
 const EMBED_COLOR = config.embed.color.default;
 const LOADING_EMOJI = config.emoji.loading;
@@ -23,8 +26,7 @@ async function deleteMessagesIndividually(interaction, messages) {
 
             await new Promise(resolve => setTimeout(resolve, MESSAGE_DELETE_DELAY_MS));
         } catch (error) {
-            sendLog(interaction.client, `❌ 在執行 ${getAdminCommandPath('刪除訊息')} 指令時發生錯誤，無法刪除訊息 ID: ${message.id}`, "ERROR", error);
-            throw new Error(`無法刪除訊息 ID: ${message.id}`);
+            throw new Error(`無法刪除訊息 ID: ${message.id}`, { cause: error });
         }
     }
 
@@ -41,7 +43,7 @@ async function getMessageChannel(interaction) {
     return channel;
 }
 
-module.exports = {
+const command = {
     data: new SlashCommandBuilder()
         .setName('刪除訊息')
         .setDescription('批量刪除訊息')
@@ -50,7 +52,7 @@ module.exports = {
                 .setDescription(`要刪除的訊息數量 (1~${DELETE_LIMIT})`)
                 .setRequired(true)
         ),
-    async execute(interaction) {
+    async execute(interaction, _context) {
 
         //啟用延遲回覆
         await interaction.deferReply({ ephemeral: true });
@@ -65,7 +67,7 @@ module.exports = {
 
             // 確保刪除的訊息數量在合理範圍內 (1-DELETE_LIMIT)
             if (amount < 1 || amount > DELETE_LIMIT) {
-                return errorReply(interaction, `**請輸入一個介於 1 到 ${DELETE_LIMIT} 之間的數字！**`);
+                return validationReply(interaction, `**請輸入一個介於 1 到 ${DELETE_LIMIT} 之間的數字！**`);
             }
 
             // 提示開始刪除
@@ -124,8 +126,11 @@ module.exports = {
 
         } catch (error) {
             // 錯誤處理
-            sendLog(interaction.client, `❌ 在執行 ${getAdminCommandPath('刪除訊息')} 指令時發生錯誤`, "ERROR", error); // 記錄錯誤日誌
-            return errorReply(interaction, `**${error.message || '發生未預期的錯誤，請向開發者回報！'}**`); // 向用戶顯示錯誤訊息
+            return errorReply(interaction, error, { context: '刪除 Discord 訊息' });
         }
     }
 };
+return command;
+}
+
+module.exports = { createCommand };

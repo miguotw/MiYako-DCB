@@ -1,23 +1,17 @@
-const path = require('path');
 /**
- * Track.TW API adapter、物流 record repository 與共用 Embed builder。
- *
- * 每位 Discord 使用者各有一個 `assets/packageTracking/<userID>.json`，避免不同使用者
- * 的面板互相看見資料。遠端 user_package_id 是 record 的主鍵；tracking number 只用於
- * 顯示與重複檢查。此模組使用同步檔案 I/O，呼叫端應避免高頻並行寫入同一使用者檔案。
+ * Track.TW API adapter 與共用 Embed builder；JSON 存取由 packageTrackingRepository 負責。
  */
-const fs = require('fs');
-const axios = require('axios');
+const { http } = require('../core/http');
 const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
     EmbedBuilder
 } = require('discord.js');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
+function createPackageTrackingTools(config) {
+const configCommands = config.commands;
 
 const PACKAGE_CONFIG = configCommands.packageTracking || {};
-const DATA_DIR = path.join(process.cwd(), 'assets', 'packageTracking');
 const API_BASE_URL = 'https://track.tw/api/v1';
 const EMBED_COLOR = config.embed.color.default;
 const EMBED_EMOJI = PACKAGE_CONFIG.emoji || '📦';
@@ -93,70 +87,6 @@ function withAddPackageRow(rows = [], addPackageCustomId = 'package_panel_add') 
     return [...outputRows, createAddPackageRow(addPackageCustomId)];
 }
 
-// 本機 repository -----------------------------------------------------------
-
-function ensureDataDir() {
-    if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-}
-
-/** 損壞或不存在的使用者檔視為空資料，讓單一檔案不阻止整個 Bot 啟動。 */
-function readPackageFile(filePath) {
-    try {
-        const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-        return { packages: Array.isArray(data.packages) ? data.packages : [] };
-    } catch {
-        return { packages: [] };
-    }
-}
-
-function writePackageFile(filePath, store) {
-    ensureDataDir();
-    fs.writeFileSync(filePath, JSON.stringify({ packages: store.packages || [] }, null, 2), 'utf8');
-}
-
-/** 僅接受 Discord snowflake 的數字字串，防止路徑穿越。 */
-function getUserPackageFile(userID) {
-    const normalizedUserID = String(userID || '').trim();
-    if (!/^\d+$/.test(normalizedUserID)) {
-        throw new Error('無效的使用者 ID。');
-    }
-
-    return path.join(DATA_DIR, `${normalizedUserID}.json`);
-}
-
-function isUserPackageFile(fileName) {
-    return /^\d+\.json$/.test(fileName);
-}
-
-function loadUserPackageStore(userID) {
-    ensureDataDir();
-
-    const userFile = getUserPackageFile(userID);
-    if (!fs.existsSync(userFile)) return { packages: [] };
-    return readPackageFile(userFile);
-}
-
-function saveUserPackageStore(userID, store) {
-    const userFile = getUserPackageFile(userID);
-    writePackageFile(userFile, store);
-}
-
-function getUserPackageStores() {
-    ensureDataDir();
-
-    return fs.readdirSync(DATA_DIR)
-        .filter(isUserPackageFile)
-        .map(fileName => {
-            const userID = path.basename(fileName, '.json');
-            return {
-                userID,
-                store: readPackageFile(path.join(DATA_DIR, fileName))
-            };
-        });
-}
-
 // 設定與 Track.TW HTTP adapter ---------------------------------------------
 
 function getTrackTwToken() {
@@ -197,24 +127,19 @@ function getPackageTrackingConfig() {
     };
 }
 
-function createTrackTwClient() {
-    return axios.create({
-        baseURL: API_BASE_URL,
-        headers: {
-            Authorization: `Bearer ${getTrackTwToken()}`
-        }
-    });
+function createTrackTwRequestConfig() {
+    return { headers: { Authorization: `Bearer ${getTrackTwToken()}` } };
 }
 
 async function getAvailableCarriers() {
-    const response = await createTrackTwClient().get('/carrier/available');
+    const response = await http.get(`${API_BASE_URL}/carrier/available`, createTrackTwRequestConfig());
     return response.data || [];
 }
 
 async function detectCarrier(trackingNumbers) {
-    const response = await createTrackTwClient().post('/carrier/detect', {
+    const response = await http.post(`${API_BASE_URL}/carrier/detect`, {
         tracking_numbers: trackingNumbers
-    });
+    }, createTrackTwRequestConfig());
     return response.data.carriers || [];
 }
 
@@ -232,17 +157,24 @@ async function importPackage(carrierID, trackingNumber, note = '', extraFields =
         };
     }
 
-    const response = await createTrackTwClient().post('/package/import', body);
+    const response = await http.post(`${API_BASE_URL}/package/import`, body, createTrackTwRequestConfig());
     return response.data;
 }
 
-async function trackingPackage(userPackageID) {
-    const response = await createTrackTwClient().get(`/package/tracking/${userPackageID}`);
+async function trackingPackage(userPackageID, { signal } = {}) {
+    const response = await http.get(`${API_BASE_URL}/package/tracking/${encodeURIComponent(userPackageID)}`, {
+        ...createTrackTwRequestConfig(),
+        signal
+    });
     return response.data;
 }
 
 async function changePackageState(userPackageID, state) {
-    const response = await createTrackTwClient().patch(`/package/state/${userPackageID}/${state}`);
+    const response = await http.patch(
+        `${API_BASE_URL}/package/state/${encodeURIComponent(userPackageID)}/${encodeURIComponent(state)}`,
+        undefined,
+        createTrackTwRequestConfig()
+    );
     return response.data;
 }
 
@@ -387,96 +319,11 @@ function createStoredPackageEmbed(record, title = '包裹貨態') {
         .setTimestamp();
 }
 
-// Record 查詢與異動 ---------------------------------------------------------
-
-function findPackageRecord(userID, trackingNumber) {
-    const store = loadUserPackageStore(userID);
-    return store.packages.find(record =>
-        record.userID === userID &&
-        record.trackingNumber.toLowerCase() === trackingNumber.toLowerCase()
-    );
-}
-
-function findDuplicatePackage(userID, carrierID, trackingNumber) {
-    const store = loadUserPackageStore(userID);
-    return store.packages.find(record =>
-        record.userID === userID &&
-        record.carrierID === carrierID &&
-        record.trackingNumber.toLowerCase() === trackingNumber.toLowerCase() &&
-        record.status !== 'deleted'
-    );
-}
-
-/** 以 userPackageID upsert；新資料插在前方，讓面板優先顯示最近操作項目。 */
-function upsertPackageRecord(record) {
-    const store = loadUserPackageStore(record.userID);
-    const index = store.packages.findIndex(item => item.userPackageID === record.userPackageID);
-
-    if (index === -1) {
-        store.packages.push(record);
-    } else {
-        store.packages[index] = { ...store.packages[index], ...record };
-    }
-
-    saveUserPackageStore(record.userID, store);
-    return record;
-}
-
-/**
- * 由遠端 ID 反查 owner。這會掃描所有使用者檔案，適合背景排程但不應放入高頻熱路徑。
- */
-function findPackageStoreByID(userPackageID) {
-    for (const { userID, store } of getUserPackageStores()) {
-        const index = store.packages.findIndex(record => record.userPackageID === userPackageID);
-        if (index !== -1) return { userID, store, index };
-    }
-
-    return null;
-}
-
-function updatePackageRecord(userPackageID, updates) {
-    const result = findPackageStoreByID(userPackageID);
-    if (!result) return null;
-
-    const { userID, store, index } = result;
-
-    store.packages[index] = {
-        ...store.packages[index],
-        ...updates,
-        updatedAt: new Date().toISOString()
-    };
-    saveUserPackageStore(userID, store);
-    return store.packages[index];
-}
-
-function deletePackageRecord(userPackageID) {
-    const result = findPackageStoreByID(userPackageID);
-    if (!result) return null;
-
-    const { userID, store, index } = result;
-
-    const [deletedRecord] = store.packages.splice(index, 1);
-    saveUserPackageStore(userID, store);
-    return deletedRecord;
-}
-
-function getPackageRecords(filter = {}) {
-    const records = filter.userID
-        ? loadUserPackageStore(filter.userID).packages
-        : getUserPackageStores().flatMap(({ store }) => store.packages);
-
-    return records.filter(record => {
-        if (filter.status && filter.status !== 'all' && record.status !== filter.status) return false;
-        if (filter.userID && record.userID !== filter.userID) return false;
-        return true;
-    });
-}
-
 /** 將 Discord interaction、carrier 與首份 API 快照正規化成可落盤 record。 */
 function createPackageRecord({ interaction, carrier, trackingNumber, note, userPackageID, packageData }) {
     const now = new Date().toISOString();
     return {
-        userPackageID,
+        userPackageID: String(userPackageID),
         userID: interaction.user.id,
         username: interaction.user.tag,
         guildID: interaction.guildId || null,
@@ -494,7 +341,7 @@ function createPackageRecord({ interaction, carrier, trackingNumber, note, userP
     };
 }
 
-module.exports = {
+return {
     getPackageTrackingConfig,
     hasTrackTwToken,
     getAvailableCarriers,
@@ -511,11 +358,8 @@ module.exports = {
     createAddPackageRow,
     createPackageNotificationActionsRows,
     withAddPackageRow,
-    findPackageRecord,
-    findDuplicatePackage,
-    upsertPackageRecord,
-    updatePackageRecord,
-    deletePackageRecord,
-    getPackageRecords,
     createPackageRecord
 };
+}
+
+module.exports = { createPackageTrackingTools };

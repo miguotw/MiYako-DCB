@@ -1,41 +1,27 @@
-const path = require('path');
-/**
- * 臨時語音頻道生命週期管理器。
- * 加入入口時複製分類與權限建立頻道，空置後延遲刪除；設定與 emptySince 皆
- * 落盤，因此 Bot 重啟後可對照 Discord 現況並恢復倒數。
- */
+'use strict';
+
 const { ChannelType, Events } = require('discord.js');
-const { configModules } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const {
-    addManagedChannel,
-    listStoredGuildIDs,
-    loadGuildStore,
-    removeEntrance,
-    removeManagedChannel,
-    updateManagedChannel
-} = require(path.join(process.cwd(), 'util/temporaryVoiceStore'));
+const { createLogTools } = require('../../../core/sendLog');
+const { createTemporaryVoiceRepository } = require('../../../util/temporaryVoiceRepository');
 
-const timers = new Map();
-const UNKNOWN_CHANNEL_ERROR_CODE = 10003;
-const MINUTE = 60 * 1000;
-const MAX_TIMEOUT = 2 ** 31 - 1;
+function createInitializer(config) {
+const { sendLog } = createLogTools(config);
+const DELETE_DELAY_MS = config.modules.temporaryVoice.deleteAfterMinutes * 60_000;
+const UNKNOWN_CHANNEL = 10003;
+const locks = new Map();
+const deletionJobs = new Map();
+const stoppingDeletionJobs = new Map();
+let repository;
+let runtimeContext;
 
-// timers 只保存本程序 handle；真正的倒數起點 emptySince 會寫入 store。
-function getDeleteDelay() {
-    const minutes = Number(configModules.temporaryVoice?.deleteAfterMinutes);
-    return Math.max(Number.isFinite(minutes) ? minutes : 5, 1) * MINUTE;
-}
+function key(guildID, channelID) { return `${guildID}:${channelID}`; }
 
-function getTimerKey(guildID, channelID) {
-    return `${guildID}:${channelID}`;
-}
-
-function clearDeleteTimer(guildID, channelID) {
-    const key = getTimerKey(guildID, channelID);
-    const timer = timers.get(key);
-    if (timer) clearTimeout(timer);
-    timers.delete(key);
+async function withLock(lockKey, operation) {
+    const previous = locks.get(lockKey) || Promise.resolve();
+    const current = previous.catch(() => {}).then(operation);
+    locks.set(lockKey, current);
+    try { return await current; }
+    finally { if (locks.get(lockKey) === current) locks.delete(lockKey); }
 }
 
 function buildChannelName(member, prefix) {
@@ -45,216 +31,243 @@ function buildChannelName(member, prefix) {
 
 function serializePermissionOverwrites(channel) {
     return channel.permissionOverwrites.cache.map(overwrite => ({
-        id: overwrite.id,
-        type: overwrite.type,
-        allow: overwrite.allow.bitfield,
-        deny: overwrite.deny.bitfield
+        id: overwrite.id, type: overwrite.type,
+        allow: overwrite.allow.bitfield, deny: overwrite.deny.bitfield
     }));
+}
+
+function isTransient(error) {
+    if (!error) return false;
+    if (['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'ENETUNREACH'].includes(error.code)) return true;
+    return error.status === 429 || error.status >= 500 || error.rawError?.retry_after !== undefined;
 }
 
 async function fetchGuildChannel(guild, channelID) {
     const cached = guild.channels.cache.get(channelID);
     if (cached) return { channel: cached, missing: false };
-
     try {
         const channel = await guild.channels.fetch(channelID);
         return { channel, missing: !channel };
     } catch (error) {
-        return { channel: null, missing: error.code === UNKNOWN_CHANNEL_ERROR_CODE, error };
+        return { channel: null, missing: error.code === UNKNOWN_CHANNEL, error };
     }
 }
 
-/** 到期時重新讀取 Discord 與 store，避免等待期間有人返回卻被誤刪。 */
-async function deleteIfStillEmpty(client, guildID, channelID) {
-    clearDeleteTimer(guildID, channelID);
-    const guild = client.guilds.cache.get(guildID);
-    if (!guild) return;
-
-    const store = loadGuildStore(guildID);
-    const record = store.channels[channelID];
-    if (!record) return;
-
-    const result = await fetchGuildChannel(guild, channelID);
-    if (!result.channel || result.channel.type !== ChannelType.GuildVoice) {
-        if (result.missing) removeManagedChannel(guildID, channelID);
-        else if (result.channel) removeManagedChannel(guildID, channelID);
-        else sendLog(client, `⚠️ 無法確認臨時語音頻道 ${channelID} 是否存在。`, 'WARN', result.error);
+function scheduleDeletion(client, guildID, channelID, generation, deadlineAt) {
+    const jobKey = key(guildID, channelID);
+    const stoppingJob = stoppingDeletionJobs.get(jobKey);
+    if (stoppingJob) {
+        void stoppingJob.then(() => {
+            if (runtimeContext) scheduleDeletion(client, guildID, channelID, generation, deadlineAt);
+        });
         return;
     }
-
-    if (result.channel.members.size > 0) {
-        updateManagedChannel(guildID, channelID, { emptySince: null });
+    const current = deletionJobs.get(jobKey);
+    if (current) {
+        current.generation = generation;
+        current.handle.reschedule(deadlineAt);
         return;
     }
-
-    try {
-        await result.channel.delete('臨時語音頻道已空置逾時');
-        removeManagedChannel(guildID, channelID);
-        sendLog(client, `🗑️ 已刪除空置的臨時語音頻道「${result.channel.name}」。`);
-    } catch (error) {
-        sendLog(client, `❌ 無法刪除臨時語音頻道 ${channelID}：`, 'ERROR', error);
-        scheduleDelete(client, guildID, channelID, new Date().toISOString());
-    }
+    const entry = { generation, handle: null };
+    entry.handle = runtimeContext.scheduler.scheduleDeadline({
+        name: `temporaryVoice.delete.${guildID}.${channelID}`,
+        deadlineAt,
+        timeoutMs: 20_000,
+        run: () => deleteIfStillEmpty(client, guildID, channelID, entry)
+    });
+    deletionJobs.set(jobKey, entry);
 }
 
-function scheduleDelete(client, guildID, channelID, emptySince) {
-    clearDeleteTimer(guildID, channelID);
-    const elapsed = Date.now() - Date.parse(emptySince);
-    const remaining = Math.max(getDeleteDelay() - (Number.isFinite(elapsed) ? elapsed : 0), 0);
-    const delay = Math.min(remaining, MAX_TIMEOUT);
-    const key = getTimerKey(guildID, channelID);
+function cancelDeletion(guildID, channelID) {
+    const jobKey = key(guildID, channelID);
+    const entry = deletionJobs.get(jobKey);
+    if (!entry) return;
+    deletionJobs.delete(jobKey);
+    // stop 會立即取消 timer/signal；不可在 channel mutex 內等待，避免與正等鎖的 job 互鎖。
+    const stoppingJob = entry.handle.stop().catch(error => {
+        sendLog(runtimeContext?.client, `⚠️ 取消臨時語音頻道 ${channelID} 的刪除工作失敗。`, 'WARN', error);
+    }).finally(() => {
+        if (stoppingDeletionJobs.get(jobKey) === stoppingJob) stoppingDeletionJobs.delete(jobKey);
+    });
+    stoppingDeletionJobs.set(jobKey, stoppingJob);
+}
 
-    // Node setTimeout 有 32-bit 上限，過長等待會分段重新排程。
-    timers.set(key, setTimeout(() => {
-        if (remaining > MAX_TIMEOUT) {
-            scheduleDelete(client, guildID, channelID, emptySince);
+async function markOccupied(guildID, channelID, cancelJob = true) {
+    await repository.updateChannel(guildID, channelID, record => {
+        record.generation = Number(record.generation || 0) + 1;
+        record.emptySince = null;
+        record.retryAttempts = 0;
+    });
+    if (cancelJob) cancelDeletion(guildID, channelID);
+}
+
+async function markEmpty(client, guildID, channelID) {
+    const now = new Date().toISOString();
+    const record = await repository.updateChannel(guildID, channelID, current => {
+        current.generation = Number(current.generation || 0) + 1;
+        current.emptySince = now;
+        current.retryAttempts = 0;
+    });
+    if (record) scheduleDeletion(client, guildID, channelID, record.generation, Date.parse(now) + DELETE_DELAY_MS);
+}
+
+async function deleteIfStillEmpty(client, guildID, channelID, job) {
+    return withLock(key(guildID, channelID), async () => {
+        const guild = client.guilds.cache.get(String(guildID));
+        if (!guild) return;
+        const store = await repository.readGuild(guildID);
+        const record = store.channels[channelID];
+        if (!record || Number(record.generation) !== Number(job.generation) || !record.emptySince) return;
+
+        const result = await fetchGuildChannel(guild, channelID);
+        if (result.missing || (result.channel && result.channel.type !== ChannelType.GuildVoice)) {
+            await repository.removeChannel(guildID, channelID);
             return;
         }
-        deleteIfStillEmpty(client, guildID, channelID).catch(error => {
-            sendLog(client, `❌ 檢查臨時語音頻道 ${channelID} 時發生錯誤：`, 'ERROR', error);
-        });
-    }, delay));
-}
-
-async function reconcileManagedChannel(client, guild, channelID, record) {
-    const result = await fetchGuildChannel(guild, channelID);
-    if (!result.channel || result.channel.type !== ChannelType.GuildVoice) {
-        if (result.missing) {
-            removeManagedChannel(guild.id, channelID);
-            clearDeleteTimer(guild.id, channelID);
-        } else if (result.channel) {
-            removeManagedChannel(guild.id, channelID);
-            clearDeleteTimer(guild.id, channelID);
-        } else {
-            sendLog(client, `⚠️ 無法載入臨時語音頻道 ${channelID}。`, 'WARN', result.error);
-        }
-        return;
-    }
-
-    if (result.channel.members.size > 0) {
-        clearDeleteTimer(guild.id, channelID);
-        if (record.emptySince) updateManagedChannel(guild.id, channelID, { emptySince: null });
-        return;
-    }
-
-    const emptySince = record.emptySince || new Date().toISOString();
-    if (!record.emptySince) updateManagedChannel(guild.id, channelID, { emptySince });
-    scheduleDelete(client, guild.id, channelID, emptySince);
-}
-
-async function reconcileGuild(client, guild) {
-    const store = loadGuildStore(guild.id);
-
-    for (const entranceID of Object.keys(store.entrances)) {
-        const result = await fetchGuildChannel(guild, entranceID);
-        if (result.missing || (result.channel && result.channel.type !== ChannelType.GuildVoice)) {
-            removeEntrance(guild.id, entranceID);
-            sendLog(client, `⚠️ 臨時語音入口 ${entranceID} 已不存在，已移除設定。`, 'WARN');
-        } else if (!result.channel) {
-            sendLog(client, `⚠️ 無法確認臨時語音入口 ${entranceID}。`, 'WARN', result.error);
-        }
-    }
-
-    const refreshedStore = loadGuildStore(guild.id);
-    for (const [channelID, record] of Object.entries(refreshedStore.channels)) {
-        await reconcileManagedChannel(client, guild, channelID, record);
-    }
-}
-
-/** 建立後才登記並移動成員；中途失敗會清掉空的半成品頻道。 */
-async function createTemporaryChannel(client, entrance, member, prefix) {
-    let temporaryChannel = null;
-    try {
-        temporaryChannel = await entrance.guild.channels.create({
-            name: buildChannelName(member, prefix),
-            type: ChannelType.GuildVoice,
-            parent: entrance.parentId,
-            permissionOverwrites: serializePermissionOverwrites(entrance),
-            reason: `為 ${member.user.tag} 建立臨時語音頻道`
-        });
-
-        await temporaryChannel.setPosition(entrance.rawPosition + 1).catch(error => {
-            sendLog(client, `⚠️ 無法將臨時語音頻道排在入口 ${entrance.id} 下方。`, 'WARN', error);
-        });
-
-        addManagedChannel(entrance.guild.id, temporaryChannel.id, {
-            entranceChannelID: entrance.id,
-            ownerID: member.id
-        });
-        if (member.voice.channelId !== entrance.id) {
-            throw new Error('成員已離開入口頻道，取消移動。');
-        }
-        await member.voice.setChannel(temporaryChannel, '移入新建立的臨時語音頻道');
-        sendLog(client, `🔊 已為 ${member.user.tag} 建立臨時語音頻道「${temporaryChannel.name}」。`);
-    } catch (error) {
-        if (temporaryChannel) {
-            removeManagedChannel(entrance.guild.id, temporaryChannel.id);
-            if (temporaryChannel.members.size === 0) {
-                await temporaryChannel.delete('建立或移動成員失敗，清理空頻道').catch(() => {});
+        if (!result.channel) {
+            if (isTransient(result.error)) {
+                const updated = await repository.updateChannel(guildID, channelID, current => {
+                    current.retryAttempts = Number(current.retryAttempts || 0) + 1;
+                });
+                const delay = Math.min(5_000 * (2 ** Math.max(updated.retryAttempts - 1, 0)), 5 * 60_000);
+                scheduleDeletion(client, guildID, channelID, updated.generation, Date.now() + delay);
+                return;
             }
+            sendLog(client, `⚠️ 無法確認臨時語音頻道 ${channelID} 是否存在。`, 'WARN', result.error);
+            return;
         }
-        sendLog(client, `❌ 無法為 ${member.user.tag} 建立臨時語音頻道：`, 'ERROR', error);
-    }
+        if (result.channel.members.size > 0) {
+            // 目前就是該 deadline job，不能在自身執行期間等待 stop。
+            await markOccupied(guildID, channelID, false);
+            return;
+        }
+
+        // delete 前再次讀取 generation，關閉 fetch 與 delete 之間成員事件造成的競態。
+        const latest = (await repository.readGuild(guildID)).channels[channelID];
+        if (!latest || Number(latest.generation) !== Number(job.generation) || result.channel.members.size > 0) return;
+        try {
+            await result.channel.delete('臨時語音頻道已空置逾時');
+            await repository.removeChannel(guildID, channelID);
+            sendLog(client, `🗑️ 已刪除空置的臨時語音頻道「${result.channel.name}」。`);
+        } catch (error) {
+            if (!isTransient(error)) {
+                sendLog(client, `❌ 無法刪除臨時語音頻道 ${channelID}：`, 'ERROR', error);
+                return;
+            }
+            const updated = await repository.updateChannel(guildID, channelID, current => {
+                current.retryAttempts = Number(current.retryAttempts || 0) + 1;
+            });
+            const delay = Math.min(5_000 * (2 ** Math.max(updated.retryAttempts - 1, 0)), 5 * 60_000);
+            scheduleDeletion(client, guildID, channelID, updated.generation, Date.now() + delay);
+        }
+    });
+}
+
+async function createTemporaryChannel(client, entrance, member, prefix) {
+    return withLock(`create:${entrance.guild.id}:${member.id}`, async () => {
+        let temporaryChannel;
+        try {
+            if (member.voice.channelId !== entrance.id) return;
+            temporaryChannel = await entrance.guild.channels.create({
+                name: buildChannelName(member, prefix), type: ChannelType.GuildVoice,
+                parent: entrance.parentId,
+                permissionOverwrites: serializePermissionOverwrites(entrance),
+                reason: `為 ${member.user.tag} 建立臨時語音頻道`
+            });
+            await repository.addChannel(entrance.guild.id, temporaryChannel.id, {
+                entranceChannelID: entrance.id, ownerID: member.id
+            });
+            if (member.voice.channelId !== entrance.id) throw new Error('成員已離開入口頻道，取消移動。');
+            await member.voice.setChannel(temporaryChannel, '移入新建立的臨時語音頻道');
+        } catch (error) {
+            if (temporaryChannel) {
+                await repository.removeChannel(entrance.guild.id, temporaryChannel.id).catch(() => {});
+                if (temporaryChannel.members.size === 0) await temporaryChannel.delete('清理建立失敗的空頻道').catch(() => {});
+            }
+            sendLog(client, `❌ 無法為 ${member.user.tag} 建立臨時語音頻道：`, 'ERROR', error);
+        }
+    });
 }
 
 async function handleVoiceStateUpdate(client, oldState, newState) {
-    // 先處理離開舊頻道，再取消新頻道倒數，最後判斷是否進入入口。
     const guild = newState.guild || oldState.guild;
-    const store = loadGuildStore(guild.id);
-
-    if (oldState.channelId && oldState.channelId !== newState.channelId && store.channels[oldState.channelId]) {
-        const oldChannel = oldState.channel;
-        if (oldChannel && oldChannel.members.size === 0) {
-            const emptySince = new Date().toISOString();
-            updateManagedChannel(guild.id, oldState.channelId, { emptySince });
-            scheduleDelete(client, guild.id, oldState.channelId, emptySince);
-        }
+    const store = await repository.readGuild(guild.id);
+    if (oldState.channelId && oldState.channelId !== newState.channelId && store.channels[oldState.channelId]
+        && oldState.channel?.members?.size === 0) {
+        await withLock(key(guild.id, oldState.channelId), () => markEmpty(client, guild.id, oldState.channelId));
     }
-
     if (newState.channelId && store.channels[newState.channelId]) {
-        clearDeleteTimer(guild.id, newState.channelId);
-        if (store.channels[newState.channelId].emptySince) {
-            updateManagedChannel(guild.id, newState.channelId, { emptySince: null });
-        }
+        await withLock(key(guild.id, newState.channelId), () => markOccupied(guild.id, newState.channelId));
     }
-
     const entrance = newState.channelId ? store.entrances[newState.channelId] : null;
     if (entrance && oldState.channelId !== newState.channelId && !newState.member.user.bot) {
         await createTemporaryChannel(client, newState.channel, newState.member, entrance.prefix);
     }
 }
 
-module.exports = client => {
-    client.once(Events.ClientReady, async () => {
-        for (const guildID of listStoredGuildIDs()) {
-            const guild = client.guilds.cache.get(guildID);
-            if (!guild) continue;
-            try {
-                await reconcileGuild(client, guild);
-            } catch (error) {
-                sendLog(client, `❌ 恢復伺服器 ${guildID} 的臨時語音頻道時發生錯誤：`, 'ERROR', error);
-            }
+async function reconcileGuild(client, guildID) {
+    const guild = client.guilds.cache.get(String(guildID));
+    if (!guild) return;
+    const store = await repository.readGuild(guildID);
+    for (const entranceID of Object.keys(store.entrances)) {
+        const result = await fetchGuildChannel(guild, entranceID);
+        if (result.missing || (result.channel && result.channel.type !== ChannelType.GuildVoice)) {
+            await repository.removeEntrance(guildID, entranceID);
         }
-        sendLog(client, '✅ 臨時語音頻道管理已啟動。');
-    });
+    }
+    const refreshed = await repository.readGuild(guildID);
+    for (const [channelID, record] of Object.entries(refreshed.channels)) {
+        const result = await fetchGuildChannel(guild, channelID);
+        if (result.missing || (result.channel && result.channel.type !== ChannelType.GuildVoice)) {
+            await repository.removeChannel(guildID, channelID);
+        } else if (!result.channel) {
+            if (isTransient(result.error)) scheduleDeletion(client, guildID, channelID, record.generation, Date.now() + 5_000);
+        } else if (result.channel.members.size > 0) await markOccupied(guildID, channelID);
+        else {
+            const emptySince = record.emptySince || new Date().toISOString();
+            const updated = record.emptySince ? record : await repository.updateChannel(guildID, channelID, current => {
+                current.emptySince = emptySince;
+                current.generation = Number(current.generation || 0) + 1;
+            });
+            scheduleDeletion(client, guildID, channelID, updated.generation,
+                Math.max(Date.parse(emptySince) + DELETE_DELAY_MS, Date.now()));
+        }
+    }
+}
 
-    client.on(Events.VoiceStateUpdate, (oldState, newState) => {
-        handleVoiceStateUpdate(client, oldState, newState).catch(error => {
-            sendLog(client, '❌ 處理臨時語音頻道事件時發生錯誤：', 'ERROR', error);
-        });
-    });
+const initializer = async (client, context) => {
+    if (typeof context.scheduler?.scheduleDeadline !== 'function') throw new Error('臨時語音功能缺少 deadline scheduler。');
+    runtimeContext = context;
+    repository = createTemporaryVoiceRepository(context.store.temporaryVoice);
+    for (const guildID of await repository.listGuildIDs()) await reconcileGuild(client, guildID);
 
-    client.on(Events.ChannelDelete, channel => {
+    const voiceListener = (oldState, newState) => handleVoiceStateUpdate(client, oldState, newState)
+        .catch(error => sendLog(client, '❌ 處理臨時語音頻道事件時發生錯誤：', 'ERROR', error));
+    const channelDeleteListener = channel => {
         if (!channel.guildId) return;
-        try {
-            const store = loadGuildStore(channel.guildId);
-            if (store.entrances[channel.id]) removeEntrance(channel.guildId, channel.id);
-            if (store.channels[channel.id]) removeManagedChannel(channel.guildId, channel.id);
-            clearDeleteTimer(channel.guildId, channel.id);
-        } catch (error) {
-            sendLog(client, `❌ 同步已刪除的頻道 ${channel.id} 時發生錯誤：`, 'ERROR', error);
-        }
-    });
+        repository.updateGuild(channel.guildId, store => {
+            delete store.entrances[channel.id];
+            delete store.channels[channel.id];
+        }).catch(error => sendLog(client, `❌ 同步已刪除的頻道 ${channel.id} 時發生錯誤：`, 'ERROR', error));
+    };
+    client.on(Events.VoiceStateUpdate, voiceListener);
+    client.on(Events.ChannelDelete, channelDeleteListener);
+    return async () => {
+        client.off(Events.VoiceStateUpdate, voiceListener);
+        client.off(Events.ChannelDelete, channelDeleteListener);
+        await Promise.all([...deletionJobs.values()].map(entry => entry.handle.stop()));
+        await Promise.all([...stoppingDeletionJobs.values()]);
+        deletionJobs.clear();
+        stoppingDeletionJobs.clear();
+        locks.clear();
+        runtimeContext = null;
+        repository = null;
+    };
 };
 
-module.exports.buildChannelName = buildChannelName;
+initializer.buildChannelName = buildChannelName;
+initializer._test = { deleteIfStillEmpty, handleVoiceStateUpdate, isTransient };
+return initializer;
+}
+
+module.exports = { createInitializer };
