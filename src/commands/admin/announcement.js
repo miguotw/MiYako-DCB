@@ -1,26 +1,32 @@
-const path = require('path');
-const { SlashCommandBuilder, EmbedBuilder, PermissionsBitField } = require('discord.js');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { ChannelType, SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { createCommandPolicy } = require('../../../core/commandPolicy');
+const { createLogTools } = require('../../../core/sendLog');
+const { createReplyTools } = require('../../../core/Reply');
+const { fetchSourceMessage } = require('../../../util/discordCommandInput');
 
+function createCommand(config) {
+const { getAdminCommandPath } = createCommandPolicy(config);
+const { sendLog } = createLogTools(config);
+const { errorReply, infoReply, validationReply } = createReplyTools(config);
+const configCommands = config.commands;
 // 導入設定檔內容
 const EMBED_COLOR = config.embed.color.default;
-const EMBED_EMOJI = configCommands.admin.announcement.emoji;
+const EMBED_EMOJI = configCommands.announcement.emoji;
 
-module.exports = {
+const command = {
     data: new SlashCommandBuilder()
-        .setName('公告')
+        .setName('發送公告')
         .setDescription('發送公告到指定頻道並提及指定身分組')
-        .setDMPermission(false)
         .addStringOption(option =>
-            option.setName('訊息哀滴')
-                .setDescription('請輸入要作為公告的訊息 ID')
+            option.setName('訊息id或連結')
+                .setDescription('請輸入要作為公告的訊息 ID 或訊息連結')
                 .setRequired(true)
         )
         .addChannelOption(option =>
             option.setName('選擇頻道')
-                .setDescription('請選擇要發送公告的頻道')
+                .setDescription('請選擇要發送公告的文字頻道')
+                // 在 Discord 選項介面只顯示伺服器的一般文字頻道。
+                .addChannelTypes(ChannelType.GuildText)
                 .setRequired(true)
         )
         .addRoleOption(option =>
@@ -28,31 +34,28 @@ module.exports = {
                 .setDescription('請選擇要提及的身分組')
                 .setRequired(false) // 設為非必填
         ),
-    async execute(interaction) {
+    async execute(interaction, _context) {
         
-        //啟用延遲回覆
-        await interaction.deferReply({ ephemeral: false });
+        // 公告本體會發送到目標頻道；操作結果僅需讓執行指令的管理員看見。
+        await interaction.deferReply({ ephemeral: true });
 
         try {
-            if (!interaction.inGuild()) {
-                return errorReply(interaction, '**此指令不支援在私訊中使用！**');
-            }
-
-            // 檢查使用者是否具有管理者權限
-            if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-                return errorReply(interaction, '**你必須是伺服器的管理者才能使用此指令！**');
-            }
-
-            const messageId = interaction.options.getString('訊息哀滴'); // 使用者輸入的訊息 ID
+            const messageInput = interaction.options.getString('訊息id或連結', true);
             const channel = interaction.options.getChannel('選擇頻道'); // 使用者選擇的頻道
             const role = interaction.options.getRole('選擇身分組'); // 使用者選擇的身分組（可為空）
 
+            // 保留執行時檢查，避免舊版已註冊指令或偽造 Interaction 傳入其他頻道類型。
+            if (channel?.type !== ChannelType.GuildText) {
+                return validationReply(interaction, '**請選擇伺服器的一般文字頻道！**');
+            }
+
             // 發送執行指令的摘要到 sendLog
-            sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/公告 訊息哀滴(${messageId}) 選擇頻道(${channel}) 選擇身分組(${role})`, "INFO");
+            sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：${getAdminCommandPath('發送公告')} 訊息id或連結(${messageInput}) 選擇頻道(${channel}) 選擇身分組(${role})`, "INFO");
 
             // 嘗試獲取訊息內容
             try {
-                const message = await interaction.channel.messages.fetch(messageId);
+                // ID 會從目前頻道讀取；連結則可指向目前伺服器中 Bot 有權讀取的其他頻道。
+                const message = await fetchSourceMessage(interaction, messageInput);
                 const messageContent = message.content; // 獲取訊息的內容
                 const imageUrl = message.attachments.first()?.url || null; // 如果有圖片則取第一張
                 // const guildIcon = interaction.guild.iconURL(); // 取得伺服器圖標
@@ -77,14 +80,17 @@ module.exports = {
                 });
 
                 // 提示已發送公告
-                infoReply(interaction, `**公告已發送到 ${channel}${role ? ` 並提及 ${role}` : ''}！**`);
+                return infoReply(interaction, `**公告已發送到 ${channel}${role ? ` 並提及 ${role}` : ''}！**`);
             } catch (error) {
-                sendLog(interaction.client, `❌ 在執行 /公告 指令時發生錯誤`, "ERROR", error);
-                return errorReply(interaction, '**無法找到該訊息 ID，請檢查以下內容！**\n 1. 機器人應具有 `讀取訊息歷史`、`檢視頻道`、`發送訊息`、`嵌入連結`、`提及身分組` 權限。\n 2. 確認訊息 ID 是否正確！');
+                if (error.isValidationError) return validationReply(interaction, `**${error.message}**`);
+                return errorReply(interaction, error, { context: '發送公告' });
             }
         } catch (error) {
-            sendLog(interaction.client, `❌ 在執行 /公告 指令時發生未預期的錯誤`, "ERROR", error);
-            return errorReply(interaction, '**發生未預期的錯誤，請向開發者回報！**');
+            return errorReply(interaction, error, { context: '發送公告' });
         }
     }
 };
+return command;
+}
+
+module.exports = { createCommand };

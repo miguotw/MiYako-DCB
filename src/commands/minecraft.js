@@ -1,17 +1,21 @@
 const path = require('path');
 const fs = require('fs');
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
-const { getServerStatus } = require(path.join(process.cwd(), 'util/getServerStatus'));
+const { createLogTools } = require('../../core/sendLog');
+const { createReplyTools } = require('../../core/Reply');
+const { PROJECT_ROOT } = require('../../core/config');
+const { getServerStatus } = require('../../util/getServerStatus');
 
 // 導入設定檔內容
+function createCommand(config) {
+const { sendLog } = createLogTools(config);
+const { errorReply, validationReply } = createReplyTools(config);
+const configCommands = config.commands;
 const EMBED_COLOR = config.embed.color.default;
 const EMBED_EMOJI = configCommands.minecraft.emoji;
 const DEFAULT_SERVERS = configCommands.minecraft.defaultServer;
 
-module.exports = {
+const command = {
     data: new SlashCommandBuilder()
         .setName('麥塊')
         .setDescription('麥塊相關的輔助功能')
@@ -43,7 +47,7 @@ module.exports = {
                             .setDescription('手動輸入伺服器 IP 位址')
                             .setRequired(false))),
 
-    async execute(interaction) {
+    async execute(interaction, _context) {
         const subcommand = interaction.options.getSubcommand();
 
         //啟用延遲回覆
@@ -81,8 +85,7 @@ module.exports = {
 
             } catch (error) {
                 // 錯誤處理
-                sendLog(interaction.client, `❌ 在執行 /麥塊 外觀 指令時發生錯誤`, "ERROR", error); // 記錄錯誤日誌
-                errorReply(interaction, '**發生未預期的錯誤，請向開發者回報！**'); // 向用戶顯示錯誤訊息
+                return errorReply(interaction, error, { context: '查詢 Minecraft 玩家外觀' });
             };
             
         } else if (subcommand === '伺服器狀態資訊') {
@@ -93,7 +96,7 @@ module.exports = {
         
                 // 沒有填入必要參數時的回應
                 if (!serverIP) {
-                    return errorReply(interaction, '**請選擇預設伺服器或手動輸入伺服器 IP 位址！**');
+                    return validationReply(interaction, '**請選擇預設伺服器或手動輸入伺服器 IP 位址！**');
                 }
         
                 // 發送執行指令的摘要到 sendLog
@@ -131,7 +134,7 @@ module.exports = {
                 let iconPath = ServerStatusIcon;
                 if (!iconPath || !fs.existsSync(iconPath)) {
                     // 使用預設圖標
-                    iconPath = path.join(process.cwd(), 'assets', 'minecraft', 'default_icon.png');
+                    iconPath = path.join(PROJECT_ROOT, 'assets', 'minecraft', 'default_icon.png');
                     if (!fs.existsSync(iconPath)) {
                         throw new Error('預設圖標文件不存在！');
                     }
@@ -149,8 +152,8 @@ module.exports = {
                 });
             } catch (error) {
                 // 如果伺服器不是 Minecraft 伺服器或無法連接
-                sendLog(interaction.client, `❌ 在執行 /麥塊 伺服器狀態資訊 指令時發生錯誤：`, "ERROR", error); // 記錄錯誤日誌
-                errorReply(interaction, `**無法連接到伺服器，原因：${error.publicMessage || error.message || '未知錯誤'}**`); // 向用戶顯示錯誤訊息
+                if (error.publicMessage) return validationReply(interaction, `**${error.publicMessage}**`);
+                return errorReply(interaction, error, { context: '查詢 Minecraft 伺服器狀態' });
             } finally {
                 // 如果是臨時文件（ServerStatusIcon），則刪除
                 if (ServerStatusIcon && fs.existsSync(ServerStatusIcon)) {
@@ -160,3 +163,7 @@ module.exports = {
         }
     }
 };
+return command;
+}
+
+module.exports = { createCommand };

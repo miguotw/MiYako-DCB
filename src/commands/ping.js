@@ -1,18 +1,20 @@
-const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { createLogTools } = require('../../core/sendLog');
+const { createReplyTools } = require('../../core/Reply');
 
 // 導入設定檔內容
+function createCommand(config) {
+const { sendLog } = createLogTools(config);
+const { errorReply } = createReplyTools(config);
+const configCommands = config.commands;
 const EMBED_COLOR = config.embed.color.default;
 const EMBED_EMOJI = configCommands.ping.emoji;
 
-module.exports = {
+const command = {
     data: new SlashCommandBuilder()
         .setName('延遲')
         .setDescription('測試機器人延遲'),
-    async execute(interaction) {
+    async execute(interaction, _context) {
         
         //啟用延遲回覆
         await interaction.deferReply({ ephemeral: true });
@@ -36,8 +38,11 @@ module.exports = {
             
         } catch (error) {
             // 錯誤處理
-            sendLog(interaction.client, `❌ 在執行 /延遲 指令時發生錯誤`, "ERROR", error);
-            return errorReply(interaction, '**發生未預期的錯誤，請向開發者回報！**');
+            return errorReply(interaction, error, { context: '執行延遲指令' });
         }
     }
 };
+return command;
+}
+
+module.exports = { createCommand };

@@ -1,20 +1,22 @@
-const path = require('path');
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply, infoReply } = require(path.join(process.cwd(), 'core/Reply'));
-const { getHitokoto } = require(path.join(process.cwd(), 'util/getHitokoto'));
+const { createLogTools } = require('../../core/sendLog');
+const { createReplyTools } = require('../../core/Reply');
+const { getHitokoto } = require('../../util/getHitokoto');
 
 // 導入設定檔內容
+function createCommand(config) {
+const { sendLog } = createLogTools(config);
+const { errorReply } = createReplyTools(config);
+const configCommands = config.commands;
 const EMBED_COLOR = config.embed.color.default;
 const EMBED_EMOJI = configCommands.hitokoto.emoji;
 
-module.exports = {
+const command = {
     data: new SlashCommandBuilder()
         .setName('一言')
         .setDescription('獲取一條動漫相關的名言短句'),
         
-    async execute(interaction) {
+    async execute(interaction, context) {
 
         //啟用延遲回覆
         await interaction.deferReply({ ephemeral: false });
@@ -23,7 +25,7 @@ module.exports = {
             sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/一言`, "INFO");
 
             // 獲取短句
-            const { hitokotoText, hitokotoFrom } = await getHitokoto();
+            const { hitokotoText, hitokotoFrom } = await getHitokoto({ http: context.http, signal: context.signal });
 
             // 創建嵌入訊息
             const embed = new EmbedBuilder()
@@ -42,8 +44,11 @@ module.exports = {
             
         } catch (error) {
             // 錯誤處理
-            sendLog(interaction.client, `❌ 在執行 /一言 指令時發生錯誤：`, "ERROR", error); // 記錄錯誤日誌
-            errorReply(interaction, `**無法獲取短句，原因：${error.message || '未知錯誤'}**`); // 向用戶顯示錯誤訊息
+            return errorReply(interaction, error, { context: '取得一言內容' });
         }
     }
 };
+return command;
+}
+
+module.exports = { createCommand };

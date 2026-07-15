@@ -1,94 +1,40 @@
-const path = require('path');
-const { SlashCommandBuilder, EmbedBuilder, PermissionsBitField, escapeMarkdown } = require('discord.js');
-const { config, configCommands } = require(path.join(process.cwd(), 'core/config'));
-const { sendLog } = require(path.join(process.cwd(), 'core/sendLog'));
-const { errorReply } = require(path.join(process.cwd(), 'core/Reply'));
+const { SlashCommandBuilder, EmbedBuilder, escapeMarkdown } = require('discord.js');
+const { createCommandPolicy } = require('../../../core/commandPolicy');
+const { createLogTools } = require('../../../core/sendLog');
+const { createReplyTools } = require('../../../core/Reply');
 
+function createCommand(config) {
+const { getAdminCommandPath } = createCommandPolicy(config);
+const { sendLog } = createLogTools(config);
+const { errorReply } = createReplyTools(config);
+const configCommands = config.commands;
 const EMBED_COLOR = config.embed.color.default;
-const EMBED_EMOJI = configCommands.admin.userInfo.emoji;
-const DISCORD_ID_PATTERN = /^\d{17,20}$/;
-
-function normalizeQuery(query) {
-    const value = query.trim();
-    const mention = value.match(/^<@!?(\d{17,20})>$/);
-    return mention ? mention[1] : value.replace(/^@/, '');
-}
+const EMBED_EMOJI = configCommands.userInfo.emoji;
 
 function displayValue(value) {
     return escapeMarkdown(String(value));
 }
 
-async function findMemberByName(guild, query) {
-    const normalizedQuery = query.toLowerCase();
-    const fetchedMembers = await guild.members.fetch({ query, limit: 100 });
-    const members = [...fetchedMembers.values()];
-
-    const usernameMatches = members.filter(member =>
-        member.user.username.toLowerCase() === normalizedQuery
-        || member.user.tag.toLowerCase() === normalizedQuery
-    );
-
-    if (usernameMatches.length === 1) return usernameMatches[0];
-    if (usernameMatches.length > 1) throw new Error('AMBIGUOUS_USER');
-
-    const nameMatches = members.filter(member =>
-        member.displayName.toLowerCase() === normalizedQuery
-        || member.user.globalName?.toLowerCase() === normalizedQuery
-    );
-
-    if (nameMatches.length === 1) return nameMatches[0];
-    if (nameMatches.length > 1) throw new Error('AMBIGUOUS_USER');
-    return null;
-}
-
-async function resolveUser(interaction, rawQuery) {
-    const query = normalizeQuery(rawQuery);
-
-    if (DISCORD_ID_PATTERN.test(query)) {
-        const member = interaction.inGuild()
-            ? await interaction.guild.members.fetch(query).catch(() => null)
-            : null;
-        const user = await interaction.client.users.fetch(query, { force: true });
-        return { user, member };
-    }
-
-    if (!interaction.inGuild()) throw new Error('NAME_LOOKUP_REQUIRES_GUILD');
-
-    const member = await findMemberByName(interaction.guild, query);
-    if (!member) throw new Error('USER_NOT_FOUND');
-
-    const user = await interaction.client.users.fetch(member.id, { force: true });
-    return { user, member };
-}
-
-module.exports = {
+const command = {
     data: new SlashCommandBuilder()
-        .setName('用戶資料')
-        .setDescription('透過 Discord 數字 ID 或英文 Username 查詢用戶基本資料')
-        .setDMPermission(false)
-        .setDefaultMemberPermissions(PermissionsBitField.Flags.Administrator)
-        .addStringOption(option =>
+        .setName('擷取用戶資料')
+        .setDescription('透過 Discord 用戶選項查詢用戶基本資料')
+        .addUserOption(option =>
             option.setName('用戶')
-                .setDescription('輸入數字 ID、@提及或英文 Username（不含 @ 亦可）')
+                .setDescription('請選擇或提及要查詢的用戶')
                 .setRequired(true)),
 
-    async execute(interaction) {
+    async execute(interaction, _context) {
         await interaction.deferReply();
 
-        const rawQuery = interaction.options.getString('用戶', true);
-        sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：/用戶資料 用戶(${rawQuery})`, 'INFO');
+        const selectedUser = interaction.options.getUser('用戶', true);
+        sendLog(interaction.client, `💾 ${interaction.user.tag} 執行了指令：${getAdminCommandPath('擷取用戶資料')} 用戶(${selectedUser.id})`, 'INFO');
 
         try {
-            if (!interaction.inGuild()) {
-                return errorReply(interaction, '**此指令不支援在私訊中使用！**');
-            }
-
-            // 檢查使用者是否具有管理者權限
-            if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-                return errorReply(interaction, '**你必須是伺服器的管理者才能使用此指令！**');
-            }
-
-            const { user, member } = await resolveUser(interaction, rawQuery);
+            // 重新取得完整 User，以便 Discord 有提供時一併取得 Banner 資料。
+            const user = await interaction.client.users.fetch(selectedUser.id, { force: true });
+            const member = interaction.options.getMember('用戶')
+                || await interaction.guild.members.fetch(selectedUser.id).catch(() => null);
             const avatarURL = user.displayAvatarURL({ extension: 'png', size: 1024, forceStatic: false });
             const bannerURL = user.bannerURL({ extension: 'png', size: 1024, forceStatic: false });
             const displayName = member?.displayName || user.globalName || user.username;
@@ -113,15 +59,11 @@ module.exports = {
             if (bannerURL) embed.setImage(bannerURL);
             await interaction.editReply({ embeds: [embed] });
         } catch (error) {
-            sendLog(interaction.client, '❌ 在執行 /用戶資料 指令時發生錯誤：', 'ERROR', error);
-
-            const messages = {
-                NAME_LOOKUP_REQUIRES_GUILD: '**私訊中只能使用 Discord 數字 ID 查詢用戶。**',
-                USER_NOT_FOUND: '**找不到該用戶，請確認數字 ID 或英文 Username 是否正確。**',
-                AMBIGUOUS_USER: '**找到多位同名用戶，請改用 Discord 數字 ID 查詢。**'
-            };
-
-            await errorReply(interaction, messages[error.message] || '**找不到該用戶，請確認查詢內容後再試一次。**');
+            await errorReply(interaction, error, { context: '取得 Discord 用戶資料' });
         }
     }
 };
+return command;
+}
+
+module.exports = { createCommand };

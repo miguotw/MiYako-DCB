@@ -1,74 +1,81 @@
 #-------------------------------
-# 管理員功能設定：
-admin:
+# /admin 發送公告 指令的設定：
+announcement:
+  enable: true
 
-  #-----------------------------
-  # /公告 指令的設定：
-  announcement:
-
-    # 標題使用的 emoji。
-    emoji: "📢"
+  # 標題使用的 emoji。
+  emoji: "📢"
 
 
-  #-----------------------------
-  # /刪除訊息 指令的設定：
-  messageDelete:
-    emoji: "🗑️"
-
-    # 刪除訊息的最大數量，最多支援一次刪除 100 則訊息。
-    deleteLimit: 30
+#-------------------------------
+# /admin 抽選系統 指令的設定：
+raffle:
+  enable: true
+  emoji: "🎁"
 
 
-  #-----------------------------
-  # /用戶資料 指令的設定：
-  userInfo:
-    emoji: "👤"
+#-------------------------------
+# /admin 資料收集 指令的設定：
+dataCollection:
+  enable: true
+  emoji: "📝"
+
+  # 資料1～5 標題的最大字元數。Discord Modal 標籤最多 45 字元。
+  titleMaxLength: 10
+
+  # 用戶提交的每個資料欄位最大字元數；可設定 1～700。
+  submissionMaxLength: 20
 
 
-  #-----------------------------
-  # Twitch 直播自動通知設定：
-  stream:
+#-------------------------------
+# /admin 刪除訊息 指令的設定：
+messageDelete:
+  enable: true
+  emoji: "🗑️"
 
-    # 是否啟用 Twitch 直播自動通知。
-    enable: true
+  # 刪除訊息的最大數量，最多支援一次刪除 100 則訊息。
+  deleteLimit: 30
 
-    # 要監控的 Twitch 使用者登入名稱，可設定多個。
-    twitchUserLogin:
-      - " "
 
-    # Twitch Developer Console 中的 Client ID。
-    twitchClientID: " "
+#-------------------------------
+# /admin 擷取用戶資料 指令的設定：
+userInfo:
+  enable: true
+  emoji: "👤"
 
-    # Twitch Developer Console 中的 Client Secret。
-    twitchClientSecret: " "
 
-    # 檢查直播狀態的間隔，單位為分鐘。
-    checkInterval: 1
+#-------------------------------
+# Twitch 直播自動通知設定：
+# 追蹤的 Twitch 頻道與 Discord 通知目標請使用 /admin 直播通知 管理。
+stream:
+  enable: true
 
-    # 更新已發送直播通知的間隔，單位為分鐘。建議配合 Twitch 縮圖更新頻率設為 5 分鐘。
-    editInterval: 5
+  # Twitch Developer Console 中的 Client ID。
+  twitchClientId: ""
 
-    # 若 Bot 啟動時主播已經在直播，是否立即發送一次通知。
-    notifyOnStartupLive: true
+  # Twitch Developer Console 中的 Client Secret。
+  twitchClientSecret: ""
 
-    # 發送直播公告時，附加的自定義隨機訊息，可繼續往下延伸。
-    message:
-      - "現在正直播精彩內容，來一起加入吧！"
-      - "直播現在開始！別錯過，一起觀看吧！"
-      - "開播啦！一起享受這場直播！"
+  # 檢查直播狀態的間隔，單位為分鐘。
+  checkInterval: 1
 
-    # 要發送通知的 Discord 伺服器、頻道與身分組。
-    # 若指定伺服器找不到 roleID，將嘗試提及 @everyone。
-    # 若沒有設定任何有效 guildID/channelID，將不執行通知。
-    targets:
-      - guildID: " "
-        channelID: " "
-        roleID: " "
+  # 更新已發送直播通知的間隔，單位為分鐘。建議配合 Twitch 縮圖更新頻率設為 5 分鐘。
+  editInterval: 5
+
+  # 若 Bot 啟動時主播已經在直播，是否立即發送一次通知。
+  notifyOnStartupLive: true
+
+  # 發送直播公告時，附加的自定義隨機訊息，可繼續往下延伸。
+  message:
+    - "現在正直播精彩內容，來一起加入吧！"
+    - "直播現在開始！別錯過，一起觀看吧！"
+    - "開播啦！一起享受這場直播！"
 
 
 #-------------------------------
 # /關於 相關設定：
 about:
+  enable: true
   emoji: "🔰"
 
   # 機器人的暱稱（將用於部分指令，請勿使用大寫英文或空格）
@@ -78,7 +85,7 @@ about:
   introduce: "みやこ機器人第三代！\n這是一個基於 discord.js 集合許多功能的綜合型機器人，\n本專案目前仍在積極開發中！"
 
   # 服務提供者，請填入您的 Discord 數字 ID
-  provider: " "
+  provider: "123456789012345678"
 
   # 專案連結
   repository: "https://github.com/miguotw/MiYako-DCB"
@@ -87,22 +94,25 @@ about:
 #-------------------------------
 # /延遲 相關設定：
 ping:
+  enable: true
   emoji: "🏓"
 
 
 #-------------------------------
 # /一言 相關設定：
 hitokoto:
+  enable: true
   emoji: "🍵"
 
 
 #-------------------------------
 # /物流 相關設定：
 packageTracking:
+  enable: true
   emoji: "📦"
 
   # Track.TW API Token，可至會員中心申請。
-  trackTwToken: " "
+  trackTwToken: ""
 
   # 包裹貨態檢查間隔，單位為分鐘。
   checkInterval: 30
@@ -113,16 +123,21 @@ packageTracking:
   # 多久沒有新貨態後自動封存，單位為天。
   archiveAfterDays: 14
 
+  # 每位使用者可同時追蹤或保留匯入名額的包裹上限，可設定 1～100。
+  maxActivePackages: 20
+
 
 #-------------------------------
 # /網際協定位址資訊 相關設定：
 ipQuery:
+  enable: true
   emoji: "ℹ️"
 
 
 #-------------------------------
 # /麥塊 相關設定：
 minecraft:
+  enable: true
   emoji: "🧱"
 
   #預設列表中的伺服器名稱與 IP，可繼續向下延伸，最多支援 25 個
@@ -133,12 +148,14 @@ minecraft:
 #-------------------------------
 # /時間戳 相關設定：
 unixTimestamp:
+  enable: true
   emoji: "🕒"
 
 
 #-------------------------------
 # /音樂 相關設定：
 music:
+  enable: true
   emoji: "🎵"
   panelUpdateSeconds: 10
 
@@ -161,5 +178,9 @@ music:
   # 啟用播放清單時，一次最多加入的曲目數。
   maxPlaylistTracks: 25
 
+  # 播放序列、單一下載檔與整體 cache 上限。
+  maxQueueTracks: 100
+  maxFileSizeMiB: 256
+  maxCacheSizeMiB: 2048
+
   ytDlpUpdateHours: 24
-  ytDlpPath: "assets/music/yt-dlp"

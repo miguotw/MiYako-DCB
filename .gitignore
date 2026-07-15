@@ -1,6 +1,5 @@
-# Node modules and lock files
+# Node modules
 node_modules/
-package-lock.json
 
 # IDE config files
 .vscode/
@@ -15,3 +14,10 @@ assets/packageTracking/*
 assets/minecraft/temp/*
 assets/music/*
 assets/temporaryVoice/*
+assets/twitch_stream/*.json
+assets/twitch_stream/*.tmp
+assets/raffle/*
+assets/dataCollection/*
+
+# Phase 3 runtime state, cache, downloaded binaries and temporary files
+runtime/
