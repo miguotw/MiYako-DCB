@@ -21,6 +21,8 @@ let updatePromise = null;
 let processManager = null;
 let activeYtDlpProcesses = 0;
 const ytDlpWaiters = [];
+let activeLivePipelines = 0;
+const liveSlotWaiters = [];
 const protectedCachePaths = new Set();
 const MAX_YTDLP_PROCESSES = 2;
 const MAX_BILIBILI_REDIRECTS = 3;
@@ -149,14 +151,55 @@ function getYtDlpConcurrencyStateForTests() {
     return { active: activeYtDlpProcesses, waiting: ytDlpWaiters.length };
 }
 
+/** 直播長駐程序使用獨立 FIFO semaphore，避免占滿短期 metadata／下載工作。 */
+async function acquireLiveSlot(limit, signal) {
+    if (signal?.aborted) throw signal.reason || new Error('直播播放已取消。');
+    const maximum = Math.min(Math.max(Number(limit) || 2, 1), 10);
+    if (activeLivePipelines < maximum && liveSlotWaiters.length === 0) {
+        activeLivePipelines += 1;
+        return;
+    }
+    await new Promise((resolve, reject) => {
+        const waiter = { maximum, resolve, reject, signal, abort: null };
+        waiter.abort = () => {
+            const index = liveSlotWaiters.indexOf(waiter);
+            if (index >= 0) liveSlotWaiters.splice(index, 1);
+            reject(signal.reason || new Error('直播播放已取消。'));
+            drainLiveSlotWaiters();
+        };
+        signal?.addEventListener('abort', waiter.abort, { once: true });
+        liveSlotWaiters.push(waiter);
+    });
+}
+
+function drainLiveSlotWaiters() {
+    while (liveSlotWaiters.length) {
+        const waiter = liveSlotWaiters[0];
+        if (activeLivePipelines >= waiter.maximum) return;
+        liveSlotWaiters.shift();
+        waiter.signal?.removeEventListener('abort', waiter.abort);
+        activeLivePipelines += 1;
+        waiter.resolve();
+    }
+}
+
+function releaseLiveSlot() {
+    activeLivePipelines = Math.max(activeLivePipelines - 1, 0);
+    drainLiveSlotWaiters();
+}
+
+function getLiveConcurrencyStateForTests() {
+    return { active: activeLivePipelines, waiting: liveSlotWaiters.length };
+}
+
 /** 下載到 `.download` 後才原子 rename，避免未完成檔案被當成可執行檔。 */
-async function downloadBinary(destination) {
+async function downloadBinary(destination, signal) {
     fs.mkdirSync(path.dirname(destination), { recursive: true });
     if (process.platform !== 'win32') fs.chmodSync(path.dirname(destination), 0o700);
     const temporary = `${destination}.download`;
     try {
-        const response = await http.get(DOWNLOAD_URL, { responseType: 'stream', maxRedirects: 5 });
-        await pipeline(response.data, fs.createWriteStream(temporary, { mode: 0o755 }));
+        const response = await http.get(DOWNLOAD_URL, { responseType: 'stream', maxRedirects: 5, signal });
+        await pipeline(response.data, fs.createWriteStream(temporary, { mode: 0o755 }), { signal });
         fs.chmodSync(temporary, 0o755);
         fs.renameSync(temporary, destination);
     } finally {
@@ -175,15 +218,29 @@ function shouldCheckUpdate(binaryPath, intervalHours, now = Date.now()) {
     } catch { return true; }
 }
 
+function waitForPromiseWithSignal(promise, signal) {
+    if (!signal) return promise;
+    if (signal.aborted) return Promise.reject(signal.reason || new Error('yt-dlp 工作已取消。'));
+    return new Promise((resolve, reject) => {
+        const abort = () => reject(signal.reason || new Error('yt-dlp 工作已取消。'));
+        const settle = callback => value => {
+            signal.removeEventListener('abort', abort);
+            callback(value);
+        };
+        signal.addEventListener('abort', abort, { once: true });
+        promise.then(settle(resolve), settle(reject));
+    });
+}
+
 /**
  * 確保 yt-dlp 存在且未超過更新檢查間隔；updatePromise 合併同時發生的檢查，
  * 防止多個 guild 在啟動時一起下載或更新同一檔案。
  */
 async function ensureYtDlp(options = {}, force = false) {
-    if (updatePromise) return updatePromise;
+    if (updatePromise) return waitForPromiseWithSignal(updatePromise, options.signal);
     updatePromise = (async () => {
         const binaryPath = resolveBinaryPath(options.binaryPath);
-        if (!fs.existsSync(binaryPath)) await downloadBinary(binaryPath);
+        if (!fs.existsSync(binaryPath)) await downloadBinary(binaryPath, options.signal);
         const intervalHours = Math.max(Number(options.updateHours) || 24, 1);
         if (force || shouldCheckUpdate(binaryPath, intervalHours)) {
             try { await runYtDlp(binaryPath, createYtDlpArgs(['-U']), { timeout: 120000, signal: options.signal }); }
@@ -198,7 +255,7 @@ async function ensureYtDlp(options = {}, force = false) {
         }
         return binaryPath;
     })().finally(() => { updatePromise = null; });
-    return updatePromise;
+    return waitForPromiseWithSignal(updatePromise, options.signal);
 }
 
 /** 只辨識「更新 extractor 可能解決」的錯誤，避免對永久錯誤做無效重試。 */
@@ -212,6 +269,9 @@ function isExtractorFailure(error) {
 function normalizeMediaError(error) {
     if (error?.code === 'MUSIC_VALIDATION') return error;
     const message = `${error?.message || ''}\n${error?.stderr || ''}`.toLowerCase();
+    if (/upcoming|premieres? in|will begin|scheduled/.test(message)) {
+        return musicValidationError('此直播尚未開始，目前不會等待預定直播。');
+    }
     if (/private|members.only|premium members|supporter.only|registered users|login required|log in|sign in|geo.?restrict|not available in your country|video unavailable|has been removed|does not exist/.test(message)) {
         return musicValidationError('此媒體無法公開存取，可能已失效、受地區限制或需要登入。');
     }
@@ -277,25 +337,33 @@ async function resolveMusicQuery(input, options = {}) {
     return descriptor;
 }
 
-async function extractResolvedTrack(query, requestedBy, options = {}, retried = false) {
+async function extractResolvedTrack(query, requestedBy, options = {}, trackOptions = {}, retried = false) {
     const binaryPath = await ensureYtDlp(options);
     try {
         const result = await runYtDlp(binaryPath, createYtDlpArgs(['--dump-single-json', '--no-playlist', '--no-warnings', '--socket-timeout', '15', query]), { timeout: 45000, signal: options.signal });
         const data = JSON.parse(result.stdout);
         const item = data.entries?.[0] || data;
-        return validateTrack(normalizeTrack(item, requestedBy), options.maxDurationSeconds, options.minDurationSeconds);
+        return validateTrack(
+            normalizeTrack(item, requestedBy, trackOptions.provider),
+            options.maxDurationSeconds,
+            options.minDurationSeconds,
+            { allowLiveStreams: options.allowLiveStreams === true, directInput: trackOptions.directInput === true }
+        );
     } catch (error) {
         if (!retried && isExtractorFailure(error)) {
             await ensureYtDlp(options, true);
-            return extractResolvedTrack(query, requestedBy, options, true);
+            return extractResolvedTrack(query, requestedBy, options, trackOptions, true);
         }
         throw normalizeMediaError(error);
     }
 }
 
 async function extractTrack(input, requestedBy, options = {}) {
-    const { query } = await resolveMusicQuery(input, options);
-    return extractResolvedTrack(query, requestedBy, options);
+    const descriptor = await resolveMusicQuery(input, options);
+    return extractResolvedTrack(descriptor.query, requestedBy, options, {
+        provider: descriptor.source,
+        directInput: descriptor.isUrl
+    });
 }
 
 function isYouTubePlaylist(input) {
@@ -326,7 +394,9 @@ async function extractYouTubePlaylist(input, requestedBy, options = {}, retried 
         for (const entry of entries.slice(0, limit)) {
             const url = getYouTubePlaylistEntryURL(entry);
             if (!url) throw musicValidationError('播放清單包含無法解析的曲目。');
-            tracks.push(await extractResolvedTrack(validateYouTubeUrl(url), requestedBy, options));
+            tracks.push(await extractResolvedTrack(validateYouTubeUrl(url), requestedBy, options, {
+                provider: 'youtube', directInput: false
+            }));
         }
         return tracks;
     } catch (error) {
@@ -360,7 +430,12 @@ async function extractBilibiliTracks(input, requestedBy, options = {}, retried =
         ]), { timeout: 60000, signal: options.signal });
         const data = JSON.parse(result.stdout);
         if (!Array.isArray(data.entries)) {
-            return [validateTrack(normalizeTrack(data, requestedBy), options.maxDurationSeconds, options.minDurationSeconds)];
+            return [validateTrack(
+                normalizeTrack(data, requestedBy, 'bilibili'),
+                options.maxDurationSeconds,
+                options.minDurationSeconds,
+                { allowLiveStreams: false, directInput: true }
+            )];
         }
         if (!data.entries.length) throw musicValidationError('Bilibili 多 P 影片中沒有可加入的內容。');
         if (data.entries.length > 1 && !options.allowPlaylists) {
@@ -371,7 +446,9 @@ async function extractBilibiliTracks(input, requestedBy, options = {}, retried =
         const tracks = [];
         for (const entry of data.entries.slice(0, limit)) {
             const url = getBilibiliEntryURL(entry, input);
-            tracks.push(await extractResolvedTrack(url, requestedBy, options));
+            tracks.push(await extractResolvedTrack(url, requestedBy, options, {
+                provider: 'bilibili', directInput: false
+            }));
         }
         return tracks;
     } catch (error) {
@@ -391,12 +468,137 @@ async function extractTracks(input, requestedBy, options = {}) {
         if (playlistInput && !options.allowPlaylists) throw musicValidationError('目前設定不允許點播 YouTube 播放清單。');
         return playlistInput
             ? extractYouTubePlaylist(descriptor.query, requestedBy, options)
-            : [await extractResolvedTrack(descriptor.query, requestedBy, options)];
+            : [await extractResolvedTrack(descriptor.query, requestedBy, options, {
+                provider: 'youtube', directInput: descriptor.isUrl
+            })];
+    }
+    const url = new URL(validateBilibiliUrl(descriptor.query, { allowShort: false }));
+    if (url.searchParams.has('p')) return [await extractResolvedTrack(url.toString(), requestedBy, options, {
+        provider: 'bilibili', directInput: true
+    })];
+    return extractBilibiliTracks(url.toString(), requestedBy, options);
+}
+
+/** 播放或重連前重新確認 canonical YouTube 頁面仍是公開直播。 */
+async function refreshLiveTrack(track, options = {}) {
+    if (track?.playbackType !== 'live' || track.provider !== 'youtube') {
+        throw new TypeError('refreshLiveTrack() 只接受 YouTube live track。');
+    }
+    const query = validateYouTubeUrl(track.url);
+    return extractResolvedTrack(query, track.requestedBy, options, {
+        provider: track.provider,
+        directInput: true
+    });
+}
+
+/**
+ * 取得獨立直播 slot，將 yt-dlp stdout 直接 pipe 至 FFmpeg，再輸出 Discord 可直接
+ * demux 的 Ogg Opus。任一 child 結束都會關閉另一個 child 並釋放 slot。
+ */
+async function startLivePipeline(track, options = {}) {
+    if (track?.playbackType !== 'live') throw new TypeError('startLivePipeline() 只接受 live track。');
+    if (!processManager || typeof processManager.spawnStreaming !== 'function') {
+        throw new Error('直播播放需要 processManager.spawnStreaming()。');
     }
 
-    const url = new URL(validateBilibiliUrl(descriptor.query, { allowShort: false }));
-    if (url.searchParams.has('p')) return [await extractResolvedTrack(url.toString(), requestedBy, options)];
-    return extractBilibiliTracks(url.toString(), requestedBy, options);
+    await acquireLiveSlot(options.maxConcurrentLiveStreams, options.signal);
+    let slotReleased = false;
+    const releaseSlotOnce = () => {
+        if (slotReleased) return;
+        slotReleased = true;
+        releaseLiveSlot();
+    };
+    let ytDlpProcess = null;
+    let ffmpegProcess = null;
+    let stoppingPromise = null;
+    const stopChildren = reason => {
+        if (stoppingPromise) return stoppingPromise;
+        try { ytDlpProcess?.stdout?.unpipe?.(ffmpegProcess?.stdin); } catch {}
+        try { ffmpegProcess?.stdin?.end?.(); } catch {}
+        stoppingPromise = Promise.allSettled([
+            ytDlpProcess?.stop?.(reason),
+            ffmpegProcess?.stop?.(reason)
+        ]).then(() => undefined);
+        return stoppingPromise;
+    };
+
+    try {
+        options.onSlotAcquired?.();
+        const preparedTrack = typeof options.prepareTrack === 'function'
+            ? await options.prepareTrack(track)
+            : track;
+        const binaryPath = await ensureYtDlp(options);
+        if (options.signal?.aborted) throw options.signal.reason || new Error('直播播放已取消。');
+        const sourceUrl = validateYouTubeUrl(preparedTrack.url);
+        ytDlpProcess = processManager.spawnStreaming(binaryPath, createYtDlpArgs([
+            '--no-playlist', '--no-warnings', '--no-live-from-start', '--socket-timeout', '15',
+            '-f', 'ba/b', '-o', '-', sourceUrl
+        ]), { signal: options.signal });
+        ytDlpProcess.completion.catch(() => {});
+
+        const volume = Math.min(Math.max(Number(options.volumePercent) || 0, 0), 100) / 100;
+        ffmpegProcess = processManager.spawnStreaming(ffmpegPath, [
+            '-hide_banner', '-loglevel', 'warning', '-i', 'pipe:0', '-map', '0:a:0', '-vn',
+            '-ac', '2', '-ar', '48000', '-filter:a', `volume=${volume}`,
+            '-c:a', 'libopus', '-application', 'audio', '-b:a', '128k', '-f', 'ogg', 'pipe:1'
+        ], { signal: options.signal });
+        ffmpegProcess.completion.catch(() => {});
+
+        // stop／來源 EOF 可能讓 pipe 產生 EPIPE；child completion 才是唯一終態來源。
+        ytDlpProcess.stdout?.on?.('error', () => {});
+        ffmpegProcess.stdin?.on?.('error', () => {});
+        ytDlpProcess.stdout.pipe(ffmpegProcess.stdin);
+
+        const taggedCompletion = (source, handle) => handle.completion.then(
+            result => ({ source, result }),
+            error => Promise.reject(Object.assign(error, { livePipelineSource: source }))
+        );
+        const completion = Promise.race([
+            taggedCompletion('yt-dlp', ytDlpProcess),
+            taggedCompletion('ffmpeg', ffmpegProcess)
+        ]).then(async result => {
+            await stopChildren(new Error(`直播 ${result.source} 已結束。`));
+            return result;
+        }, async error => {
+            await stopChildren(error);
+            throw error;
+        }).finally(releaseSlotOnce);
+
+        // 即使呼叫端只監聽 AudioPlayer，completion 也不能形成未處理 rejection。
+        completion.catch(() => {});
+        return {
+            audioStream: ffmpegProcess.stdout,
+            completion,
+            async stop(reason) {
+                await stopChildren(reason);
+                releaseSlotOnce();
+            }
+        };
+    } catch (error) {
+        await stopChildren(error);
+        releaseSlotOnce();
+        throw error;
+    }
+}
+
+/** 直播不建立 cache，只補上穩定 queue ID 並移除任何 extractor 短效欄位。 */
+function prepareLiveTrack(track) {
+    if (track?.playbackType !== 'live') throw new TypeError('prepareLiveTrack() 只接受 live track。');
+    return {
+        id: track.id,
+        title: track.title,
+        url: track.url,
+        channel: track.channel,
+        uploadDate: track.uploadDate,
+        thumbnail: track.thumbnail,
+        duration: null,
+        isLive: true,
+        liveStatus: 'is_live',
+        playbackType: 'live',
+        provider: track.provider,
+        requestedBy: track.requestedBy,
+        queueID: crypto.randomUUID()
+    };
 }
 
 function ensureCacheDirectory() {
@@ -449,6 +651,7 @@ function ensureCacheCapacity(options = {}, requiredBytes = 0) {
  * 失敗時會清除同 UUID 的殘檔，成功後由播放器在不再需要時呼叫 deleteTrackFile。
  */
 async function downloadTrack(track, options = {}, onProgress = null, retried = false) {
+    if (track?.playbackType === 'live') throw new TypeError('直播 track 不可進入檔案下載流程。');
     track.url = validateMusicUrl(track?.url, { allowShort: false });
     const binaryPath = await ensureYtDlp(options);
     ensureCacheDirectory();
@@ -504,14 +707,17 @@ async function checkFfmpeg() {
     } catch {
         throw new Error(`ffmpeg-static 執行檔不可執行：${ffmpegPath}`);
     }
-    return runProcess(ffmpegPath, ['-version'], { timeout: 10000 });
+    const version = await runProcess(ffmpegPath, ['-version'], { timeout: 10000 });
+    const encoders = await runProcess(ffmpegPath, ['-hide_banner', '-encoders'], { timeout: 10000 });
+    if (!/\blibopus\b/.test(encoders.stdout)) throw new Error('ffmpeg-static 缺少直播所需的 libopus encoder。');
+    return version;
 }
 
 module.exports = {
     ffmpegPath, CACHE_DIRECTORY, createYtDlpArgs, resolveBinaryPath, runProcess, runYtDlp,
     setProcessManager, shouldCheckUpdate, ensureYtDlp, isExtractorFailure, normalizeMediaError,
     resolveBilibiliShortUrl, extractTrack,
-    extractTracks, downloadTrack, deleteTrackFile, checkFfmpeg,
+    extractTracks, refreshLiveTrack, startLivePipeline, prepareLiveTrack, downloadTrack, deleteTrackFile, checkFfmpeg,
     setProtectedCachePaths, cleanupOrphanedCache, ensureCacheCapacity,
-    getYtDlpConcurrencyStateForTests
+    getYtDlpConcurrencyStateForTests, getLiveConcurrencyStateForTests
 };

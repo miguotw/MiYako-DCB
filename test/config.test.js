@@ -222,6 +222,8 @@ test('固定數值範圍與 Discord 欄位限制會被驗證', () => {
         ['configCommands.yml', document => { document.packageTracking.maxActivePackages = 0; }],
         ['configCommands.yml', document => { document.packageTracking.maxActivePackages = 101; }],
         ['configCommands.yml', document => { document.music.ytDlpUpdateHours = 721; }],
+        ['configCommands.yml', document => { document.music.maxConcurrentLiveStreams = 11; }],
+        ['configCommands.yml', document => { document.music.liveReconnectWindowSeconds = 9; }],
         ['configCommands.yml', document => { document.music.maxDurationMinutes = 1441; }],
         ['configCommands.yml', document => { document.music.maxQueueTracks = 0; }],
         ['configCommands.yml', document => { document.music.maxFileSizeMiB = 4097; }],

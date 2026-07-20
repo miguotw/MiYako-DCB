@@ -113,7 +113,8 @@ function toYtDlpQuery(input) {
     try {
         new URL(value);
         const query = validateMusicUrl(value);
-        return { query, isUrl: true, source: YOUTUBE_HOSTS.has(new URL(query).hostname) ? 'youtube' : 'bilibili' };
+        const source = YOUTUBE_HOSTS.has(new URL(query).hostname) ? 'youtube' : 'bilibili';
+        return { query, isUrl: true, source };
     } catch (error) {
         if (/^[a-z][a-z\d+.-]*:/i.test(value)) throw error;
         return { query: `ytsearch1:${value}`, isUrl: false, source: 'youtube' };
@@ -121,9 +122,11 @@ function toYtDlpQuery(input) {
 }
 
 /** 將 yt-dlp 多種 extractor 回應收斂成播放器使用的固定 Track shape。 */
-function normalizeTrack(data, requestedBy = null) {
-    const duration = Number(data?.duration || 0);
-    const isLive = Boolean(data?.is_live) || data?.live_status === 'is_live' || duration <= 0;
+function normalizeTrack(data, requestedBy = null, provider = null) {
+    const rawDuration = Number(data?.duration);
+    const liveStatus = typeof data?.live_status === 'string' ? data.live_status : null;
+    const isLive = data?.is_live === true || liveStatus === 'is_live';
+    const duration = isLive ? null : Number.isFinite(rawDuration) && rawDuration > 0 ? rawDuration : null;
     return {
         id: String(data?.id || ''),
         title: String(data?.title || '未知標題'),
@@ -133,15 +136,29 @@ function normalizeTrack(data, requestedBy = null) {
         thumbnail: data?.thumbnail || data?.thumbnails?.at?.(-1)?.url || null,
         duration,
         isLive,
+        liveStatus,
+        playbackType: isLive ? 'live' : 'file',
+        provider,
         requestedBy
     };
 }
 
-/** 拒絕直播、缺少 URL 及超出設定長度範圍的媒體。 */
-function validateTrack(track, maxDurationSeconds = 7200, minDurationSeconds = 0) {
-    if (track.isLive) throw musicValidationError('目前不支援直播內容。');
+/** 驗證直播狀態、URL 及一般媒體的長度範圍。直播只允許直接公開 URL。 */
+function validateTrack(track, maxDurationSeconds = 7200, minDurationSeconds = 0, options = {}) {
     if (!track.url) throw musicValidationError('無法取得此媒體的播放網址。');
     track.url = validateMusicUrl(track.url, { allowShort: false });
+    if (track.isLive) {
+        if (!options.allowLiveStreams) throw musicValidationError('目前設定不允許播放直播內容。');
+        if (!options.directInput) throw musicValidationError('直播必須直接貼上公開直播連結，不能透過搜尋或播放清單加入。');
+        if (track.provider !== 'youtube') throw musicValidationError('目前只支援 YouTube 公開直播。');
+        track.duration = null;
+        track.playbackType = 'live';
+        return track;
+    }
+    if (track.liveStatus === 'is_upcoming') throw musicValidationError('此直播尚未開始，目前不會等待預定直播。');
+    if (track.liveStatus === 'post_live') throw musicValidationError('此直播剛結束且仍在轉檔中，請稍後再試。');
+    if (!(Number(track.duration) > 0)) throw musicValidationError('無法取得此媒體的有效播放長度。');
+    track.playbackType = 'file';
     if (maxDurationSeconds > 0 && track.duration > maxDurationSeconds) {
         throw musicValidationError(`歌曲長度不可超過 ${formatDuration(maxDurationSeconds)}。`);
     }

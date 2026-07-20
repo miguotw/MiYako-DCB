@@ -178,6 +178,13 @@ music:
   # 啟用播放清單／多 P 時，一次最多加入的曲目數。
   maxPlaylistTracks: 25
 
+  # 是否允許直接貼上 YouTube 公開直播；直播固定從目前 live edge 開始。
+  allowLiveStreams: true
+
+  # 全部伺服器合計最多同時播放的直播數，以及單次中斷最多重連秒數。
+  maxConcurrentLiveStreams: 2
+  liveReconnectWindowSeconds: 120
+
   # 播放序列、單一下載檔與整體 cache 上限。
   maxQueueTracks: 100
   maxFileSizeMiB: 256

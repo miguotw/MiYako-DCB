@@ -12,8 +12,8 @@ const {
     AudioPlayerStatus, VoiceConnectionStatus, NoSubscriberBehavior, StreamType,
     createAudioPlayer, createAudioResource, entersState, joinVoiceChannel
 } = require('@discordjs/voice');
-const { deleteTrackFile } = require('./ytDlpManager');
-const { musicValidationError } = require('./musicHelpers');
+const { deleteTrackFile, refreshLiveTrack, startLivePipeline } = require('./ytDlpManager');
+const { musicValidationError, validateYouTubeUrl } = require('./musicHelpers');
 
 const guildStates = new Map();
 
@@ -24,14 +24,32 @@ function createGuildState(guildID, options, hooks) {
         guildID, options, hooks, player, connection: null, voiceChannelID: null,
         current: null, queue: [], resource: null, panelMessage: null, panelChannel: null,
         progressTimer: null, recoveryTimer: null, inactivityTimer: null,
+        liveRetryTimer: null, liveRetryStartedAt: 0, liveRetryAttempt: 0,
         voiceChannel: null, starting: false, preparingTracks: 0, playbackGeneration: 0,
         paused: false, resumeAfterRecovery: false, resumeOffsetSeconds: 0,
+        livePipeline: null, liveAbortController: null, liveStatus: null,
+        liveHandlingKeys: new Set(), controlOperation: Promise.resolve(),
         shuttingDown: false
     };
-    player.on('error', error => failCurrent(state, error, error?.resource?.metadata?.playbackGeneration));
+    player.on('error', error => {
+        const generation = error?.resource?.metadata?.playbackGeneration;
+        if (state.current?.playbackType === 'live') void handleLiveInterruption(state, error, generation);
+        else void failCurrent(state, error, generation);
+    });
     player.on('stateChange', (oldState, nextState) => {
         if (nextState.status === AudioPlayerStatus.Idle) {
-            void finishCurrent(state, oldState?.resource?.metadata?.playbackGeneration);
+            const generation = oldState?.resource?.metadata?.playbackGeneration;
+            if (state.current?.playbackType !== 'live') void finishCurrent(state, generation);
+        }
+        const nextGeneration = nextState?.resource?.metadata?.playbackGeneration;
+        if (nextState.status === AudioPlayerStatus.Playing
+            && state.current?.playbackType === 'live'
+            && nextGeneration === state.playbackGeneration) {
+            state.liveStatus = 'playing';
+            state.liveRetryStartedAt = 0;
+            state.liveRetryAttempt = 0;
+            state.hooks.updatePanel?.(state);
+            persistState(state);
         }
         // 若在 Buffering 階段收到無人／斷線暫停，進入 Playing 後再次落實暫停。
         if (state.paused && nextState.status === AudioPlayerStatus.Playing) player.pause(true);
@@ -52,20 +70,50 @@ function elapsedSeconds(state) {
     return state.resumeOffsetSeconds + (state.resource?.playbackDuration || 0) / 1000;
 }
 
+function sanitizeLiveTrack(track) {
+    const provider = track?.provider;
+    const url = provider === 'youtube' ? validateYouTubeUrl(track.url) : null;
+    if (!url) throw new Error('live track 缺少受支援的 provider。');
+    return {
+        id: String(track.id || ''),
+        title: String(track.title || '未知直播'),
+        url,
+        channel: String(track.channel || '未知頻道'),
+        uploadDate: /^\d{8}$/.test(String(track.uploadDate || '')) ? String(track.uploadDate) : null,
+        thumbnail: typeof track.thumbnail === 'string' ? track.thumbnail : null,
+        duration: null,
+        isLive: true,
+        liveStatus: 'is_live',
+        playbackType: 'live',
+        provider,
+        requestedBy: track.requestedBy ? String(track.requestedBy) : null,
+        queueID: String(track.queueID || track.id || url)
+    };
+}
+
+function snapshotTrack(track) {
+    if (!track) return null;
+    if (track.playbackType !== 'live') return track;
+    try { return sanitizeLiveTrack(track); }
+    catch { return null; }
+}
+
 /**
  * 保存足以重建播放的最小快照；序列完全為空時刪除舊檔，避免下次啟動誤恢復。
  * localPath 也會落盤，恢復時仍會再次確認檔案確實存在。
  */
 function persistState(state, immediate = false) {
-    const snapshot = !state.current && !state.queue.length ? null : {
+    const current = snapshotTrack(state.current);
+    const queue = state.queue.map(snapshotTrack).filter(Boolean);
+    const snapshot = !current && !queue.length ? null : {
         guildID: state.guildID,
         voiceChannelID: state.voiceChannelID,
         panelChannelID: state.panelChannel?.id || state.panelMessage?.channelId || null,
         panelMessageID: state.panelMessage?.id || null,
         paused: state.paused,
-        progressSeconds: elapsedSeconds(state),
-        current: state.current,
-        queue: state.queue
+        progressSeconds: current?.playbackType === 'live' ? null : elapsedSeconds(state),
+        current,
+        queue
     };
     const result = state.hooks.persistSnapshot?.(state, snapshot, { immediate });
     if (!immediate) result?.catch?.(error => state.hooks.onPersistenceError?.(state, error));
@@ -101,7 +149,7 @@ async function connect(state, voiceChannel) {
                 waitForState(disconnectedConnection, VoiceConnectionStatus.Connecting, 5000)
             ]);
             await waitForState(disconnectedConnection, VoiceConnectionStatus.Ready, 20000);
-            const resumed = resumeRecoveredPlayback(state);
+            const resumed = await resumeRecoveredPlayback(state);
             await state.hooks.notifyPlaybackStatus?.(
                 state,
                 'success',
@@ -197,6 +245,175 @@ function endTrackPreparation(state) {
     refreshInactivityTimer(state);
 }
 
+function livePlaybackMatches(state, generation, queueID) {
+    return !state.shuttingDown
+        && state.playbackGeneration === generation
+        && state.current?.playbackType === 'live'
+        && state.current.queueID === queueID;
+}
+
+function clearLiveRetryTimer(state) {
+    if (!state.liveRetryTimer) return;
+    const clearTimer = state.options.clearTimeout || clearTimeout;
+    clearTimer(state.liveRetryTimer);
+    state.liveRetryTimer = null;
+}
+
+function liveSignal(state, controller, timeoutMs = null) {
+    const signals = [controller.signal];
+    if (state.options.signal) signals.push(state.options.signal);
+    if (Number(timeoutMs) > 0) signals.push(AbortSignal.timeout(Math.ceil(Number(timeoutMs))));
+    return signals.length === 1 ? signals[0] : AbortSignal.any(signals);
+}
+
+async function stopLiveWork(state, reason, { clearRetry = true } = {}) {
+    if (clearRetry) clearLiveRetryTimer(state);
+    const controller = state.liveAbortController;
+    const livePipeline = state.livePipeline;
+    state.liveAbortController = null;
+    state.livePipeline = null;
+    if (controller && !controller.signal.aborted) controller.abort(reason);
+    if (livePipeline) await livePipeline.stop(reason).catch(() => {});
+}
+
+function updateLiveStatus(state, status) {
+    state.liveStatus = status;
+    state.hooks.updatePanel?.(state);
+    persistState(state);
+}
+
+async function startLivePlayback(state, track, generation, retrying = false) {
+    const queueID = track.queueID;
+    if (!livePlaybackMatches(state, generation, queueID) || state.paused) return false;
+    const controller = new AbortController();
+    state.liveAbortController = controller;
+    const now = state.options.now || Date.now;
+    const reconnectWindowMs = Math.max(Number(state.options.liveReconnectWindowSeconds) || 120, 10) * 1000;
+    const remainingRetryMs = retrying && state.liveRetryStartedAt
+        ? reconnectWindowMs - (now() - state.liveRetryStartedAt)
+        : null;
+    if (remainingRetryMs !== null && remainingRetryMs <= 0) {
+        throw musicValidationError('直播來源中斷超過重連期限。');
+    }
+    const signal = liveSignal(state, controller, remainingRetryMs);
+    updateLiveStatus(state, retrying ? 'reconnecting' : 'waiting');
+
+    const pipeline = await startLivePipeline(state.current, {
+        ...state.options,
+        signal,
+        onSlotAcquired: () => {
+            if (livePlaybackMatches(state, generation, queueID) && !state.paused) {
+                updateLiveStatus(state, retrying ? 'reconnecting' : 'connecting');
+            }
+        },
+        prepareTrack: async () => {
+            const refreshed = await refreshLiveTrack(track, {
+                ...state.options,
+                allowLiveStreams: state.options.allowLiveStreams !== false,
+                signal
+            });
+            if (!livePlaybackMatches(state, generation, queueID) || state.paused) {
+                throw signal.reason || new Error('直播狀態已變更。');
+            }
+            if (refreshed.playbackType !== 'live') throw musicValidationError('此直播已結束。');
+            if (retrying && state.liveRetryStartedAt && now() - state.liveRetryStartedAt >= reconnectWindowMs) {
+                throw musicValidationError('直播來源中斷超過重連期限。');
+            }
+            state.current = sanitizeLiveTrack({ ...refreshed, queueID });
+            return state.current;
+        }
+    });
+    if (!livePlaybackMatches(state, generation, queueID) || state.paused) {
+        await pipeline.stop(new Error('直播狀態已變更。')).catch(() => {});
+        return false;
+    }
+
+    state.livePipeline = pipeline;
+    state.resource = createAudioResource(pipeline.audioStream, {
+        inputType: StreamType.OggOpus,
+        metadata: { ...state.current, playbackGeneration: generation }
+    });
+    state.player.play(state.resource);
+    startProgressUpdates(state);
+    persistState(state);
+    pipeline.completion.then(
+        result => handleLiveInterruption(state, new Error(`直播 ${result.source} 已結束。`), generation),
+        error => handleLiveInterruption(state, error, generation)
+    ).catch(() => {});
+    return true;
+}
+
+async function finishLiveCurrent(state, error, generation) {
+    if (!livePlaybackMatches(state, generation, state.current?.queueID)) return;
+    const failed = state.current;
+    const finishingGeneration = ++state.playbackGeneration;
+    await stopLiveWork(state, error);
+    if (state.playbackGeneration !== finishingGeneration || state.current !== failed) return;
+    stopProgressUpdates(state);
+    state.player.stop(true);
+    state.current = null;
+    state.resource = null;
+    state.starting = false;
+    state.paused = false;
+    state.liveStatus = null;
+    state.liveRetryStartedAt = 0;
+    state.liveRetryAttempt = 0;
+    persistState(state);
+    await state.hooks.notifyError?.(state, failed, error);
+    await playNext(state);
+}
+
+/** 直播來源失敗時重新解析 canonical URL；確認離線或超過窗口才前進序列。 */
+async function handleLiveInterruption(state, error, generation = state.playbackGeneration) {
+    const queueID = state.current?.queueID;
+    const handlingKey = `${generation}:${queueID}`;
+    if (!livePlaybackMatches(state, generation, queueID)
+        || state.paused
+        || state.liveRetryTimer !== null
+        || state.liveHandlingKeys.has(handlingKey)) return;
+    state.liveHandlingKeys.add(handlingKey);
+    try {
+        await stopLiveWork(state, error, { clearRetry: false });
+        if (!livePlaybackMatches(state, generation, queueID) || state.paused) return;
+        if (error?.code === 'MUSIC_VALIDATION') {
+            await finishLiveCurrent(state, error, generation);
+            return;
+        }
+
+        const now = state.options.now || Date.now;
+        const reconnectWindowMs = Math.max(Number(state.options.liveReconnectWindowSeconds) || 120, 10) * 1000;
+        if (!state.liveRetryStartedAt) state.liveRetryStartedAt = now();
+        const elapsed = now() - state.liveRetryStartedAt;
+        if (elapsed >= reconnectWindowMs) {
+            await finishLiveCurrent(state, musicValidationError('直播來源中斷超過重連期限。'), generation);
+            return;
+        }
+
+        const retryDelays = Array.isArray(state.options.liveRetryDelaysSeconds)
+            ? state.options.liveRetryDelaysSeconds
+            : [1, 2, 4, 8, 20];
+        const configuredDelay = Number(retryDelays[Math.min(state.liveRetryAttempt, retryDelays.length - 1)]);
+        const delaySeconds = Number.isFinite(configuredDelay) ? Math.max(configuredDelay, 0) : 1;
+        state.liveRetryAttempt += 1;
+        updateLiveStatus(state, 'reconnecting');
+        if (state.liveRetryAttempt === 1) {
+            state.hooks.notifyPlaybackStatus?.(state, 'warning', '直播來源中斷，正在重新連線。');
+        }
+        const setTimer = state.options.setTimeout || setTimeout;
+        const remainingMs = reconnectWindowMs - elapsed;
+        state.liveRetryTimer = setTimer(() => {
+            state.liveRetryTimer = null;
+            if (!livePlaybackMatches(state, generation, queueID) || state.paused) return;
+            const retryGeneration = ++state.playbackGeneration;
+            startLivePlayback(state, state.current, retryGeneration, true)
+                .catch(retryError => handleLiveInterruption(state, retryError, retryGeneration));
+        }, Math.min(delaySeconds * 1000, remainingMs));
+        state.liveRetryTimer?.unref?.();
+    } finally {
+        state.liveHandlingKeys.delete(handlingKey);
+    }
+}
+
 /** 應用層重連採固定五秒重試；同一 guild 同時間只允許一個 recovery timer。 */
 function scheduleRecovery(state) {
     if (state.recoveryTimer) return;
@@ -208,7 +425,7 @@ function scheduleRecovery(state) {
             const channel = await state.hooks.getVoiceChannel?.(state);
             if (!channel) return;
             await connect(state, channel);
-            const resumed = resumeRecoveredPlayback(state);
+            const resumed = await resumeRecoveredPlayback(state);
             await state.hooks.notifyPlaybackStatus?.(
                 state,
                 'success',
@@ -222,7 +439,9 @@ function scheduleRecovery(state) {
 
 /** 加入已下載歌曲；insertNext 只插到待播首位，不會中斷目前歌曲。 */
 async function enqueue(state, track, voiceChannel, panelChannel, insertNext = false) {
+    if (state.shuttingDown) throw new Error('音樂播放器正在關閉，無法加入新的歌曲。');
     await connect(state, voiceChannel);
+    if (state.shuttingDown) throw new Error('音樂播放器正在關閉，無法加入新的歌曲。');
     state.panelChannel = panelChannel;
     if (insertNext) state.queue.unshift(track);
     else state.queue.push(track);
@@ -248,13 +467,26 @@ async function playNext(state) {
         return;
     }
     state.starting = true;
+    track.playbackType ||= 'file';
     state.current = track;
     const generation = ++state.playbackGeneration;
-    state.paused = false;
-    state.resumeOffsetSeconds = Number(track.resumeSeconds) || 0;
+    state.paused = track.playbackType === 'live' && track.resumePaused === true;
+    delete track.resumePaused;
+    state.resumeOffsetSeconds = track.playbackType === 'live' ? 0 : Number(track.resumeSeconds) || 0;
     try {
         await state.hooks.replacePanel?.(state);
         if (generation !== state.playbackGeneration || state.current !== track) return;
+        if (track.playbackType === 'live') {
+            state.starting = false;
+            if (state.paused) {
+                updateLiveStatus(state, 'paused');
+                return;
+            }
+            persistState(state);
+            startLivePlayback(state, track, generation)
+                .catch(error => handleLiveInterruption(state, error, generation));
+            return;
+        }
         if (!track.localPath || !fs.existsSync(track.localPath)) throw new Error('找不到已下載的音訊檔案。');
         if (state.resumeOffsetSeconds > 0) {
             const transcoder = new prism.FFmpeg({ args: ['-ss', String(state.resumeOffsetSeconds), '-i', track.localPath, '-analyzeduration', '0', '-loglevel', '0', '-f', 's16le', '-ar', '48000', '-ac', '2'] });
@@ -308,15 +540,52 @@ async function failCurrent(state, error, eventGeneration = state.playbackGenerat
     await playNext(state);
 }
 
-function togglePause(state) {
-    if (!state.current) return null;
+async function togglePauseNow(state, target) {
+    if (!state.current || state.current !== target) return null;
+    if (target.playbackType === 'live') {
+        if (state.paused) {
+            state.paused = false;
+            state.liveRetryStartedAt = 0;
+            state.liveRetryAttempt = 0;
+            const generation = ++state.playbackGeneration;
+            updateLiveStatus(state, 'waiting');
+            startLivePlayback(state, state.current, generation)
+                .catch(error => handleLiveInterruption(state, error, generation));
+            return false;
+        }
+        const reason = new Error('使用者暫停直播。');
+        const generation = ++state.playbackGeneration;
+        state.paused = true;
+        state.player.stop(true);
+        await stopLiveWork(state, reason);
+        if (state.playbackGeneration !== generation || state.current !== target || !state.paused) return state.paused;
+        state.resource = null;
+        updateLiveStatus(state, 'paused');
+        return true;
+    }
     if (state.paused || state.player.state.status === AudioPlayerStatus.Paused) { state.paused = false; state.player.unpause(); }
     else { state.player.pause(true); state.paused = true; }
     state.hooks.updatePanel?.(state); persistState(state); return state.paused;
 }
+
+/** 同一 guild 的暫停／繼續依序執行，並綁定呼叫當下的 track，避免操作落到下一首。 */
+function togglePause(state) {
+    const target = state.current;
+    const operation = state.controlOperation.catch(() => {}).then(() => togglePauseNow(state, target));
+    state.controlOperation = operation.catch(() => {});
+    return operation;
+}
 function pauseForReason(state, reason) {
     if (!state.current || state.paused) return false;
-    state.player.pause(true);
+    if (state.current.playbackType === 'live') {
+        state.playbackGeneration += 1;
+        state.player.stop(true);
+        void stopLiveWork(state, new Error(reason));
+        state.resource = null;
+        state.liveStatus = 'paused';
+    } else {
+        state.player.pause(true);
+    }
     state.paused = true;
     state.hooks.updatePanel?.(state);
     state.hooks.notifyPlaybackStatus?.(state, 'warning', reason);
@@ -329,12 +598,21 @@ function pauseForRecovery(state) {
     if (pausedByRecovery) state.resumeAfterRecovery = true;
     return pausedByRecovery;
 }
-function resumeRecoveredPlayback(state) {
+async function resumeRecoveredPlayback(state) {
     if (!state.resumeAfterRecovery) return false;
     state.resumeAfterRecovery = false;
     if (!state.current) return false;
     state.paused = false;
-    state.player.unpause();
+    if (state.current.playbackType === 'live') {
+        state.liveRetryStartedAt = 0;
+        state.liveRetryAttempt = 0;
+        const generation = ++state.playbackGeneration;
+        updateLiveStatus(state, 'waiting');
+        startLivePlayback(state, state.current, generation)
+            .catch(error => handleLiveInterruption(state, error, generation));
+    } else {
+        state.player.unpause();
+    }
     state.hooks.updatePanel?.(state);
     persistState(state);
     return true;
@@ -382,9 +660,14 @@ function skipCurrent(state) {
     if (!state.current) return false;
     const skipped = state.current;
     state.playbackGeneration += 1;
+    if (skipped.playbackType === 'live') void stopLiveWork(state, new Error('直播已被跳過。'));
     state.starting = false;
     state.current = null;
     state.resource = null;
+    state.paused = false;
+    state.liveStatus = null;
+    state.liveRetryStartedAt = 0;
+    state.liveRetryAttempt = 0;
     stopProgressUpdates(state);
     state.player.stop(true);
     deleteTrackFile(skipped);
@@ -408,16 +691,36 @@ function stopProgressUpdates(state) { if (state.progressTimer) clearInterval(sta
 async function restoreGuildState(snapshot, voiceChannel, panelChannel, panelMessage, options, hooks) {
     const state = getGuildState(snapshot.guildID, options, hooks);
     state.panelChannel = panelChannel; state.panelMessage = panelMessage; state.voiceChannelID = null;
-    state.queue = [
-        ...(snapshot.current ? [{ ...snapshot.current, resumeSeconds: Number(snapshot.progressSeconds) || 0 }] : []),
+    const restoredTracks = [
+        ...(snapshot.current ? [{
+            ...snapshot.current,
+            ...(snapshot.current.playbackType === 'live'
+                ? { resumePaused: snapshot.paused === true }
+                : { resumeSeconds: Number(snapshot.progressSeconds) || 0 })
+        }] : []),
         ...(Array.isArray(snapshot.queue) ? snapshot.queue : [])
-    ].filter(track => track.localPath && fs.existsSync(track.localPath))
-        .map(track => ({ ...track, queueID: track.queueID || path.basename(track.localPath) }));
+    ];
+    state.queue = restoredTracks.map(track => {
+        if (track.playbackType === 'live') {
+            if (options.allowLiveStreams === false) return null;
+            try {
+                const restored = sanitizeLiveTrack(track);
+                if (track.resumePaused === true) restored.resumePaused = true;
+                return restored;
+            } catch { return null; }
+        }
+        if (!track.localPath || !fs.existsSync(track.localPath)) return null;
+        return {
+            ...track,
+            playbackType: 'file',
+            queueID: track.queueID || path.basename(track.localPath)
+        };
+    }).filter(Boolean);
     if (!state.queue.length) { await state.hooks.persistSnapshot?.(state, null, { immediate: true }); return null; }
     await connect(state, voiceChannel);
     await playNext(state);
     if (!state.current) throw new Error('保存的歌曲無法恢復播放。');
-    if (snapshot.paused) togglePause(state);
+    if (snapshot.paused && state.current.playbackType !== 'live') await togglePause(state);
     return state;
 }
 
@@ -426,6 +729,8 @@ async function restoreGuildState(snapshot, voiceChannel, panelChannel, panelMess
  * remove=true 也會移出 guildStates，供閒置退出後完整釋放狀態。
  */
 function cleanupState(state, remove = false) {
+    state.playbackGeneration += 1;
+    void stopLiveWork(state, new Error('音樂播放器已清理。'));
     stopProgressUpdates(state);
     if (state.recoveryTimer) clearTimeout(state.recoveryTimer);
     state.recoveryTimer = null;
@@ -434,6 +739,8 @@ function cleanupState(state, remove = false) {
     state.voiceChannel = null; state.voiceChannelID = null;
     deleteTrackFile(state.current); for (const track of state.queue) deleteTrackFile(track);
     state.current = null; state.queue = []; state.resumeAfterRecovery = false;
+    state.paused = false; state.liveStatus = null; state.liveRetryStartedAt = 0; state.liveRetryAttempt = 0;
+    state.liveHandlingKeys.clear();
     state.hooks.persistSnapshot?.(state, null, { immediate: true });
     if (remove) guildStates.delete(state.guildID);
 }
@@ -443,14 +750,25 @@ async function snapshotAllGuildStates() {
     await Promise.all([...guildStates.values()].map(state => persistState(state, true)));
 }
 
+/** 先凍結播放器狀態再保存，避免取消 child 產生的 Idle/Error 在快照前換曲。 */
+async function prepareAllPlayersForShutdown() {
+    for (const state of guildStates.values()) {
+        state.shuttingDown = true;
+        clearLiveRetryTimer(state);
+    }
+    await snapshotAllGuildStates();
+}
+
 /**
  * 關機專用清理：先設 shuttingDown 阻止 AudioPlayer Idle 消費序列，再停止 timer、
  * player 與語音連線。此流程刻意保留 cache 與 snapshot，供下次啟動恢復。
  */
 async function shutdownAllPlayers() {
-    await snapshotAllGuildStates();
+    await prepareAllPlayersForShutdown();
+    await Promise.all([...guildStates.values()].map(state => (
+        stopLiveWork(state, new Error('應用程式正在關閉。')).catch(() => {})
+    )));
     for (const state of guildStates.values()) {
-        state.shuttingDown = true;
         stopProgressUpdates(state);
         if (state.recoveryTimer) clearTimeout(state.recoveryTimer);
         state.recoveryTimer = null;
@@ -463,4 +781,4 @@ async function shutdownAllPlayers() {
     }
 }
 function isCurrentPanel(state, messageID) { return Boolean(state.panelMessage?.id && state.panelMessage.id === messageID); }
-module.exports = { guildStates, getGuildState, enqueue, summonToVoiceChannel, togglePause, skipCurrent, cleanupState, snapshotAllGuildStates, shutdownAllPlayers, isCurrentPanel, elapsedSeconds, restoreGuildState, handleVoiceStateUpdate, removeQueuedTracks, clearQueue, beginTrackPreparation, endTrackPreparation };
+module.exports = { guildStates, getGuildState, enqueue, summonToVoiceChannel, togglePause, skipCurrent, cleanupState, snapshotAllGuildStates, prepareAllPlayersForShutdown, shutdownAllPlayers, isCurrentPanel, elapsedSeconds, restoreGuildState, handleVoiceStateUpdate, removeQueuedTracks, clearQueue, beginTrackPreparation, endTrackPreparation };

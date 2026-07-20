@@ -7,8 +7,10 @@ const {
 const {
     ffmpegPath, checkFfmpeg, createYtDlpArgs, shouldCheckUpdate, isExtractorFailure,
     normalizeMediaError, resolveBilibiliShortUrl, resolveBinaryPath, CACHE_DIRECTORY,
-    extractTracks, runYtDlp, setProcessManager, getYtDlpConcurrencyStateForTests
+    extractTracks, prepareLiveTrack, startLivePipeline, runYtDlp, setProcessManager,
+    getYtDlpConcurrencyStateForTests, getLiveConcurrencyStateForTests
 } = require('../util/ytDlpManager');
+const { PassThrough } = require('node:stream');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -29,6 +31,28 @@ function installFakeYtDlp(t, run) {
         fs.rmSync(root, { recursive: true, force: true });
     });
     return binaryPath;
+}
+
+function fakeStreamingHandle() {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    let resolveCompletion;
+    let rejectCompletion;
+    let stopPromise = null;
+    const completion = new Promise((resolve, reject) => {
+        resolveCompletion = resolve;
+        rejectCompletion = reject;
+    });
+    return {
+        stdin, stdout, completion,
+        stop(reason = new Error('stopped')) {
+            if (!stopPromise) {
+                stopPromise = Promise.resolve().then(() => rejectCompletion(reason));
+            }
+            return stopPromise;
+        },
+        finish(result = { code: 0, signal: null, stderr: '' }) { resolveCompletion(result); }
+    };
 }
 
 test('網址原樣傳入，標題使用 ytsearch1', () => {
@@ -57,6 +81,7 @@ test('只接受精確且安全的 YouTube URL', () => {
         'https://127.0.0.1/watch?v=abc',
         'https://192.168.1.1/watch?v=abc',
         'https://www.youtube.com/redirect?q=http://127.0.0.1',
+        'https://www.twitch.tv/channel',
         'https://vimeo.com/123'
     ];
     for (const url of rejected) assert.throws(() => toYtDlpQuery(url));
@@ -150,6 +175,31 @@ test('拒絕直播與超長內容', () => {
     assert.throws(() => validateTrack({ isLive: false, url, duration: 7201 }, 7200), /2:00:00/);
     assert.throws(() => validateTrack({ isLive: false, url, duration: 30 }, 7200, 60), /1:00/);
     assert.doesNotThrow(() => validateTrack({ isLive: false, url, duration: 999999 }, 0, 0));
+});
+
+test('只允許直接公開 URL 建立 YouTube live track', () => {
+    const youtube = normalizeTrack({
+        id: 'live-id', title: 'Live', webpage_url: 'https://youtu.be/live-id',
+        uploader: 'Channel', is_live: true, live_status: 'is_live'
+    }, 'user', 'youtube');
+    assert.equal(youtube.duration, null);
+    assert.equal(youtube.playbackType, 'live');
+    assert.equal(validateTrack(youtube, 1, 9999, { allowLiveStreams: true, directInput: true }), youtube);
+    assert.throws(() => validateTrack({ ...youtube }, 7200, 0, { allowLiveStreams: true, directInput: false }), /直接貼上/);
+    assert.throws(() => validateTrack({ ...youtube }, 7200, 0, { allowLiveStreams: false, directInput: true }), /設定不允許/);
+
+    const upcoming = normalizeTrack({
+        webpage_url: 'https://youtu.be/upcoming', live_status: 'is_upcoming'
+    }, 'user', 'youtube');
+    assert.throws(() => validateTrack(upcoming, 7200, 0, { allowLiveStreams: true, directInput: true }), /尚未開始/);
+    const postLive = normalizeTrack({
+        webpage_url: 'https://youtu.be/post-live', live_status: 'post_live'
+    }, 'user', 'youtube');
+    assert.throws(() => validateTrack(postLive, 7200, 0, { allowLiveStreams: true, directInput: true }), /轉檔中/);
+    const finished = normalizeTrack({
+        webpage_url: 'https://youtu.be/finished', live_status: 'was_live', duration: 3600
+    }, 'user', 'youtube');
+    assert.equal(validateTrack(finished, 7200, 0, { allowLiveStreams: true, directInput: true }).playbackType, 'file');
 });
 
 test('格式化時間、進度與佇列分頁', () => {
@@ -262,6 +312,57 @@ test('全域同時最多執行兩個 yt-dlp child', async () => {
     assert.deepEqual(getYtDlpConcurrencyStateForTests(), { active: 2, waiting: 1 });
     await Promise.all(tasks);
     assert.deepEqual(getYtDlpConcurrencyStateForTests(), { active: 0, waiting: 0 });
+});
+
+test('直播管線以獨立兩路 FIFO slot 串接 yt-dlp、FFmpeg 並完整釋放', async t => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'miyako-live-pipeline-'));
+    const binaryPath = path.join(root, 'yt-dlp');
+    fs.writeFileSync(binaryPath, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+    fs.writeFileSync(`${binaryPath}.update.json`, JSON.stringify({ lastCheckedAt: Date.now() }));
+    const calls = [];
+    setProcessManager({
+        run: async () => ({ code: 0, stdout: '', stderr: '' }),
+        spawnStreaming(command, args) {
+            const handle = fakeStreamingHandle();
+            calls.push({ command, args, handle });
+            return handle;
+        }
+    });
+    t.after(() => {
+        setProcessManager(null);
+        fs.rmSync(root, { recursive: true, force: true });
+    });
+    const track = prepareLiveTrack({
+        id: 'live', title: 'Live', url: 'https://youtu.be/live', channel: 'Channel',
+        duration: null, isLive: true, liveStatus: 'is_live', playbackType: 'live',
+        provider: 'youtube', requestedBy: 'user'
+    });
+
+    const first = await startLivePipeline(track, { binaryPath, maxConcurrentLiveStreams: 2, volumePercent: 20 });
+    const second = await startLivePipeline(track, { binaryPath, maxConcurrentLiveStreams: 2, volumePercent: 20 });
+    const thirdPromise = startLivePipeline(track, { binaryPath, maxConcurrentLiveStreams: 2, volumePercent: 20 });
+    assert.deepEqual(getLiveConcurrencyStateForTests(), { active: 2, waiting: 1 });
+    assert.equal(calls.length, 4);
+    assert.equal(calls[0].args.includes('--no-live-from-start'), true);
+    assert.equal(calls[0].args.includes('-o'), true);
+    assert.equal(calls[1].command, ffmpegPath);
+    assert.equal(calls[1].args.includes('volume=0.2'), true);
+    assert.equal(calls[1].args.includes('libopus'), true);
+
+    const piped = new Promise(resolve => calls[1].handle.stdin.once('data', resolve));
+    calls[0].handle.stdout.write('media-bytes');
+    assert.equal((await piped).toString(), 'media-bytes');
+    assert.equal(first.audioStream, calls[1].handle.stdout);
+
+    await first.stop(new Error('release first'));
+    await assert.rejects(first.completion, /release first/);
+    const third = await thirdPromise;
+    assert.deepEqual(getLiveConcurrencyStateForTests(), { active: 2, waiting: 0 });
+    assert.equal(calls.length, 6);
+
+    await Promise.all([second.stop(new Error('release second')), third.stop(new Error('release third'))]);
+    await Promise.allSettled([second.completion, third.completion]);
+    assert.deepEqual(getLiveConcurrencyStateForTests(), { active: 0, waiting: 0 });
 });
 
 test('Bilibili 單片、多 P、指定分 P 與展開上限皆使用受控 yt-dlp 流程', async t => {
