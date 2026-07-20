@@ -1,5 +1,8 @@
 const MAX_QUEUE_PAGE_SIZE = 10;
 const YOUTUBE_HOSTS = new Set(['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtu.be']);
+const BILIBILI_HOSTS = new Set(['bilibili.com', 'www.bilibili.com', 'm.bilibili.com']);
+const BILIBILI_SHORT_HOST = 'b23.tv';
+const BILIBILI_VIDEO_ID = /^(?:BV[a-z\d]{10}|av\d{1,20})$/i;
 /**
  * 音樂資料的純函式集合，不持有 Discord 或播放器狀態，適合單獨測試。
  * yt-dlp 原始 metadata 會先 normalize、再 validate，通過後才可進入下載序列。
@@ -45,23 +48,85 @@ function validateYouTubeUrl(input) {
     return url.toString();
 }
 
+/**
+ * Bilibili 只接受一般影片頁與官方短網址；其他 extractor 路徑一律拒絕。
+ * 一般影片網址會正規化至 www，並只保留代表指定分 P 的 `p` 參數。
+ */
+function validateBilibiliUrl(input, { allowShort = true } = {}) {
+    let url;
+    try { url = new URL(String(input || '').trim()); }
+    catch { throw musicValidationError('Bilibili 連結格式不正確。'); }
+
+    if (url.protocol !== 'https:') throw musicValidationError('Bilibili 連結必須使用 HTTPS。');
+    if (url.username || url.password || url.port) throw musicValidationError('Bilibili 連結不可包含帳密或自訂連接埠。');
+
+    const pathSegments = url.pathname.split('/').filter(Boolean);
+    if (url.hostname === BILIBILI_SHORT_HOST) {
+        if (!allowShort) throw musicValidationError('Bilibili 短網址尚未解析為影片網址。');
+        if (pathSegments.length !== 1 || !/^[a-z\d_-]{1,128}$/i.test(pathSegments[0])) {
+            throw musicValidationError('b23.tv 連結格式不正確。');
+        }
+        url.search = '';
+        url.hash = '';
+        return url.toString();
+    }
+
+    if (!BILIBILI_HOSTS.has(url.hostname)) throw musicValidationError('只接受 YouTube 或 Bilibili 連結。');
+    if (pathSegments.length !== 2 || pathSegments[0] !== 'video' || !BILIBILI_VIDEO_ID.test(pathSegments[1])) {
+        throw musicValidationError('只支援一般 Bilibili 影片或多 P 連結。');
+    }
+
+    const partValues = url.searchParams.getAll('p');
+    if (partValues.length > 1 || (partValues.length === 1 && !/^[1-9]\d*$/.test(partValues[0]))) {
+        throw musicValidationError('Bilibili 分 P 必須是正整數。');
+    }
+    const part = partValues[0];
+    url.hostname = 'www.bilibili.com';
+    url.pathname = `/video/${pathSegments[1]}`;
+    url.search = '';
+    if (part) url.searchParams.set('p', part);
+    url.hash = '';
+    return url.toString();
+}
+
+function isBilibiliShortUrl(input) {
+    try { return new URL(String(input || '')).hostname === BILIBILI_SHORT_HOST; }
+    catch { return false; }
+}
+
+/** 驗證可進入 yt-dlp 的媒體網址，避免把外部程序當成任意 URL 下載器。 */
+function validateMusicUrl(input, options) {
+    let url;
+    try { url = new URL(String(input || '').trim()); }
+    catch { throw musicValidationError('只接受 YouTube、Bilibili 連結或歌曲標題。'); }
+    if (YOUTUBE_HOSTS.has(url.hostname)) return validateYouTubeUrl(url.toString());
+    if (BILIBILI_HOSTS.has(url.hostname) || url.hostname === BILIBILI_SHORT_HOST) {
+        return validateBilibiliUrl(url.toString(), options);
+    }
+    throw musicValidationError('只接受 YouTube 或 Bilibili 連結。');
+}
+
 /** URL 通過精確 allowlist 後交給 yt-dlp；其餘文字轉為只取第一筆的 YouTube 搜尋語法。 */
 function toYtDlpQuery(input) {
     const value = String(input || '').trim();
-    if (!value) throw musicValidationError('請輸入 YouTube 連結或歌曲標題。');
+    if (!value) throw musicValidationError('請輸入 YouTube、Bilibili 連結或歌曲標題。');
     try {
         new URL(value);
-        return { query: validateYouTubeUrl(value), isUrl: true };
+        const query = validateMusicUrl(value);
+        const source = YOUTUBE_HOSTS.has(new URL(query).hostname) ? 'youtube' : 'bilibili';
+        return { query, isUrl: true, source };
     } catch (error) {
         if (/^[a-z][a-z\d+.-]*:/i.test(value)) throw error;
-        return { query: `ytsearch1:${value}`, isUrl: false };
+        return { query: `ytsearch1:${value}`, isUrl: false, source: 'youtube' };
     }
 }
 
 /** 將 yt-dlp 多種 extractor 回應收斂成播放器使用的固定 Track shape。 */
-function normalizeTrack(data, requestedBy = null) {
-    const duration = Number(data?.duration || 0);
-    const isLive = Boolean(data?.is_live) || data?.live_status === 'is_live' || duration <= 0;
+function normalizeTrack(data, requestedBy = null, provider = null) {
+    const rawDuration = Number(data?.duration);
+    const liveStatus = typeof data?.live_status === 'string' ? data.live_status : null;
+    const isLive = data?.is_live === true || liveStatus === 'is_live';
+    const duration = isLive ? null : Number.isFinite(rawDuration) && rawDuration > 0 ? rawDuration : null;
     return {
         id: String(data?.id || ''),
         title: String(data?.title || '未知標題'),
@@ -71,15 +136,29 @@ function normalizeTrack(data, requestedBy = null) {
         thumbnail: data?.thumbnail || data?.thumbnails?.at?.(-1)?.url || null,
         duration,
         isLive,
+        liveStatus,
+        playbackType: isLive ? 'live' : 'file',
+        provider,
         requestedBy
     };
 }
 
-/** 拒絕直播、缺少 URL 及超出設定長度範圍的媒體。 */
-function validateTrack(track, maxDurationSeconds = 7200, minDurationSeconds = 0) {
-    if (track.isLive) throw musicValidationError('目前不支援直播內容。');
+/** 驗證直播狀態、URL 及一般媒體的長度範圍。直播只允許直接公開 URL。 */
+function validateTrack(track, maxDurationSeconds = 7200, minDurationSeconds = 0, options = {}) {
     if (!track.url) throw musicValidationError('無法取得此媒體的播放網址。');
-    track.url = validateYouTubeUrl(track.url);
+    track.url = validateMusicUrl(track.url, { allowShort: false });
+    if (track.isLive) {
+        if (!options.allowLiveStreams) throw musicValidationError('目前設定不允許播放直播內容。');
+        if (!options.directInput) throw musicValidationError('直播必須直接貼上公開直播連結，不能透過搜尋或播放清單加入。');
+        if (track.provider !== 'youtube') throw musicValidationError('目前只支援 YouTube 公開直播。');
+        track.duration = null;
+        track.playbackType = 'live';
+        return track;
+    }
+    if (track.liveStatus === 'is_upcoming') throw musicValidationError('此直播尚未開始，目前不會等待預定直播。');
+    if (track.liveStatus === 'post_live') throw musicValidationError('此直播剛結束且仍在轉檔中，請稍後再試。');
+    if (!(Number(track.duration) > 0)) throw musicValidationError('無法取得此媒體的有效播放長度。');
+    track.playbackType = 'file';
     if (maxDurationSeconds > 0 && track.duration > maxDurationSeconds) {
         throw musicValidationError(`歌曲長度不可超過 ${formatDuration(maxDurationSeconds)}。`);
     }
@@ -119,11 +198,14 @@ module.exports = {
     formatDuration,
     getUploadYear,
     isMusicValidationError,
+    isBilibiliShortUrl,
     musicValidationError,
     normalizeTrack,
     paginateQueue,
     createProgressBar,
     toYtDlpQuery,
     validateTrack,
+    validateBilibiliUrl,
+    validateMusicUrl,
     validateYouTubeUrl
 };

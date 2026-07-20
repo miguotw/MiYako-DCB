@@ -231,6 +231,82 @@ function createProcessManager({
         return resultPromise;
     }
 
+    /**
+     * 啟動長時間串流程序。stdout 直接交給呼叫端消費，不在記憶體中累積；
+     * stderr 僅保留固定大小的尾端，供程序結束時診斷。
+     */
+    function spawnStreaming(command, args = [], options = {}) {
+        if (stopping || rootSignal?.aborted) {
+            throw createAbortError('程序管理器已停止。', rootSignal?.reason);
+        }
+        if (!Array.isArray(args)) throw new TypeError('spawnStreaming() 的 args 必須是陣列。');
+
+        const {
+            signal,
+            maxStderrBytes = 64 * 1024,
+            ...spawnOptions
+        } = options;
+        if (signal?.aborted) throw createAbortError('外部串流程序已取消。', signal.reason);
+
+        const stderrLimit = Number(maxStderrBytes);
+        if (!Number.isSafeInteger(stderrLimit) || stderrLimit < 0) {
+            throw new RangeError('spawnStreaming() 的 maxStderrBytes 必須是非負安全整數。');
+        }
+
+        const child = spawnFn(command, args, {
+            ...spawnOptions,
+            stdio: ['pipe', 'pipe', 'pipe'],
+            ...(useProcessGroups ? { detached: true } : {})
+        });
+        const record = addRecord(child, { processGroup: useProcessGroups });
+        let stderrTail = Buffer.alloc(0);
+        let settled = false;
+
+        const completion = new Promise((resolve, reject) => {
+            const cleanup = () => signal?.removeEventListener('abort', abort);
+            const finish = (callback, value) => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                callback(value);
+            };
+            const abort = () => {
+                void terminate(record, createAbortError('外部串流程序已取消。', signal.reason)).catch(() => {});
+            };
+
+            child.stderr?.on('data', chunk => {
+                if (stderrLimit === 0) return;
+                const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+                if (buffer.length >= stderrLimit) {
+                    // 複製尾端，避免小 subarray 持續引用一個可能非常大的原始 chunk。
+                    stderrTail = Buffer.from(buffer.subarray(buffer.length - stderrLimit));
+                    return;
+                }
+                const previousBytes = Math.min(stderrTail.length, stderrLimit - buffer.length);
+                stderrTail = Buffer.concat([
+                    stderrTail.subarray(stderrTail.length - previousBytes),
+                    buffer
+                ], previousBytes + buffer.length);
+            });
+            child.once('error', error => finish(reject, error));
+            child.once('close', (code, childSignal) => {
+                const result = { code, signal: childSignal, stderr: stderrTail.toString() };
+                if (record.cancelError) return finish(reject, attachResult(record.cancelError, result));
+                if (code === 0 && childSignal == null) return finish(resolve, result);
+                const message = result.stderr.trim() || `${command} 結束，代碼 ${code}`;
+                finish(reject, Object.assign(new Error(message), result));
+            });
+            signal?.addEventListener('abort', abort, { once: true });
+        });
+
+        const stop = reason => terminate(
+            record,
+            createAbortError('外部串流程序已取消。', reason)
+        );
+        // 呼叫端必須消費 stdout；process manager 不附加 data listener 或緩衝內容。
+        return { stdin: child.stdin, stdout: child.stdout, completion, stop };
+    }
+
     /** 冪等停止所有已追蹤程序；第一次呼叫後不再接受新的 run。 */
     function stopAll() {
         if (stopPromise) return stopPromise;
@@ -248,7 +324,7 @@ function createProcessManager({
     if (rootSignal?.aborted) stopping = true;
     else rootSignal?.addEventListener('abort', onRootAbort, { once: true });
 
-    return { run, track, stopAll };
+    return { run, spawnStreaming, track, stopAll };
 }
 
 module.exports = { createProcessManager };
