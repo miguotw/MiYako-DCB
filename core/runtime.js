@@ -8,7 +8,7 @@ const { createInteractionRouter } = require('./router');
 const { createScheduler } = require('./scheduler');
 const { createStoreRegistry } = require('./storeRegistry');
 const { createFeatureManifests } = require('../src/features');
-const { snapshotAllGuildStates, shutdownAllPlayers } = require('../util/musicPlayer');
+const { prepareAllPlayersForShutdown, shutdownAllPlayers } = require('../util/musicPlayer');
 
 const DEFAULT_READY_TIMEOUT_MS = 30000;
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 20000;
@@ -76,6 +76,7 @@ function createRuntime({
     const startedFeatures = [];
     let startPromise = null;
     let shutdownPromise = null;
+    let shutdownError = null;
     let inFlightFeatureStart = null;
 
     async function stopFeatures() {
@@ -103,12 +104,12 @@ function createRuntime({
         };
 
         await phase('router', async () => router.close());
+        await phase('musicPrepare', async () => prepareAllPlayersForShutdown());
         await phase('http', async () => {
             if (!controller.signal.aborted) controller.abort(shutdownReason);
         });
         await phase('scheduler', async () => scheduler.stop());
         await phase('process', async () => processManager.stopAll());
-        await phase('musicSnapshot', async () => snapshotAllGuildStates());
         await phase('featureStartDrain', async () => {
             if (!inFlightFeatureStart) return;
             try { await inFlightFeatureStart; }
@@ -130,18 +131,19 @@ function createRuntime({
     /** 冪等 graceful shutdown；超過總期限會拒絕，讓可執行 entrypoint 決定強制退出。 */
     function shutdown(reason = new Error('收到關機要求。')) {
         if (shutdownPromise) return shutdownPromise;
+        shutdownError = reason instanceof Error ? reason : new Error(String(reason || '收到關機要求。'));
         let timer;
         const deadline = new Promise((_, reject) => {
             timer = setTimeout(() => reject(new Error(`Graceful shutdown 超過 ${shutdownTimeoutMs} 毫秒。`)), shutdownTimeoutMs);
         });
-        shutdownPromise = Promise.race([performShutdown(reason), deadline]).finally(() => clearTimeout(timer));
+        shutdownPromise = Promise.race([performShutdown(shutdownError), deadline]).finally(() => clearTimeout(timer));
         return shutdownPromise;
     }
 
     function start() {
         if (startPromise) return startPromise;
-        if (shutdownPromise || controller.signal.aborted) {
-            startPromise = Promise.reject(controller.signal.reason || new Error('Runtime 已開始關閉，不能再次啟動。'));
+        if (shutdownPromise || shutdownError || controller.signal.aborted) {
+            startPromise = Promise.reject(controller.signal.reason || shutdownError || new Error('Runtime 已開始關閉，不能再次啟動。'));
             return startPromise;
         }
         startPromise = (async () => {
@@ -150,12 +152,12 @@ function createRuntime({
                 const ready = waitUntilReady(client, controller.signal, readyTimeoutMs);
                 await Promise.all([client.login(config.startup.token), ready]);
                 for (const feature of catalog.manifests) {
-                    if (controller.signal.aborted) throw controller.signal.reason || new Error('啟動已取消。');
+                    if (shutdownPromise || shutdownError || controller.signal.aborted) throw controller.signal.reason || shutdownError || new Error('啟動已取消。');
                     const featureStart = (async () => {
                         await feature.start?.(context);
-                        if (controller.signal.aborted) {
+                        if (shutdownPromise || shutdownError || controller.signal.aborted) {
                             await feature.stop?.(context);
-                            throw controller.signal.reason || new Error('啟動已取消。');
+                            throw controller.signal.reason || shutdownError || new Error('啟動已取消。');
                         }
                         startedFeatures.push(feature);
                     })();

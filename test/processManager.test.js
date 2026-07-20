@@ -9,6 +9,7 @@ function createChild(pid = 1234) {
     child.pid = pid;
     child.exitCode = null;
     child.signalCode = null;
+    child.stdin = new PassThrough();
     child.stdout = new PassThrough();
     child.stderr = new PassThrough();
     child.killSignals = [];
@@ -155,4 +156,94 @@ test('stdout/stderr 超過上限會終止程序樹並回傳 MAX_BUFFER', async (
     await assert.rejects(manager.run('noisy-tool', [], { maxStdoutBytes: 4 }), error => error.code === 'MAX_BUFFER');
     assert.deepEqual(child.killSignals, ['SIGTERM']);
     await manager.stopAll();
+});
+
+test('spawnStreaming 不累積或限制大量 stdout，並提供 stdin/stdout', async () => {
+    const child = createChild();
+    let spawnOptions;
+    const manager = createProcessManager({
+        platform: 'win32',
+        spawnFn: (_command, _args, options) => {
+            spawnOptions = options;
+            return child;
+        }
+    });
+
+    const streaming = manager.spawnStreaming('yt-dlp', ['-o', '-']);
+    let stdoutBytes = 0;
+    streaming.stdout.on('data', chunk => { stdoutBytes += chunk.length; });
+    child.stdout.write(Buffer.alloc(9 * 1024 * 1024));
+    child.close(0, null);
+
+    assert.equal(streaming.stdin, child.stdin);
+    assert.equal(streaming.stdout, child.stdout);
+    assert.deepEqual(await streaming.completion, { code: 0, signal: null, stderr: '' });
+    assert.equal(stdoutBytes, 9 * 1024 * 1024);
+    assert.deepEqual(spawnOptions.stdio, ['pipe', 'pipe', 'pipe']);
+    assert.deepEqual(child.killSignals, []);
+    await manager.stopAll();
+});
+
+test('spawnStreaming 的 completion 只保留 stderr 尾端並拒絕非零結束', async () => {
+    const child = createChild();
+    const manager = createProcessManager({ platform: 'win32', spawnFn: () => child });
+    const streaming = manager.spawnStreaming('ffmpeg', [], { maxStderrBytes: 8 });
+
+    child.stderr.write('discard-');
+    child.stderr.write('last-tail');
+    child.close(2, null);
+
+    await assert.rejects(streaming.completion, error => (
+        error.code === 2
+        && error.signal === null
+        && error.stderr === 'ast-tail'
+        && error.message === 'ast-tail'
+    ));
+    await manager.stopAll();
+});
+
+test('spawnStreaming stop 冪等並沿用 TERM→KILL process group', async () => {
+    const child = createChild(6789);
+    const groupSignals = [];
+    const cancellation = new Error('skip live stream');
+    const manager = createProcessManager({
+        platform: 'linux',
+        killGraceMs: 0,
+        spawnFn: () => child,
+        killFn: (pid, childSignal) => {
+            groupSignals.push([pid, childSignal]);
+            if (childSignal === 'SIGKILL') queueMicrotask(() => child.close(null, 'SIGKILL'));
+        }
+    });
+    const streaming = manager.spawnStreaming('yt-dlp');
+    const rejected = assert.rejects(streaming.completion, error => (
+        error === cancellation && error.signal === 'SIGKILL'
+    ));
+
+    const firstStop = streaming.stop(cancellation);
+    const secondStop = streaming.stop();
+    assert.equal(firstStop, secondStop);
+    await firstStop;
+    await rejected;
+    assert.deepEqual(groupSignals, [[-6789, 'SIGTERM'], [-6789, 'SIGKILL']]);
+    await manager.stopAll();
+});
+
+test('stopAll 會取消 spawnStreaming 建立的程序', async () => {
+    const child = createChild();
+    child.kill = childSignal => {
+        child.killSignals.push(childSignal);
+        queueMicrotask(() => child.close(null, childSignal));
+        return true;
+    };
+    const manager = createProcessManager({ platform: 'win32', spawnFn: () => child });
+    const streaming = manager.spawnStreaming('ffmpeg');
+    const rejected = assert.rejects(streaming.completion, error => (
+        error.name === 'AbortError' && error.signal === 'SIGTERM'
+    ));
+
+    await manager.stopAll();
+    await rejected;
+    assert.deepEqual(child.killSignals, ['SIGTERM']);
+    assert.throws(() => manager.spawnStreaming('later'), /正在關閉|已停止/);
 });
