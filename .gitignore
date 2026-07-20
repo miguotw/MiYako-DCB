@@ -4,20 +4,13 @@ node_modules/
 # IDE config files
 .vscode/
 .idea/
+.agents/
+.codex/
 
 # Sensitive info files
 .env
 *.bak
 config/*
-assets/miyakoChat/*
-assets/packageTracking/*
-assets/minecraft/temp/*
-assets/music/*
-assets/temporaryVoice/*
-assets/twitch_stream/*.json
-assets/twitch_stream/*.tmp
-assets/raffle/*
-assets/dataCollection/*
 
-# Phase 3 runtime state, cache, downloaded binaries and temporary files
+# Runtime state, cache, downloaded binaries and temporary files
 runtime/
