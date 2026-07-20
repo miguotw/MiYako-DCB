@@ -159,7 +159,7 @@ function createButtons(state, disabled = false) {
 
 function createPanelEmbed(state) {
     const embed = new EmbedBuilder().setColor(COLOR).setTitle(`${EMOJI} ┃ 音樂 - 管理面板`);
-    if (!state.current) return embed.setDescription('目前沒有播放中的音樂。使用下方按鈕加入歌曲。');
+    if (!state.current) return embed.setDescription('目前沒有播放中的音樂，使用下方按鈕加入歌曲。\n支援 [YouTube](https://www.youtube.com/)／[Bilibili](https://www.bilibili.com/)  與 [YouTube](https://www.youtube.com/) 標題搜尋。');
     const track = state.current;
     const elapsed = Math.min(elapsedSeconds(state), track.duration);
     const upcoming = state.queue.slice(0, 5).map((item, index) => `${String(index + 1).padStart(2, '0')}. [${truncateTitle(item.title)}](${item.url}) \`${formatDuration(item.duration)}\` · ${item.requestedBy ? `<@${item.requestedBy}>` : '未知點播者'}`).join('\n');
@@ -355,7 +355,7 @@ function createClearQueueModal(channelID, messageID) {
 
 function createMusicRequestModal(insertNext = false) {
     return new ModalBuilder().setCustomId(insertNext ? 'music_request_modal:next' : 'music_request_modal').setTitle(insertNext ? '插播音樂' : '點播音樂').addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('query').setLabel('YouTube／Bilibili 連結或歌曲標題')
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('query').setLabel('YouTube／Bilibili 連結或 YouTube 標題')
             .setPlaceholder('純文字將搜尋 YouTube').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(1000))
     );
 }
