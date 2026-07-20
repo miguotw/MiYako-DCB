@@ -168,7 +168,7 @@ music:
   # 接下來、完整序列與移除選單的歌曲標題最大字符數，可設定 1～97。
   queueTitleMaxLength: 25
 
-  # 單首曲目允許的最長與最短播放時間，單位為分鐘。0 表示不限制。
+  # 單首曲目允許的最長與最短播放時間，單位為分鐘，0 表示不限制。
   maxDurationMinutes: 180
   minDurationMinutes: 1
 
@@ -181,13 +181,16 @@ music:
   # 是否允許直接貼上 YouTube 公開直播；直播固定從目前 live edge 開始。
   allowLiveStreams: true
 
-  # 全部伺服器合計最多同時播放的直播數，以及單次中斷最多重連秒數。
-  maxConcurrentLiveStreams: 2
+  # 單次直播中斷最多重連秒數；直播播放本身沒有全域路數限制。
   liveReconnectWindowSeconds: 120
+
+  # 全部伺服器合計最多同時執行的 yt-dlp 解析／搜尋／下載工作數。
+  maxConcurrentYtDlpProcesses: 3
 
   # 播放序列、單一下載檔與整體 cache 上限。
   maxQueueTracks: 100
   maxFileSizeMiB: 256
   maxCacheSizeMiB: 2048
 
+  # yt-dlp 更新間隔，單位為小時。
   ytDlpUpdateHours: 24

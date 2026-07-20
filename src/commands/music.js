@@ -36,7 +36,7 @@ const OPTIONS = {
     allowPlaylists: MUSIC_CONFIG.allowPlaylists === true,
     maxPlaylistTracks: Math.min(Math.max(Number(MUSIC_CONFIG.maxPlaylistTracks) || 25, 1), 100),
     allowLiveStreams: MUSIC_CONFIG.allowLiveStreams !== false,
-    maxConcurrentLiveStreams: Math.min(Math.max(Number(MUSIC_CONFIG.maxConcurrentLiveStreams) || 2, 1), 10),
+    maxConcurrentYtDlpProcesses: Math.min(Math.max(Number(MUSIC_CONFIG.maxConcurrentYtDlpProcesses) || 3, 1), 10),
     liveReconnectWindowSeconds: Math.min(Math.max(Number(MUSIC_CONFIG.liveReconnectWindowSeconds) || 120, 10), 600),
     panelUpdateSeconds: Number(MUSIC_CONFIG.panelUpdateSeconds) || 10,
     inactivityTimeoutMinutes: Number(MUSIC_CONFIG.inactivityTimeoutMinutes) > 0 ? Number(MUSIC_CONFIG.inactivityTimeoutMinutes) : 5,
@@ -356,7 +356,6 @@ function formatTrackLength(track) {
 function liveStatusLabel(state) {
     if (state.paused || state.liveStatus === 'paused') return '`⏸️ 已暫停`';
     const labels = {
-        waiting: '`🕒 等待直播播放資源`',
         connecting: '`🟡 正在連線`',
         reconnecting: '`🟠 來源中斷，正在重新連線`',
         playing: '`🔴 LIVE`'

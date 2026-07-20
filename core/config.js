@@ -175,7 +175,7 @@ const commandsConfigSchema = strictObject({
         allowPlaylists: z.boolean(),
         maxPlaylistTracks: integerRange('music.maxPlaylistTracks', 1, 100),
         allowLiveStreams: z.boolean().default(true),
-        maxConcurrentLiveStreams: integerRange('music.maxConcurrentLiveStreams', 1, 10).default(2),
+        maxConcurrentYtDlpProcesses: integerRange('music.maxConcurrentYtDlpProcesses', 1, 10).default(3),
         liveReconnectWindowSeconds: integerRange('music.liveReconnectWindowSeconds', 10, 600).default(120),
         ytDlpUpdateHours: integerRange('music.ytDlpUpdateHours', 1, 720),
         maxQueueTracks: integerRange('music.maxQueueTracks', 1, 1000).default(100),

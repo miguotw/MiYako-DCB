@@ -8,7 +8,7 @@ const {
     ffmpegPath, checkFfmpeg, createYtDlpArgs, shouldCheckUpdate, isExtractorFailure,
     normalizeMediaError, resolveBilibiliShortUrl, resolveBinaryPath, CACHE_DIRECTORY,
     extractTracks, prepareLiveTrack, startLivePipeline, runYtDlp, setProcessManager,
-    getYtDlpConcurrencyStateForTests, getLiveConcurrencyStateForTests
+    getYtDlpConcurrencyStateForTests
 } = require('../util/ytDlpManager');
 const { PassThrough } = require('node:stream');
 const fs = require('fs');
@@ -301,20 +301,31 @@ test('快照 immediate flush 等待最新內容且寫入不重疊', async () => 
     assert.equal(maximumActive, 1);
 });
 
-test('全域同時最多執行兩個 yt-dlp child', async () => {
-    const tasks = Array.from({ length: 3 }, () => runYtDlp(process.execPath, [
+test('yt-dlp 預設同時執行三個 child，並接受較低的設定上限', async () => {
+    const tasks = Array.from({ length: 4 }, () => runYtDlp(process.execPath, [
         '-e', 'setTimeout(() => process.exit(0), 150)'
     ], { timeout: 2000 }));
     const deadline = Date.now() + 1000;
     while (getYtDlpConcurrencyStateForTests().waiting !== 1 && Date.now() < deadline) {
         await new Promise(resolve => setTimeout(resolve, 5));
     }
-    assert.deepEqual(getYtDlpConcurrencyStateForTests(), { active: 2, waiting: 1 });
+    assert.deepEqual(getYtDlpConcurrencyStateForTests(), { active: 3, waiting: 1 });
     await Promise.all(tasks);
+    assert.deepEqual(getYtDlpConcurrencyStateForTests(), { active: 0, waiting: 0 });
+
+    const configuredTasks = Array.from({ length: 3 }, () => runYtDlp(process.execPath, [
+        '-e', 'setTimeout(() => process.exit(0), 150)'
+    ], { timeout: 2000, maxConcurrentYtDlpProcesses: 2 }));
+    const configuredDeadline = Date.now() + 1000;
+    while (getYtDlpConcurrencyStateForTests().waiting !== 1 && Date.now() < configuredDeadline) {
+        await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    assert.deepEqual(getYtDlpConcurrencyStateForTests(), { active: 2, waiting: 1 });
+    await Promise.all(configuredTasks);
     assert.deepEqual(getYtDlpConcurrencyStateForTests(), { active: 0, waiting: 0 });
 });
 
-test('直播管線以獨立兩路 FIFO slot 串接 yt-dlp、FFmpeg 並完整釋放', async t => {
+test('直播管線不設全域路數上限，並串接 yt-dlp、FFmpeg', async t => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'miyako-live-pipeline-'));
     const binaryPath = path.join(root, 'yt-dlp');
     fs.writeFileSync(binaryPath, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
@@ -338,11 +349,11 @@ test('直播管線以獨立兩路 FIFO slot 串接 yt-dlp、FFmpeg 並完整釋�
         provider: 'youtube', requestedBy: 'user'
     });
 
-    const first = await startLivePipeline(track, { binaryPath, maxConcurrentLiveStreams: 2, volumePercent: 20 });
-    const second = await startLivePipeline(track, { binaryPath, maxConcurrentLiveStreams: 2, volumePercent: 20 });
-    const thirdPromise = startLivePipeline(track, { binaryPath, maxConcurrentLiveStreams: 2, volumePercent: 20 });
-    assert.deepEqual(getLiveConcurrencyStateForTests(), { active: 2, waiting: 1 });
-    assert.equal(calls.length, 4);
+    const pipelines = await Promise.all(Array.from({ length: 4 }, () => (
+        startLivePipeline(track, { binaryPath, volumePercent: 20 })
+    )));
+    const [first] = pipelines;
+    assert.equal(calls.length, 8);
     assert.equal(calls[0].args.includes('--no-live-from-start'), true);
     assert.equal(calls[0].args.includes('-o'), true);
     assert.equal(calls[1].command, ffmpegPath);
@@ -354,15 +365,8 @@ test('直播管線以獨立兩路 FIFO slot 串接 yt-dlp、FFmpeg 並完整釋�
     assert.equal((await piped).toString(), 'media-bytes');
     assert.equal(first.audioStream, calls[1].handle.stdout);
 
-    await first.stop(new Error('release first'));
-    await assert.rejects(first.completion, /release first/);
-    const third = await thirdPromise;
-    assert.deepEqual(getLiveConcurrencyStateForTests(), { active: 2, waiting: 0 });
-    assert.equal(calls.length, 6);
-
-    await Promise.all([second.stop(new Error('release second')), third.stop(new Error('release third'))]);
-    await Promise.allSettled([second.completion, third.completion]);
-    assert.deepEqual(getLiveConcurrencyStateForTests(), { active: 0, waiting: 0 });
+    await Promise.all(pipelines.map((pipeline, index) => pipeline.stop(new Error(`release ${index}`))));
+    await Promise.allSettled(pipelines.map(pipeline => pipeline.completion));
 });
 
 test('Bilibili 單片、多 P、指定分 P 與展開上限皆使用受控 yt-dlp 流程', async t => {

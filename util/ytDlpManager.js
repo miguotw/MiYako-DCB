@@ -21,10 +21,8 @@ let updatePromise = null;
 let processManager = null;
 let activeYtDlpProcesses = 0;
 const ytDlpWaiters = [];
-let activeLivePipelines = 0;
-const liveSlotWaiters = [];
 const protectedCachePaths = new Set();
-const MAX_YTDLP_PROCESSES = 2;
+const DEFAULT_MAX_YTDLP_PROCESSES = 3;
 const MAX_BILIBILI_REDIRECTS = 3;
 
 const BINARY_PATH = path.join(PROJECT_ROOT, 'runtime', 'bin', 'yt-dlp');
@@ -113,83 +111,55 @@ function runProcess(command, args, options = {}) {
     });
 }
 
-async function acquireYtDlp(signal) {
+function resolveYtDlpConcurrencyLimit(value) {
+    return Math.min(Math.max(Number(value) || DEFAULT_MAX_YTDLP_PROCESSES, 1), 10);
+}
+
+async function acquireYtDlp(limit, signal) {
     if (signal?.aborted) throw signal.reason || new Error('yt-dlp 工作已取消。');
-    if (activeYtDlpProcesses < MAX_YTDLP_PROCESSES) {
+    const maximum = resolveYtDlpConcurrencyLimit(limit);
+    if (activeYtDlpProcesses < maximum && ytDlpWaiters.length === 0) {
         activeYtDlpProcesses += 1;
         return;
     }
     await new Promise((resolve, reject) => {
-        const waiter = { resolve, reject, signal, abort: null };
+        const waiter = { maximum, resolve, reject, signal, abort: null };
         waiter.abort = () => {
             const index = ytDlpWaiters.indexOf(waiter);
             if (index >= 0) ytDlpWaiters.splice(index, 1);
             reject(signal.reason || new Error('yt-dlp 工作已取消。'));
+            drainYtDlpWaiters();
         };
         signal?.addEventListener('abort', waiter.abort, { once: true });
         ytDlpWaiters.push(waiter);
     });
 }
 
-function releaseYtDlp() {
-    const waiter = ytDlpWaiters.shift();
-    if (waiter) {
+function drainYtDlpWaiters() {
+    while (ytDlpWaiters.length) {
+        const waiter = ytDlpWaiters[0];
+        if (activeYtDlpProcesses >= waiter.maximum) return;
+        ytDlpWaiters.shift();
         waiter.signal?.removeEventListener('abort', waiter.abort);
+        activeYtDlpProcesses += 1;
         waiter.resolve();
-        return;
     }
+}
+
+function releaseYtDlp() {
     activeYtDlpProcesses = Math.max(activeYtDlpProcesses - 1, 0);
+    drainYtDlpWaiters();
 }
 
 async function runYtDlp(binaryPath, args, options = {}) {
-    await acquireYtDlp(options.signal);
-    try { return await runProcess(binaryPath, args, options); }
+    const { maxConcurrentYtDlpProcesses, ...processOptions } = options;
+    await acquireYtDlp(maxConcurrentYtDlpProcesses, processOptions.signal);
+    try { return await runProcess(binaryPath, args, processOptions); }
     finally { releaseYtDlp(); }
 }
 
 function getYtDlpConcurrencyStateForTests() {
     return { active: activeYtDlpProcesses, waiting: ytDlpWaiters.length };
-}
-
-/** 直播長駐程序使用獨立 FIFO semaphore，避免占滿短期 metadata／下載工作。 */
-async function acquireLiveSlot(limit, signal) {
-    if (signal?.aborted) throw signal.reason || new Error('直播播放已取消。');
-    const maximum = Math.min(Math.max(Number(limit) || 2, 1), 10);
-    if (activeLivePipelines < maximum && liveSlotWaiters.length === 0) {
-        activeLivePipelines += 1;
-        return;
-    }
-    await new Promise((resolve, reject) => {
-        const waiter = { maximum, resolve, reject, signal, abort: null };
-        waiter.abort = () => {
-            const index = liveSlotWaiters.indexOf(waiter);
-            if (index >= 0) liveSlotWaiters.splice(index, 1);
-            reject(signal.reason || new Error('直播播放已取消。'));
-            drainLiveSlotWaiters();
-        };
-        signal?.addEventListener('abort', waiter.abort, { once: true });
-        liveSlotWaiters.push(waiter);
-    });
-}
-
-function drainLiveSlotWaiters() {
-    while (liveSlotWaiters.length) {
-        const waiter = liveSlotWaiters[0];
-        if (activeLivePipelines >= waiter.maximum) return;
-        liveSlotWaiters.shift();
-        waiter.signal?.removeEventListener('abort', waiter.abort);
-        activeLivePipelines += 1;
-        waiter.resolve();
-    }
-}
-
-function releaseLiveSlot() {
-    activeLivePipelines = Math.max(activeLivePipelines - 1, 0);
-    drainLiveSlotWaiters();
-}
-
-function getLiveConcurrencyStateForTests() {
-    return { active: activeLivePipelines, waiting: liveSlotWaiters.length };
 }
 
 /** 下載到 `.download` 後才原子 rename，避免未完成檔案被當成可執行檔。 */
@@ -243,7 +213,11 @@ async function ensureYtDlp(options = {}, force = false) {
         if (!fs.existsSync(binaryPath)) await downloadBinary(binaryPath, options.signal);
         const intervalHours = Math.max(Number(options.updateHours) || 24, 1);
         if (force || shouldCheckUpdate(binaryPath, intervalHours)) {
-            try { await runYtDlp(binaryPath, createYtDlpArgs(['-U']), { timeout: 120000, signal: options.signal }); }
+            try { await runYtDlp(binaryPath, createYtDlpArgs(['-U']), {
+                timeout: 120000,
+                signal: options.signal,
+                maxConcurrentYtDlpProcesses: options.maxConcurrentYtDlpProcesses
+            }); }
             catch (error) {
                 // 更新失敗時保留目前可執行版本；實際抽取仍會回報原始錯誤。
                 if (!fs.existsSync(binaryPath)) throw error;
@@ -340,7 +314,11 @@ async function resolveMusicQuery(input, options = {}) {
 async function extractResolvedTrack(query, requestedBy, options = {}, trackOptions = {}, retried = false) {
     const binaryPath = await ensureYtDlp(options);
     try {
-        const result = await runYtDlp(binaryPath, createYtDlpArgs(['--dump-single-json', '--no-playlist', '--no-warnings', '--socket-timeout', '15', query]), { timeout: 45000, signal: options.signal });
+        const result = await runYtDlp(binaryPath, createYtDlpArgs(['--dump-single-json', '--no-playlist', '--no-warnings', '--socket-timeout', '15', query]), {
+            timeout: 45000,
+            signal: options.signal,
+            maxConcurrentYtDlpProcesses: options.maxConcurrentYtDlpProcesses
+        });
         const data = JSON.parse(result.stdout);
         const item = data.entries?.[0] || data;
         return validateTrack(
@@ -385,7 +363,11 @@ async function extractYouTubePlaylist(input, requestedBy, options = {}, retried 
     try {
         const result = await runYtDlp(binaryPath, createYtDlpArgs([
             '--dump-single-json', '--flat-playlist', '--yes-playlist', '--no-warnings', '--socket-timeout', '15', validateYouTubeUrl(input)
-        ]), { timeout: 60000, signal: options.signal });
+        ]), {
+            timeout: 60000,
+            signal: options.signal,
+            maxConcurrentYtDlpProcesses: options.maxConcurrentYtDlpProcesses
+        });
         const data = JSON.parse(result.stdout);
         const entries = Array.isArray(data.entries) ? data.entries : [];
         if (!entries.length) throw musicValidationError('播放清單中沒有可加入的曲目。');
@@ -427,7 +409,11 @@ async function extractBilibiliTracks(input, requestedBy, options = {}, retried =
     try {
         const result = await runYtDlp(binaryPath, createYtDlpArgs([
             '--dump-single-json', '--flat-playlist', '--yes-playlist', '--no-warnings', '--socket-timeout', '15', input
-        ]), { timeout: 60000, signal: options.signal });
+        ]), {
+            timeout: 60000,
+            signal: options.signal,
+            maxConcurrentYtDlpProcesses: options.maxConcurrentYtDlpProcesses
+        });
         const data = JSON.parse(result.stdout);
         if (!Array.isArray(data.entries)) {
             return [validateTrack(
@@ -492,8 +478,8 @@ async function refreshLiveTrack(track, options = {}) {
 }
 
 /**
- * 取得獨立直播 slot，將 yt-dlp stdout 直接 pipe 至 FFmpeg，再輸出 Discord 可直接
- * demux 的 Ogg Opus。任一 child 結束都會關閉另一個 child 並釋放 slot。
+ * 將 yt-dlp stdout 直接 pipe 至 FFmpeg，再輸出 Discord 可直接 demux 的 Ogg Opus。
+ * 直播長駐程序不使用短期 yt-dlp semaphore，也不設全域播放路數上限。
  */
 async function startLivePipeline(track, options = {}) {
     if (track?.playbackType !== 'live') throw new TypeError('startLivePipeline() 只接受 live track。');
@@ -501,13 +487,6 @@ async function startLivePipeline(track, options = {}) {
         throw new Error('直播播放需要 processManager.spawnStreaming()。');
     }
 
-    await acquireLiveSlot(options.maxConcurrentLiveStreams, options.signal);
-    let slotReleased = false;
-    const releaseSlotOnce = () => {
-        if (slotReleased) return;
-        slotReleased = true;
-        releaseLiveSlot();
-    };
     let ytDlpProcess = null;
     let ffmpegProcess = null;
     let stoppingPromise = null;
@@ -523,7 +502,7 @@ async function startLivePipeline(track, options = {}) {
     };
 
     try {
-        options.onSlotAcquired?.();
+        if (options.signal?.aborted) throw options.signal.reason || new Error('直播播放已取消。');
         const preparedTrack = typeof options.prepareTrack === 'function'
             ? await options.prepareTrack(track)
             : track;
@@ -562,7 +541,7 @@ async function startLivePipeline(track, options = {}) {
         }, async error => {
             await stopChildren(error);
             throw error;
-        }).finally(releaseSlotOnce);
+        });
 
         // 即使呼叫端只監聽 AudioPlayer，completion 也不能形成未處理 rejection。
         completion.catch(() => {});
@@ -571,12 +550,10 @@ async function startLivePipeline(track, options = {}) {
             completion,
             async stop(reason) {
                 await stopChildren(reason);
-                releaseSlotOnce();
             }
         };
     } catch (error) {
         await stopChildren(error);
-        releaseSlotOnce();
         throw error;
     }
 }
@@ -667,6 +644,7 @@ async function downloadTrack(track, options = {}, onProgress = null, retried = f
         ]), {
             timeout: 15 * 60 * 1000,
             signal: options.signal,
+            maxConcurrentYtDlpProcesses: options.maxConcurrentYtDlpProcesses,
             onStderr: output => {
                 const matches = [...output.matchAll(/\[download\]\s+([\d.]+)%/g)];
                 if (matches.length) onProgress?.(Math.min(Number(matches.at(-1)[1]) || 0, 100));
@@ -719,5 +697,5 @@ module.exports = {
     resolveBilibiliShortUrl, extractTrack,
     extractTracks, refreshLiveTrack, startLivePipeline, prepareLiveTrack, downloadTrack, deleteTrackFile, checkFfmpeg,
     setProtectedCachePaths, cleanupOrphanedCache, ensureCacheCapacity,
-    getYtDlpConcurrencyStateForTests, getLiveConcurrencyStateForTests
+    getYtDlpConcurrencyStateForTests
 };

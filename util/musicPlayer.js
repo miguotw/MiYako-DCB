@@ -296,16 +296,11 @@ async function startLivePlayback(state, track, generation, retrying = false) {
         throw musicValidationError('直播來源中斷超過重連期限。');
     }
     const signal = liveSignal(state, controller, remainingRetryMs);
-    updateLiveStatus(state, retrying ? 'reconnecting' : 'waiting');
+    updateLiveStatus(state, retrying ? 'reconnecting' : 'connecting');
 
     const pipeline = await startLivePipeline(state.current, {
         ...state.options,
         signal,
-        onSlotAcquired: () => {
-            if (livePlaybackMatches(state, generation, queueID) && !state.paused) {
-                updateLiveStatus(state, retrying ? 'reconnecting' : 'connecting');
-            }
-        },
         prepareTrack: async () => {
             const refreshed = await refreshLiveTrack(track, {
                 ...state.options,
@@ -548,7 +543,7 @@ async function togglePauseNow(state, target) {
             state.liveRetryStartedAt = 0;
             state.liveRetryAttempt = 0;
             const generation = ++state.playbackGeneration;
-            updateLiveStatus(state, 'waiting');
+            updateLiveStatus(state, 'connecting');
             startLivePlayback(state, state.current, generation)
                 .catch(error => handleLiveInterruption(state, error, generation));
             return false;
@@ -607,7 +602,7 @@ async function resumeRecoveredPlayback(state) {
         state.liveRetryStartedAt = 0;
         state.liveRetryAttempt = 0;
         const generation = ++state.playbackGeneration;
-        updateLiveStatus(state, 'waiting');
+        updateLiveStatus(state, 'connecting');
         startLivePlayback(state, state.current, generation)
             .catch(error => handleLiveInterruption(state, error, generation));
     } else {
