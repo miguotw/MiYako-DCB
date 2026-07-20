@@ -11,7 +11,10 @@ const { pipeline } = require('stream/promises');
 const ffmpegPath = require('ffmpeg-static');
 const { http } = require('../core/http');
 const { PROJECT_ROOT } = require('../core/config');
-const { musicValidationError, toYtDlpQuery, normalizeTrack, validateTrack, validateYouTubeUrl } = require('./musicHelpers');
+const {
+    isBilibiliShortUrl, musicValidationError, toYtDlpQuery, normalizeTrack,
+    validateBilibiliUrl, validateMusicUrl, validateTrack, validateYouTubeUrl
+} = require('./musicHelpers');
 
 const DOWNLOAD_URL = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux';
 let updatePromise = null;
@@ -20,12 +23,17 @@ let activeYtDlpProcesses = 0;
 const ytDlpWaiters = [];
 const protectedCachePaths = new Set();
 const MAX_YTDLP_PROCESSES = 2;
+const MAX_BILIBILI_REDIRECTS = 3;
 
 const BINARY_PATH = path.join(PROJECT_ROOT, 'runtime', 'bin', 'yt-dlp');
 const CACHE_DIRECTORY = path.join(PROJECT_ROOT, 'runtime', 'cache', 'music');
 
 /** Runtime 注入集中程序管理器，確保 timeout、取消與關機都能終止完整程序樹。 */
 function setProcessManager(manager) {
+    if (manager == null) {
+        processManager = null;
+        return;
+    }
     if (!manager || typeof manager.run !== 'function') throw new TypeError('processManager 必須提供 run。');
     processManager = manager;
 }
@@ -35,8 +43,8 @@ function createYtDlpArgs(args) {
     return ['--ignore-config', ...args];
 }
 
-function resolveBinaryPath() {
-    return BINARY_PATH;
+function resolveBinaryPath(overridePath) {
+    return overridePath ? path.resolve(String(overridePath)) : BINARY_PATH;
 }
 
 /**
@@ -200,9 +208,77 @@ function isExtractorFailure(error) {
     return /extract|signature|nsig|cipher|youtube said|requested format|unable to download video data: http error 403/.test(message);
 }
 
-async function extractTrack(input, requestedBy, options = {}, retried = false) {
+/** 可預期的存取限制屬於輸入結果，不應建立系統事件或 ERROR 日誌。 */
+function normalizeMediaError(error) {
+    if (error?.code === 'MUSIC_VALIDATION') return error;
+    const message = `${error?.message || ''}\n${error?.stderr || ''}`.toLowerCase();
+    if (/private|members.only|premium members|supporter.only|registered users|login required|log in|sign in|geo.?restrict|not available in your country|video unavailable|has been removed|does not exist/.test(message)) {
+        return musicValidationError('此媒體無法公開存取，可能已失效、受地區限制或需要登入。');
+    }
+    return error;
+}
+
+function getResponseHeader(headers, name) {
+    if (!headers) return undefined;
+    if (typeof headers.get === 'function') return headers.get(name);
+    return headers[name] ?? headers[name.toLowerCase()];
+}
+
+/**
+ * b23.tv 必須先在應用層逐跳解析；遇到非官方目的地時，在送出下一個請求前拒絕，
+ * 避免短網址或開放轉址繞過媒體 URL allowlist。
+ */
+async function resolveBilibiliShortUrl(input, options = {}) {
+    const client = options.http;
+    if (!client || typeof client.get !== 'function') throw new Error('解析 b23.tv 需要 HTTP client。');
+    let current = validateBilibiliUrl(input);
+    const visited = new Set();
+
+    for (let redirects = 0; redirects < MAX_BILIBILI_REDIRECTS; redirects++) {
+        if (visited.has(current)) throw musicValidationError('b23.tv 連結包含循環跳轉。');
+        visited.add(current);
+        let response;
+        try {
+            response = await client.get(current, {
+                signal: options.signal,
+                maxRedirects: 0,
+                maxContentLength: 64 * 1024,
+                maxBodyLength: 64 * 1024,
+                validateStatus: status => status >= 200 && status < 400
+            });
+        } catch (error) {
+            const status = Number(error?.response?.status);
+            if (status >= 400 && status < 500) throw musicValidationError('b23.tv 連結已失效或無法存取。');
+            throw error;
+        }
+        const status = Number(response?.status);
+        const location = getResponseHeader(response?.headers, 'location');
+        if ((status && (status < 300 || status >= 400)) || !location) {
+            throw musicValidationError('b23.tv 未回傳有效的影片跳轉網址。');
+        }
+
+        let next;
+        try { next = new URL(String(location), current).toString(); }
+        catch { throw musicValidationError('b23.tv 回傳的跳轉網址格式不正確。'); }
+        if (isBilibiliShortUrl(next)) {
+            current = validateBilibiliUrl(next);
+            continue;
+        }
+        return validateBilibiliUrl(next, { allowShort: false });
+    }
+    throw musicValidationError(`b23.tv 跳轉不可超過 ${MAX_BILIBILI_REDIRECTS} 次。`);
+}
+
+async function resolveMusicQuery(input, options = {}) {
+    const descriptor = toYtDlpQuery(input);
+    if (descriptor.source === 'bilibili' && isBilibiliShortUrl(descriptor.query)) {
+        return { ...descriptor, query: await resolveBilibiliShortUrl(descriptor.query, options) };
+    }
+    return descriptor;
+}
+
+async function extractResolvedTrack(query, requestedBy, options = {}, retried = false) {
     const binaryPath = await ensureYtDlp(options);
-    const { query } = toYtDlpQuery(input);
     try {
         const result = await runYtDlp(binaryPath, createYtDlpArgs(['--dump-single-json', '--no-playlist', '--no-warnings', '--socket-timeout', '15', query]), { timeout: 45000, signal: options.signal });
         const data = JSON.parse(result.stdout);
@@ -211,31 +287,32 @@ async function extractTrack(input, requestedBy, options = {}, retried = false) {
     } catch (error) {
         if (!retried && isExtractorFailure(error)) {
             await ensureYtDlp(options, true);
-            return extractTrack(input, requestedBy, options, true);
+            return extractResolvedTrack(query, requestedBy, options, true);
         }
-        throw error;
+        throw normalizeMediaError(error);
     }
 }
 
-function isPlaylistInput(input) {
+async function extractTrack(input, requestedBy, options = {}) {
+    const { query } = await resolveMusicQuery(input, options);
+    return extractResolvedTrack(query, requestedBy, options);
+}
+
+function isYouTubePlaylist(input) {
     try {
         const url = new URL(validateYouTubeUrl(input));
         return url.pathname.includes('/playlist') || url.searchParams.has('list');
     } catch { return false; }
 }
 
-function getPlaylistEntryURL(entry) {
+function getYouTubePlaylistEntryURL(entry) {
     const value = entry?.webpage_url || entry?.original_url || entry?.url || entry?.id;
     if (!value) return null;
     if (/^https?:\/\//i.test(value)) return value;
     return `https://www.youtube.com/watch?v=${encodeURIComponent(value)}`;
 }
 
-/** 單曲直接抽取；播放清單先 flat 展開，再逐曲取得完整 metadata 與驗證。 */
-async function extractTracks(input, requestedBy, options = {}, retried = false) {
-    const playlistInput = isPlaylistInput(input);
-    if (playlistInput && !options.allowPlaylists) throw musicValidationError('目前設定不允許點播 YouTube 播放清單。');
-    if (!playlistInput) return [await extractTrack(input, requestedBy, options)];
+async function extractYouTubePlaylist(input, requestedBy, options = {}, retried = false) {
     const binaryPath = await ensureYtDlp(options);
     try {
         const result = await runYtDlp(binaryPath, createYtDlpArgs([
@@ -247,18 +324,79 @@ async function extractTracks(input, requestedBy, options = {}, retried = false) 
         const limit = Math.min(Math.max(Number(options.maxPlaylistTracks) || 25, 1), 100);
         const tracks = [];
         for (const entry of entries.slice(0, limit)) {
-            const url = getPlaylistEntryURL(entry);
+            const url = getYouTubePlaylistEntryURL(entry);
             if (!url) throw musicValidationError('播放清單包含無法解析的曲目。');
-            tracks.push(await extractTrack(url, requestedBy, options));
+            tracks.push(await extractResolvedTrack(validateYouTubeUrl(url), requestedBy, options));
         }
         return tracks;
     } catch (error) {
         if (!retried && isExtractorFailure(error)) {
             await ensureYtDlp(options, true);
-            return extractTracks(input, requestedBy, options, true);
+            return extractYouTubePlaylist(input, requestedBy, options, true);
         }
-        throw error;
+        throw normalizeMediaError(error);
     }
+}
+
+function getBilibiliEntryURL(entry, input) {
+    const inputUrl = new URL(validateBilibiliUrl(input, { allowShort: false }));
+    const candidates = [entry?.webpage_url, entry?.original_url, entry?.url];
+    for (const value of candidates) {
+        if (!/^https?:\/\//i.test(String(value || ''))) continue;
+        try {
+            const candidate = new URL(validateBilibiliUrl(value, { allowShort: false }));
+            if (candidate.pathname === inputUrl.pathname && candidate.searchParams.has('p')) return candidate.toString();
+        }
+        catch {}
+    }
+    throw musicValidationError('Bilibili 播放項目不是受支援的多 P 內容。');
+}
+
+async function extractBilibiliTracks(input, requestedBy, options = {}, retried = false) {
+    const binaryPath = await ensureYtDlp(options);
+    try {
+        const result = await runYtDlp(binaryPath, createYtDlpArgs([
+            '--dump-single-json', '--flat-playlist', '--yes-playlist', '--no-warnings', '--socket-timeout', '15', input
+        ]), { timeout: 60000, signal: options.signal });
+        const data = JSON.parse(result.stdout);
+        if (!Array.isArray(data.entries)) {
+            return [validateTrack(normalizeTrack(data, requestedBy), options.maxDurationSeconds, options.minDurationSeconds)];
+        }
+        if (!data.entries.length) throw musicValidationError('Bilibili 多 P 影片中沒有可加入的內容。');
+        if (data.entries.length > 1 && !options.allowPlaylists) {
+            throw musicValidationError('目前設定不允許點播 Bilibili 多 P 影片。');
+        }
+
+        const limit = Math.min(Math.max(Number(options.maxPlaylistTracks) || 25, 1), 100);
+        const tracks = [];
+        for (const entry of data.entries.slice(0, limit)) {
+            const url = getBilibiliEntryURL(entry, input);
+            tracks.push(await extractResolvedTrack(url, requestedBy, options));
+        }
+        return tracks;
+    } catch (error) {
+        if (!retried && isExtractorFailure(error)) {
+            await ensureYtDlp(options, true);
+            return extractBilibiliTracks(input, requestedBy, options, true);
+        }
+        throw normalizeMediaError(error);
+    }
+}
+
+/** 單曲直接抽取；YouTube 播放清單與 Bilibili 多 P 先 flat 展開。 */
+async function extractTracks(input, requestedBy, options = {}) {
+    const descriptor = await resolveMusicQuery(input, options);
+    if (descriptor.source === 'youtube') {
+        const playlistInput = descriptor.isUrl && isYouTubePlaylist(descriptor.query);
+        if (playlistInput && !options.allowPlaylists) throw musicValidationError('目前設定不允許點播 YouTube 播放清單。');
+        return playlistInput
+            ? extractYouTubePlaylist(descriptor.query, requestedBy, options)
+            : [await extractResolvedTrack(descriptor.query, requestedBy, options)];
+    }
+
+    const url = new URL(validateBilibiliUrl(descriptor.query, { allowShort: false }));
+    if (url.searchParams.has('p')) return [await extractResolvedTrack(url.toString(), requestedBy, options)];
+    return extractBilibiliTracks(url.toString(), requestedBy, options);
 }
 
 function ensureCacheDirectory() {
@@ -311,7 +449,7 @@ function ensureCacheCapacity(options = {}, requiredBytes = 0) {
  * 失敗時會清除同 UUID 的殘檔，成功後由播放器在不再需要時呼叫 deleteTrackFile。
  */
 async function downloadTrack(track, options = {}, onProgress = null, retried = false) {
-    validateYouTubeUrl(track?.url);
+    track.url = validateMusicUrl(track?.url, { allowShort: false });
     const binaryPath = await ensureYtDlp(options);
     ensureCacheDirectory();
     const maximumFileBytes = Math.max(Number(options.maxFileSizeBytes) || 256 * 1024 ** 2, 1);
@@ -347,7 +485,7 @@ async function downloadTrack(track, options = {}, onProgress = null, retried = f
             await ensureYtDlp(options, true);
             return downloadTrack(track, options, onProgress, true);
         }
-        throw error;
+        throw normalizeMediaError(error);
     }
 }
 
@@ -371,7 +509,8 @@ async function checkFfmpeg() {
 
 module.exports = {
     ffmpegPath, CACHE_DIRECTORY, createYtDlpArgs, resolveBinaryPath, runProcess, runYtDlp,
-    setProcessManager, shouldCheckUpdate, ensureYtDlp, isExtractorFailure, extractTrack,
+    setProcessManager, shouldCheckUpdate, ensureYtDlp, isExtractorFailure, normalizeMediaError,
+    resolveBilibiliShortUrl, extractTrack,
     extractTracks, downloadTrack, deleteTrackFile, checkFfmpeg,
     setProtectedCachePaths, cleanupOrphanedCache, ensureCacheCapacity,
     getYtDlpConcurrencyStateForTests

@@ -172,10 +172,10 @@ music:
   maxDurationMinutes: 180
   minDurationMinutes: 1
 
-  # 是否允許透過播放清單連結一次加入多首歌曲。
+  # 是否允許透過 YouTube 播放清單或 Bilibili 多 P 連結一次加入多首歌曲。
   allowPlaylists: true
 
-  # 啟用播放清單時，一次最多加入的曲目數。
+  # 啟用播放清單／多 P 時，一次最多加入的曲目數。
   maxPlaylistTracks: 25
 
   # 播放序列、單一下載檔與整體 cache 上限。

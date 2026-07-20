@@ -355,7 +355,8 @@ function createClearQueueModal(channelID, messageID) {
 
 function createMusicRequestModal(insertNext = false) {
     return new ModalBuilder().setCustomId(insertNext ? 'music_request_modal:next' : 'music_request_modal').setTitle(insertNext ? '插播音樂' : '點播音樂').addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('query').setLabel('YouTube 連結或歌曲標題').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(1000))
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('query').setLabel('YouTube／Bilibili 連結或歌曲標題')
+            .setPlaceholder('純文字將搜尋 YouTube').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(1000))
     );
 }
 
@@ -516,7 +517,7 @@ const command = {
                 const insertNext = interaction.customId.endsWith(':next');
                 const query = interaction.fields.getTextInputValue('query');
                 await interaction.editReply({ embeds: [createDownloadEmbed(null, 0, 1, 0)] });
-                const requestOptions = { ...OPTIONS, signal: context.signal };
+                const requestOptions = { ...OPTIONS, signal: context.signal, http: context.http };
                 const metadataTracks = await extractTracks(query, interaction.user.id, requestOptions);
                 if (state.queue.length + metadataTracks.length > OPTIONS.maxQueueTracks) {
                     throw musicValidationError(`播放序列最多只能有 ${OPTIONS.maxQueueTracks} 首歌曲。`);
@@ -562,7 +563,7 @@ const command = {
                 sendLog(interaction.client, `🎵 ${interaction.user.tag} ${insertNext ? '插播' : '點播'}：${first.title}${downloadedTracks.length > 1 ? ` 等 ${downloadedTracks.length} 首` : ''}`, 'INFO');
                 const description = downloadedTracks.length === 1
                     ? `**[${first.title}](${first.url})** · <@${interaction.user.id}>\n-# 目前位於序列第 ${insertAhead ? 2 : firstPosition} 首`
-                    : `**從播放清單${insertNext ? '插播' : '加入'}了 ${downloadedTracks.length} 首歌曲** · <@${interaction.user.id}>\n-# 第一首目前位於序列第 ${insertAhead ? 2 : firstPosition} 首`;
+                    : `**${insertNext ? '插播' : '加入'}了 ${downloadedTracks.length} 首歌曲** · <@${interaction.user.id}>\n-# 第一首目前位於序列第 ${insertAhead ? 2 : firstPosition} 首`;
                 await interaction.editReply({ embeds: [createActionEmbed(`${SUCCESS_EMOJI} ┃ ${insertNext ? '插播' : '點播'}成功`, description, SUCCESS_COLOR)] });
             } catch (error) {
                 for (const track of downloadedTracks) if (!enqueuedTracks.has(track)) deleteTrackFile(track);
