@@ -48,9 +48,23 @@ function hoyolabHttp({ networkFailure = false } = {}) {
 
 test('HoYoLAB 憑證驗證要求 v2 欄位並以 info endpoint 探索遊戲', async () => {
     assert.equal(parseHoyolabCookie(HOYO_COOKIE), HOYO_COOKIE);
-    assert.equal(buildHoyolabCookie('v2_secret', '123456789'), 'ltoken_v2=v2_secret; ltuid_v2=123456789;');
+    assert.equal(
+        buildHoyolabCookie('ltoken_v2:"v2_secret"', 'ltuid_v2:"123456789"'),
+        'ltoken_v2=v2_secret; ltuid_v2=123456789;'
+    );
+    assert.equal(
+        buildHoyolabCookie('ltoken_v2 : "v2_secret"', 'ltuid_v2: "123456789"'),
+        'ltoken_v2=v2_secret; ltuid_v2=123456789;'
+    );
     assert.equal(buildHoyolabCookie('', ''), '');
-    for (const values of [['token', ''], ['', '123'], ['token; injected=1', '123'], ['token', 'not-a-uid']]) {
+    for (const values of [
+        ['ltoken_v2:"token"', ''],
+        ['', 'ltuid_v2:"123"'],
+        ['v2_secret', '123456789'],
+        ['ltuid_v2:"v2_secret"', 'ltoken_v2:"123456789"'],
+        ['ltoken_v2:"token; injected=1"', 'ltuid_v2:"123"'],
+        ['ltoken_v2:"token"', 'ltuid_v2:"not-a-uid"']
+    ]) {
         assert.throws(() => buildHoyolabCookie(...values), GameCheckInAdapterError);
     }
     for (const invalid of ['', 'ltoken_v2=x;', 'ltuid_v2=1;', 'ltoken_v2=x; ltuid_v2=1;\nInjected: yes']) {

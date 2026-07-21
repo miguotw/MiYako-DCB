@@ -128,21 +128,29 @@ function parseHoyolabCookie(value) {
     return cookie;
 }
 
-function buildHoyolabCookie(ltokenV2, ltuidV2) {
-    const token = String(ltokenV2 || '').trim();
-    const uid = String(ltuidV2 || '').trim();
-    if (!token && !uid) return '';
-    if (!token || !uid) {
+function parseHoyolabCopiedValue(value, name) {
+    const input = String(value || '').trim();
+    const match = input.match(new RegExp(`^${name}\\s*:\\s*"([^"\\r\\n\\0]+)"$`));
+    return match?.[1] || null;
+}
+
+function buildHoyolabCookie(ltokenV2Input, ltuidV2Input) {
+    const tokenInput = String(ltokenV2Input || '').trim();
+    const uidInput = String(ltuidV2Input || '').trim();
+    if (!tokenInput && !uidInput) return '';
+    if (!tokenInput || !uidInput) {
         throw new GameCheckInAdapterError(
             'HOYOLAB_COOKIE_MISSING_FIELDS',
             'ltoken_v2 與 ltuid_v2 必須同時填寫；若要停用，請將兩欄都留空。',
             { validation: true }
         );
     }
-    if (token.length > 2048 || /[;\r\n\0]/.test(token) || !/^\d{1,32}$/.test(uid)) {
+    const token = parseHoyolabCopiedValue(tokenInput, 'ltoken_v2');
+    const uid = parseHoyolabCopiedValue(uidInput, 'ltuid_v2');
+    if (!token || !uid || token.length > 2048 || /[;\r\n\0]/.test(token) || !/^\d{1,32}$/.test(uid)) {
         throw new GameCheckInAdapterError(
             'HOYOLAB_COOKIE_INVALID',
-            'HoYoLAB 憑證欄位格式不正確，請只貼上各欄位的值。',
+            'HoYoLAB 憑證欄位格式不正確，請完整貼上 ltoken_v2:"..." 與 ltuid_v2:"..."。',
             { validation: true }
         );
     }

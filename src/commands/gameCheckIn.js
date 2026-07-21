@@ -116,7 +116,6 @@ function createCommand(config, {
                 '## 狀態',
                 `- HoYoLAB：${status('hoyolab')}`,
                 `- SKPORT：${status('skport')}`,
-                `- 通知模式：${MODE_NAMES[record.notificationMode]}`,
                 '## 憑證取得方式',
                 '1. 請先閱讀下方教學，再選擇對應平台輸入。',
                 '2. 若曾經填寫過憑證，輸入時會覆蓋對應平台舊有憑證；留空時會清除舊有憑證。',
@@ -124,14 +123,14 @@ function createCommand(config, {
                 '### HoYoLAB Cookie 取得方式',
                 '1. 使用瀏覽器登入 [HoYoLAB](https://www.hoyolab.com/) ，按 F12 開啟開發者工具。',
                 '2. 到 Application／儲存空間 → Cookies → `https://www.hoyolab.com`。',
-                '3. 分別找到 `ltoken_v2` 與 `ltuid_v2`，只複製各自 Value 欄位的內容，範例如下：',
+                '3. 分別找到 `ltoken_v2` 與 `ltuid_v2`，將瀏覽器複製出的完整內容貼到對應欄位。請勿刪除名稱、冒號或雙引號，格式如下：',
                 '`ltoken_v2`：',
                 '```',
-                'v2_xxxxxxxxxx',
+                'ltoken_v2:"v2_xxxxxxxxxx"',
                 '```',
                 '`ltuid_v2`：',
                 '```',
-                '123456789',
+                'ltuid_v2:"123456789"',
                 '```',
                 '### SKPORT 帳號 Token 取得方式',
                 '1. 使用瀏覽器登入 [Gryphline](https://user.gryphline.com/) 。',
@@ -190,20 +189,20 @@ function createCommand(config, {
                 new ActionRowBuilder().addComponents(
                     new TextInputBuilder()
                         .setCustomId('ltoken_v2')
-                        .setLabel('ltoken_v2 的值（兩欄皆留空可停用）')
-                        .setPlaceholder('v2_xxxxxxxxxx')
+                        .setLabel('ltoken_v2 完整內容（兩欄皆留空可停用）')
+                        .setPlaceholder('ltoken_v2:"v2_xxxxxxxxxx"')
                         .setStyle(TextInputStyle.Short)
                         .setRequired(false)
-                        .setMaxLength(2048)
+                        .setMaxLength(2064)
                 ),
                 new ActionRowBuilder().addComponents(
                     new TextInputBuilder()
                         .setCustomId('ltuid_v2')
-                        .setLabel('ltuid_v2 的值（兩欄皆留空可停用）')
-                        .setPlaceholder('123456789')
+                        .setLabel('ltuid_v2 完整內容（兩欄皆留空可停用）')
+                        .setPlaceholder('ltuid_v2:"123456789"')
                         .setStyle(TextInputStyle.Short)
                         .setRequired(false)
-                        .setMaxLength(32)
+                        .setMaxLength(64)
                 )
             );
         }
@@ -212,7 +211,7 @@ function createCommand(config, {
                 .setCustomId('credential')
                 .setLabel('account_token（留空停用）')
                 .setPlaceholder('只貼上 data.content 的值')
-                .setStyle(TextInputStyle.Paragraph)
+                .setStyle(TextInputStyle.Short)
                 .setRequired(false)
                 .setMaxLength(2048)
         ));

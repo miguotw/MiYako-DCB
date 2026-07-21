@@ -191,7 +191,7 @@ Twitch OAuth token provider 與 Helix client 使用共用 HTTP policy；Helix ID
 
 ### 遊戲自動簽到
 
-`/遊戲簽到` 的主面板是公開且不含個人狀態的通用入口；憑證教學、平台按鈕、Modal、啟用/停用簽到、驗證結果與通知設定全部是 ephemeral。每位 Discord 使用者可保存一組 HoYoLAB Cookie 與一組 SKPORT `account_token`；HoYoLAB 表單分別輸入 `ltoken_v2` 與 `ltuid_v2` 的值，不需自行組合 Cookie。兩個 HoYoLAB 欄位或 SKPORT 欄位留空提交會清除該平台並停用自動簽到，既有秘密不會重新顯示。送出非空憑證只會查詢帳號／角色以確認有效性，不會立即簽到或傳送測試 DM；自動簽到會等到下一個正常排程時間。
+`/遊戲簽到` 的主面板是公開且不含個人狀態的通用入口；憑證教學、平台按鈕、Modal、啟用/停用簽到、驗證結果與通知設定全部是 ephemeral。每位 Discord 使用者可保存一組 HoYoLAB Cookie 與一組 SKPORT `account_token`；HoYoLAB 表單分別貼上瀏覽器複製出的 `ltoken_v2:"…"` 與 `ltuid_v2:"…"` 完整內容，由 Bot 自行組合 Cookie，只有裸值的輸入不會接受。兩個 HoYoLAB 欄位或 SKPORT 欄位留空提交會清除該平台並停用自動簽到，既有秘密不會重新顯示。送出非空憑證只會查詢帳號／角色以確認有效性，不會立即簽到或傳送測試 DM；自動簽到會等到下一個正常排程時間。
 
 「啟用/停用簽到」可分別停用 HoYoLAB 五款與 SKPORT 兩款支援遊戲，預設全部啟用，也允許全部停用。停用單一遊戲不會清除平台憑證；若全部遊戲皆停用，排程不會建立簽到工作或傳送空白通知。尚未開始的平台會採用最新設定，已開始、等待重試或完成的平台則沿用當日遊戲快照，變更於下一日生效。
 

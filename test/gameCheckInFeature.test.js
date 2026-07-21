@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { MessageFlags } = require('discord.js');
+const { MessageFlags, TextInputStyle } = require('discord.js');
 const { createStoreRegistry } = require('../core/storeRegistry');
 const { createCommand } = require('../src/commands/gameCheckIn');
 const {
@@ -306,7 +306,7 @@ test('憑證教學合併為單一私密 Embed，並以兩個平台按鈕開啟 M
     assert.match(payload.embeds[0].data.description, /- SKPORT：已設定/);
     assert.match(payload.embeds[0].data.description, /- 通知模式：啟用所有通知/);
     assert.match(payload.embeds[0].data.description, /\[HoYoLAB\]\(https:\/\/www\.hoyolab\.com\/\)/);
-    assert.match(payload.embeds[0].data.description, /```\nv2_xxxxxxxxxx\n```/);
+    assert.match(payload.embeds[0].data.description, /```\nltoken_v2:"v2_xxxxxxxxxx"\n```/);
     assert.match(payload.embeds[0].data.description, /```json/);
     assert.deepEqual(payload.components[0].components.map(item => item.data.custom_id), [
         'game_checkin_credentials_hoyolab', 'game_checkin_credentials_skport'
@@ -323,19 +323,22 @@ test('憑證教學合併為單一私密 Embed，並以兩個平台按鈕開啟 M
     for (const row of modal.components) {
         assert.equal(row.components[0].data.required, false);
         assert.equal(row.components[0].data.value, undefined);
+        assert.equal(row.components[0].data.style, TextInputStyle.Short);
     }
 
     const skport = createInteraction({ customId: 'game_checkin_credentials_skport' });
     await setup.command.buttonHandlers.game_checkin_credentials_skport(skport, setup.context);
-    assert.equal(skport.calls.at(-1)[1].data.custom_id, 'game_checkin_credentials_modal:skport');
+    const skportModal = skport.calls.at(-1)[1];
+    assert.equal(skportModal.data.custom_id, 'game_checkin_credentials_modal:skport');
+    assert.equal(skportModal.components[0].components[0].data.style, TextInputStyle.Short);
 });
 
 test('Modal 分欄組合 HoYoLAB 憑證，唯讀驗證成功才保存且空白會停用平台', async t => {
     const setup = createCommandFixture(t);
     const submitted = createInteraction({
         customId: 'game_checkin_credentials_modal:hoyolab',
-        ltokenV2: 'secret',
-        ltuidV2: '1'
+        ltokenV2: 'ltoken_v2:"secret"',
+        ltuidV2: 'ltuid_v2:"1"'
     });
     await setup.command.modalSubmitHandlers.game_checkin_credentials_modal(submitted, setup.context);
     assert.deepEqual(setup.validations, [['hoyolab', 'ltoken_v2=secret; ltuid_v2=1;']]);
@@ -361,7 +364,7 @@ test('Modal 分欄組合 HoYoLAB 憑證，唯讀驗證成功才保存且空白�
 
     const partial = createInteraction({
         customId: 'game_checkin_credentials_modal:hoyolab',
-        ltokenV2: 'only-one-field'
+        ltokenV2: 'ltoken_v2:"only-one-field"'
     });
     await setup.command.modalSubmitHandlers.game_checkin_credentials_modal(partial, setup.context);
     assert.match(JSON.stringify(partial.calls.at(-1)[1]), /必須同時填寫/);
@@ -384,7 +387,9 @@ test('驗證錯誤保留舊憑證且不將秘密放入回覆', async t => {
     await setup.repository.setCredential('123456789012345678', 'hoyolab', 'old-secret');
     const oldCredential = (await setup.repository.readUser('123456789012345678')).credentials.hoyolab;
     const interaction = createInteraction({
-        customId: 'game_checkin_credentials_modal:hoyolab', ltokenV2: 'new-secret', ltuidV2: '123'
+        customId: 'game_checkin_credentials_modal:hoyolab',
+        ltokenV2: 'ltoken_v2:"new-secret"',
+        ltuidV2: 'ltuid_v2:"123"'
     });
     await setup.command.modalSubmitHandlers.game_checkin_credentials_modal(interaction, setup.context);
     assert.deepEqual((await setup.repository.readUser(interaction.user.id)).credentials.hoyolab, oldCredential);
