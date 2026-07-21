@@ -8,8 +8,6 @@ const {
     MessageFlags,
     ModalBuilder,
     SlashCommandBuilder,
-    StringSelectMenuBuilder,
-    StringSelectMenuOptionBuilder,
     TextInputBuilder,
     TextInputStyle
 } = require('discord.js');
@@ -77,65 +75,51 @@ function createCommand(config, {
 
     function createCredentialGuide(record) {
         const status = platform => record.credentials[platform] ? '已設定' : '未設定（不自動簽到）';
-        const overview = new EmbedBuilder()
+        return new EmbedBuilder()
             .setColor(color)
-            .setTitle(`${emoji} ┃ 憑證設定`)
+            .setTitle('遊戲自動簽到 - 輸入/更新憑證')
             .setDescription([
-                `HoYoLAB：**${status('hoyolab')}**`,
-                `SKPORT：**${status('skport')}**`,
-                `通知：**${MODE_NAMES[record.notificationMode]}**`,
-                '',
-                '請先閱讀下方教學，再從選單選擇平台。SKPORT 欄位或兩個 HoYoLAB 欄位皆留空送出，會清除該平台憑證。',
-                '**既有憑證不會重新顯示。**'
-            ].join('\n'));
-        const hoyolab = new EmbedBuilder()
-            .setColor(color)
-            .setTitle('HoYoLAB Cookie 取得方式')
-            .setDescription([
-                '1. 使用瀏覽器登入 HoYoLAB，按 F12 開啟開發者工具。',
+                '## 狀態',
+                `- HoYoLAB：${status('hoyolab')}`,
+                `- SKPORT：${status('skport')}`,
+                `- 通知模式：${MODE_NAMES[record.notificationMode]}`,
+                '## 憑證取得方式',
+                '1. 請先閱讀下方教學，再選擇對應平台輸入。',
+                '2. 若曾經填寫過憑證，輸入時會覆蓋對應平台舊有憑證；留空時會清除舊有憑證。',
+                '3. 既有憑證不會重新顯示。',
+                '### HoYoLAB Cookie 取得方式',
+                '1. 使用瀏覽器登入 [HoYoLAB](https://www.hoyolab.com/) ，按 F12 開啟開發者工具。',
                 '2. 到 Application／儲存空間 → Cookies → `https://www.hoyolab.com`。',
-                '3. 分別找到 `ltoken_v2` 與 `ltuid_v2`，只複製各自 Value 欄位的內容。',
-                '`ltoken_v2` Value 範例：',
-                '```text',
+                '3. 分別找到 `ltoken_v2` 與 `ltuid_v2`，只複製各自 Value 欄位的內容，範例如下：',
+                '`ltoken_v2`：',
+                '```',
                 'v2_xxxxxxxxxx',
                 '```',
-                '`ltuid_v2` Value 範例：',
-                '```text',
+                '`ltuid_v2`：',
+                '```',
                 '123456789',
                 '```',
-                'Cookie 為 HttpOnly 時無法用 `document.cookie` 取得，請從 Cookies 表格複製。'
-            ].join('\n'));
-        const skport = new EmbedBuilder()
-            .setColor(color)
-            .setTitle('SKPORT account_token 取得方式')
-            .setDescription([
-                '1. 在同一瀏覽器登入 Gryphline／SKPORT。',
-                '2. 開啟 https://web-api.gryphline.com/cookie_store/account_token 。',
+                '-# Cookie 為 HttpOnly 時無法用 document.cookie 取得，請從 Cookies 表格複製。',
+                '### SKPORT 帳號 token 取得方式',
+                '1. 使用瀏覽器登入 [Gryphline](https://user.gryphline.com/) 。',
+                '2. 使用瀏覽器開啟 https://web-api.gryphline.com/cookie_store/account_token 。',
                 '3. 畫面會顯示類似以下 JSON，只複製 `data.content` 的值。',
                 '```json',
                 '{"code":0,"data":{"content":"YourAccountTokenHere"},"msg":""}',
                 '```'
             ].join('\n'));
-        return [overview, hoyolab, skport];
     }
 
-    function createPlatformRow() {
+    function createCredentialPlatformRow() {
         return new ActionRowBuilder().addComponents(
-            new StringSelectMenuBuilder()
-                .setCustomId('game_checkin_platform')
-                .setPlaceholder('選擇要設定的平台')
-                .setMinValues(1)
-                .setMaxValues(1)
-                .addOptions(
-                    new StringSelectMenuOptionBuilder()
-                        .setLabel('HoYoLAB')
-                        .setDescription('設定 Cookie，支援五款 HoYoLAB 遊戲')
-                        .setValue('hoyolab'),
-                    new StringSelectMenuOptionBuilder()
-                        .setLabel('SKPORT')
-                        .setDescription('設定長效 account_token')
-                        .setValue('skport')
-                )
+            new ButtonBuilder()
+                .setCustomId('game_checkin_credentials_hoyolab')
+                .setLabel('HoYoLAB')
+                .setStyle(ButtonStyle.Primary),
+            new ButtonBuilder()
+                .setCustomId('game_checkin_credentials_skport')
+                .setLabel('SKPORT')
+                .setStyle(ButtonStyle.Primary)
         );
     }
 
@@ -204,17 +188,13 @@ function createCommand(config, {
     async function showCredentialGuide(interaction, context) {
         const record = await repository(context).readUser(interaction.user.id);
         await interaction.reply({
-            embeds: createCredentialGuide(record),
-            components: [createPlatformRow()],
+            embeds: [createCredentialGuide(record)],
+            components: [createCredentialPlatformRow()],
             flags: MessageFlags.Ephemeral
         });
     }
 
-    async function selectPlatform(interaction) {
-        const platform = interaction.values?.[0];
-        if (!PLATFORM_NAMES[platform]) {
-            return validationReply(interaction, '**不支援選取的平台。**', { method: 'reply', ephemeral: true });
-        }
+    async function showCredentialModal(interaction, platform) {
         return interaction.showModal(createCredentialModal(platform));
     }
 
@@ -233,15 +213,10 @@ function createCommand(config, {
                 : interaction.fields.getTextInputValue('credential').trim();
             if (value) await adapters.validate[platform](value, { http: context.http, signal: context.signal });
             const changed = await repository(context).setCredential(interaction.user.id, platform, value);
-            let dmTest = null;
-            if (changed.firstActive && changed.record.notificationMode !== 'off') {
-                dmTest = await testDirectMessage(interaction, changed.record.notificationMode);
-            }
             const action = value ? (changed.changed ? '已驗證並保存' : '未變更') : '已清除並停用';
-            const lines = [`${PLATFORM_NAMES[platform]} 憑證${action}。`];
-            if (dmTest === true) lines.push('通知測試 DM 已成功送達。');
-            if (dmTest === false) lines.push('設定已保存，但測試 DM 無法送達；請到 Discord「使用者設定 → Content & Social → Direct messages」允許共同伺服器私人訊息。');
-            await interaction.editReply({ embeds: [createResultEmbed('憑證設定完成', lines.join('\n'))] });
+            await interaction.editReply({
+                embeds: [createResultEmbed('憑證設定完成', `${PLATFORM_NAMES[platform]} 憑證${action}。`)]
+            });
             sendLog(interaction.client, `🎮 遊戲簽到 ${PLATFORM_NAMES[platform]} 憑證已${value ? '更新' : '停用'}。`);
         } catch (error) {
             if (error instanceof GameCheckInAdapterError) {
@@ -277,11 +252,9 @@ function createCommand(config, {
 
         buttonHandlers: {
             game_checkin_credentials: showCredentialGuide,
-            game_checkin_notifications: cycleNotifications
-        },
-
-        componentHandlers: {
-            game_checkin_platform: selectPlatform
+            game_checkin_notifications: cycleNotifications,
+            game_checkin_credentials_hoyolab: interaction => showCredentialModal(interaction, 'hoyolab'),
+            game_checkin_credentials_skport: interaction => showCredentialModal(interaction, 'skport')
         },
 
         modalSubmitHandlers: {
@@ -292,9 +265,9 @@ function createCommand(config, {
     command._test = {
         createCredentialGuide,
         createCredentialModal,
+        createCredentialPlatformRow,
         createPanelEmbed,
         createPanelRow,
-        createPlatformRow,
         testDirectMessage
     };
     return command;

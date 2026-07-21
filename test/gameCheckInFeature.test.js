@@ -31,7 +31,6 @@ const config = {
 function createInteraction({
     userID = '123456789012345678',
     customId = '',
-    values = [],
     credential = '',
     ltokenV2 = '',
     ltuidV2 = '',
@@ -40,7 +39,6 @@ function createInteraction({
     const calls = [];
     const interaction = {
         customId,
-        values,
         deferred: false,
         replied: false,
         calls,
@@ -109,19 +107,32 @@ test('公開遊戲簽到面板固定兩個按鈕且不包含個人狀態', async
     assert.doesNotMatch(payload.embeds[0].data.description, /已設定|未設定/);
 });
 
-test('憑證教學私密顯示 Markdown 範例，平台選擇開啟不回填秘密的 Modal', async t => {
+test('憑證教學合併為單一私密 Embed，並以兩個平台按鈕開啟 Modal', async t => {
     const setup = createCommandFixture(t);
+    await setup.repository.setCredential('123456789012345678', 'skport', 'stored-token');
+    await setup.repository.cycleNotification('123456789012345678');
+    await setup.repository.cycleNotification('123456789012345678');
     const guide = createInteraction({ customId: 'game_checkin_credentials' });
     await setup.command.buttonHandlers.game_checkin_credentials(guide, setup.context);
     const payload = guide.calls.at(-1)[1];
     assert.equal(payload.flags, MessageFlags.Ephemeral);
-    assert.equal(payload.embeds.length, 3);
-    assert.match(payload.embeds[1].data.description, /```text/);
-    assert.match(payload.embeds[2].data.description, /```json/);
-    assert.equal(payload.components[0].components[0].toJSON().options.length, 2);
+    assert.equal(payload.embeds.length, 1);
+    assert.equal(payload.embeds[0].data.title, '遊戲自動簽到 - 輸入/更新憑證');
+    assert.match(payload.embeds[0].data.description, /## 狀態/);
+    assert.match(payload.embeds[0].data.description, /- HoYoLAB：未設定（不自動簽到）/);
+    assert.match(payload.embeds[0].data.description, /- SKPORT：已設定/);
+    assert.match(payload.embeds[0].data.description, /- 通知模式：啟用所有通知/);
+    assert.match(payload.embeds[0].data.description, /\[HoYoLAB\]\(https:\/\/www\.hoyolab\.com\/\)/);
+    assert.match(payload.embeds[0].data.description, /```\nv2_xxxxxxxxxx\n```/);
+    assert.match(payload.embeds[0].data.description, /```json/);
+    assert.deepEqual(payload.components[0].components.map(item => item.data.custom_id), [
+        'game_checkin_credentials_hoyolab', 'game_checkin_credentials_skport'
+    ]);
+    assert.equal(payload.components[0].components.every(item => item.toJSON().type === 2), true);
+    assert.equal(setup.command.componentHandlers, undefined);
 
-    const selected = createInteraction({ values: ['hoyolab'], customId: 'game_checkin_platform' });
-    await setup.command.componentHandlers.game_checkin_platform(selected, setup.context);
+    const selected = createInteraction({ customId: 'game_checkin_credentials_hoyolab' });
+    await setup.command.buttonHandlers.game_checkin_credentials_hoyolab(selected, setup.context);
     const modal = selected.calls.at(-1)[1];
     assert.equal(modal.data.custom_id, 'game_checkin_credentials_modal:hoyolab');
     assert.equal(modal.components.length, 2);
@@ -131,9 +142,9 @@ test('憑證教學私密顯示 Markdown 範例，平台選擇開啟不回填秘�
         assert.equal(row.components[0].data.value, undefined);
     }
 
-    const invalid = createInteraction({ values: ['unknown'] });
-    await setup.command.componentHandlers.game_checkin_platform(invalid, setup.context);
-    assert.equal(invalid.calls.at(-1)[0], 'reply');
+    const skport = createInteraction({ customId: 'game_checkin_credentials_skport' });
+    await setup.command.buttonHandlers.game_checkin_credentials_skport(skport, setup.context);
+    assert.equal(skport.calls.at(-1)[1].data.custom_id, 'game_checkin_credentials_modal:skport');
 });
 
 test('Modal 分欄組合 HoYoLAB 憑證，唯讀驗證成功才保存且空白會停用平台', async t => {
@@ -145,7 +156,7 @@ test('Modal 分欄組合 HoYoLAB 憑證，唯讀驗證成功才保存且空白�
     });
     await setup.command.modalSubmitHandlers.game_checkin_credentials_modal(submitted, setup.context);
     assert.deepEqual(setup.validations, [['hoyolab', 'ltoken_v2=secret; ltuid_v2=1;']]);
-    assert.equal(submitted.calls.some(call => call[0] === 'dm'), true);
+    assert.equal(submitted.calls.some(call => call[0] === 'dm'), false);
     assert.equal(
         (await setup.repository.readUser(submitted.user.id)).credentials.hoyolab.value,
         'ltoken_v2=secret; ltuid_v2=1;'
@@ -201,6 +212,7 @@ test('通知依 all → failures → off → all 循環，啟用測試失敗仍�
     const toAll = createInteraction({ dmError: error });
     await setup.command.buttonHandlers.game_checkin_notifications(toAll, setup.context);
     assert.equal((await setup.repository.readUser(toAll.user.id)).notificationMode, 'all');
+    assert.equal(toAll.calls.some(call => call[0] === 'dm'), true);
     assert.match(JSON.stringify(toAll.calls.at(-1)[1]), /Content & Social/);
 
     const toFailures = createInteraction();
