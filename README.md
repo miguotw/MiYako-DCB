@@ -199,7 +199,7 @@ Twitch OAuth token provider 與 Helix client 使用共用 HTTP policy；Helix ID
 
 HoYoLAB 支援原神、崩壞：星穹鐵道、崩壞3rd、未定事件簿與絕區零；實作參考 [canaria3406/hoyolab-auto-sign](https://github.com/canaria3406/hoyolab-auto-sign)。SKPORT 使用長效 `account_token` 動態交換短效憑證並探索明日方舟繁中服及明日方舟：終末地的全部已綁定角色／伺服器；流程參考 [canaria3406/skport-auto-sign PR #4](https://github.com/canaria3406/skport-auto-sign/pull/4)。兩者皆為第三方、非官方且可能變動的 API adapter；已知的重複簽到、驗證失敗與暫時性錯誤會分別回報，未知拒絕僅保留安全的數字錯誤碼或 HTTP 狀態，不會輸出完整上游 response。
 
-通知模式依序為啟用所有通知、僅失敗時通知、停用所有通知，預設只通知失敗。切換至啟用所有通知或僅失敗時通知時，通知測試會以 ephemeral 互動回覆顯示；正式簽到結果仍由 persisted outbox 嘗試 DM。使用者需在 Discord「使用者設定 → Content & Social → Direct messages」允許共同伺服器私人訊息。簽到與 DM 都可能因平台或 Discord 的外部狀態失敗。
+通知模式依序為啟用所有通知、僅失敗時通知、停用所有通知，預設只通知失敗。切換時只會以 ephemeral 回覆目前模式；正式簽到結果由 persisted outbox 嘗試 DM。使用者需在 Discord「使用者設定 → Content & Social → Direct messages」允許共同伺服器私人訊息。簽到與 DM 都可能因平台或 Discord 的外部狀態失敗。
 
 憑證以 `aes-256-gcm-v1` 格式保存於 owner-scoped JSON，使用 `gameCheckIn.credentialEncryptionKey` 設定的 AES-256-GCM 主金鑰加密。每次寫入都使用新的隨機 IV，驗證資料會綁定 Discord 使用者、平台、revision 與更新時間；JSON、outbox 與日誌不保存憑證明文。啟動時會在 scheduler 建立前驗證全部加密憑證，金鑰錯誤或資料遭竄改會阻止 Bot 啟動，且不會輸出金鑰、密文或憑證。
 
