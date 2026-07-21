@@ -18,9 +18,13 @@ const {
     GameCheckInAdapterError,
     createGameCheckInAdapters
 } = require('../../util/gameCheckInAdapters');
+const { gamesForPlatform, getGameByID } = require('../../util/gameCheckInCatalog');
 const { createGameCheckInRepository } = require('../../util/gameCheckInRepository');
-const { nextCheckInEpoch } = require('../../util/gameCheckInSchedule');
-const { createGameCheckInPanelEmbed } = require('../../util/gameCheckInViews');
+const { dateKeyAt, nextCheckInEpoch } = require('../../util/gameCheckInSchedule');
+const {
+    createGameCheckInPanelEmbed,
+    createGameCheckInPanelRow
+} = require('../../util/gameCheckInViews');
 
 const PLATFORM_NAMES = Object.freeze({ hoyolab: 'HoYoLAB', skport: 'SKPORT' });
 const MODE_NAMES = Object.freeze({
@@ -33,6 +37,7 @@ function createCommand(config, {
     adapters = createGameCheckInAdapters(),
     logTools = createLogTools(config),
     repositoryFactory = createGameCheckInRepository,
+    wakeCoordinator = () => {},
     now = () => Date.now()
 } = {}) {
     const { errorReply, validationReply } = createReplyTools(config);
@@ -40,12 +45,50 @@ function createCommand(config, {
     const repositoryCache = new WeakMap();
     const color = config.embed.color.default;
     const emoji = config.commands.gameCheckIn.emoji;
+    const toggleEmojis = config.commands.gameCheckIn.toggleEmojis;
 
     function repository(context) {
         const json = context?.store?.gameCheckIn;
         if (!json) throw new Error('遊戲簽到功能缺少 gameCheckIn repository context。');
         if (!repositoryCache.has(json)) repositoryCache.set(json, repositoryFactory(json));
         return repositoryCache.get(json);
+    }
+
+    function panelScope(interaction, fallbackChannelID = '') {
+        const guildID = String(interaction.guildId || '');
+        if (guildID) return { type: 'guild', id: guildID };
+        const channelID = String(interaction.channelId || fallbackChannelID || '');
+        if (channelID) return { type: 'dm', id: channelID };
+        throw new Error('遊戲簽到主面板無法判斷 Guild 或 DM scope。');
+    }
+
+    async function fetchPanelMessage(client, panel) {
+        let channel = client.channels?.cache?.get(panel.channelID);
+        if (!channel && typeof client.channels?.fetch === 'function') {
+            channel = await client.channels.fetch(panel.channelID).catch(() => null);
+        }
+        return channel?.messages?.fetch?.(panel.messageID).catch(() => null) || null;
+    }
+
+    async function disableReplacedPanels(client, panels) {
+        for (const panel of panels) {
+            try {
+                const message = await fetchPanelMessage(client, panel);
+                if (message) await message.edit({ components: [createGameCheckInPanelRow(true)] });
+            } catch (error) {
+                sendLog(client, '⚠️ 停用被取代的遊戲自動簽到面板失敗。', 'WARN', error);
+            }
+        }
+    }
+
+    async function requireCurrentPanel(interaction, context) {
+        const messageID = String(interaction.message?.id || '');
+        const current = messageID && await repository(context).isCurrentPanel(panelScope(interaction), messageID);
+        if (current) return true;
+        await validationReply(interaction, '**此遊戲簽到面板已被取代，請使用最新面板。**', {
+            method: 'reply', ephemeral: true
+        });
+        return false;
     }
 
     function createPanelEmbed() {
@@ -55,19 +98,6 @@ function createCommand(config, {
             config.log.timezone
         );
         return createGameCheckInPanelEmbed(config, nextTriggerAt);
-    }
-
-    function createPanelRow() {
-        return new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId('game_checkin_credentials')
-                .setLabel('輸入／更新憑證')
-                .setStyle(ButtonStyle.Primary),
-            new ButtonBuilder()
-                .setCustomId('game_checkin_notifications')
-                .setLabel('啟用／停用通知')
-                .setStyle(ButtonStyle.Secondary)
-        );
     }
 
     function createCredentialGuide(record) {
@@ -96,7 +126,6 @@ function createCommand(config, {
                 '```',
                 '123456789',
                 '```',
-                '-# Cookie 為 HttpOnly 時無法用 document.cookie 取得，請從 Cookies 表格複製。',
                 '### SKPORT 帳號 Token 取得方式',
                 '1. 使用瀏覽器登入 [Gryphline](https://user.gryphline.com/) 。',
                 '2. 使用瀏覽器開啟 https://web-api.gryphline.com/cookie_store/account_token 。',
@@ -118,6 +147,30 @@ function createCommand(config, {
                 .setLabel('SKPORT')
                 .setStyle(ButtonStyle.Primary)
         );
+    }
+
+    function createGameSettingsEmbed() {
+        return new EmbedBuilder()
+            .setColor(color)
+            .setTitle(`${emoji} ┃ 遊戲自動簽到（BETA） - 啟用/停用簽到`)
+            .setDescription([
+                '點選下方按鈕可分別啟用或停用自動簽到。',
+                '> 已開始或等待重試的遊戲將沿用當日設定，其餘變更可立即生效。',
+                `> \`${toggleEmojis.enabled} 啟用\` \`${toggleEmojis.disabled} 停用\``
+            ].join('\n'));
+    }
+
+    function createGameSettingsRows(record) {
+        const disabled = new Set(record.disabledGames);
+        return ['hoyolab', 'skport'].map(platform => new ActionRowBuilder().addComponents(
+            gamesForPlatform(platform).map(game => {
+                const enabled = !disabled.has(game.id);
+                return new ButtonBuilder()
+                    .setCustomId(`game_checkin_game_toggle:${game.id}`)
+                    .setLabel(game.name)
+                    .setStyle(enabled ? ButtonStyle.Success : ButtonStyle.Danger);
+            })
+        ));
     }
 
     function createCredentialModal(platform) {
@@ -174,8 +227,7 @@ function createCommand(config, {
                 .setTitle(`${emoji} ┃ 遊戲自動簽到（BETA） - 通知測試`)
                 .setDescription([
                     `**目前通知模式：${MODE_NAMES[mode]}**`,
-                    `這是由 ${botName} 發送的遊戲自動簽到通知測試。`,
-                    '正式簽到結果會嘗試透過 DM 傳送。'
+                    `這是由 ${botName} 發送的遊戲自動簽到通知測試。`
                 ].join('\n'))],
             flags: MessageFlags.Ephemeral,
             allowedMentions: { parse: [], users: botID ? [botID] : [] }
@@ -194,6 +246,40 @@ function createCommand(config, {
 
     async function showCredentialModal(interaction, platform) {
         return interaction.showModal(createCredentialModal(platform));
+    }
+
+    async function showGameSettings(interaction, context) {
+        const record = await repository(context).readUser(interaction.user.id);
+        await interaction.reply({
+            embeds: [createGameSettingsEmbed()],
+            components: createGameSettingsRows(record),
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    async function toggleGame(interaction, context) {
+        const gameID = interaction.customId.slice('game_checkin_game_toggle:'.length);
+        if (!getGameByID(gameID)) {
+            return validationReply(interaction, '**遊戲設定按鈕已失效，請重新開啟設定。**', {
+                method: 'reply', ephemeral: true
+            });
+        }
+        try {
+            const updated = await repository(context).toggleGame(interaction.user.id, gameID, {
+                date: dateKeyAt(now(), config.log.timezone)
+            });
+            await interaction.update({
+                embeds: [createGameSettingsEmbed()],
+                components: createGameSettingsRows(updated.record)
+            });
+            try {
+                await wakeCoordinator();
+            } catch (error) {
+                sendLog(interaction.client, '⚠️ 喚醒遊戲自動簽到排程失敗。', 'WARN', error);
+            }
+        } catch (error) {
+            return errorReply(interaction, error, { context: '切換單一遊戲自動簽到設定' });
+        }
     }
 
     async function submitCredential(interaction, context) {
@@ -233,10 +319,10 @@ function createCommand(config, {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         try {
             const updated = await repository(context).cycleNotification(interaction.user.id);
-            const needsTest = updated.previousMode === 'off' && updated.mode === 'all';
-            const lines = [`通知模式已切換為：**${MODE_NAMES[updated.mode]}**。`];
-            if (needsTest) lines.push('已另外顯示一則臨時通知測試。');
-            await interaction.editReply({ embeds: [createResultEmbed('通知設定完成', lines.join('\n'))] });
+            const needsTest = updated.mode !== 'off';
+            await interaction.editReply({
+                embeds: [createResultEmbed('通知設定完成', `**通知模式已切換為：${MODE_NAMES[updated.mode]}。**`)]
+            });
             if (needsTest) await sendNotificationTest(interaction, updated.mode);
         } catch (error) {
             return errorReply(interaction, error, { context: '切換遊戲簽到通知模式' });
@@ -249,16 +335,25 @@ function createCommand(config, {
             .setDescription('開啟遊戲自動簽到設定面板'),
 
         async execute(interaction, context) {
-            await interaction.reply({ embeds: [createPanelEmbed()], components: [createPanelRow()] });
+            await interaction.reply({ embeds: [createPanelEmbed()], components: [createGameCheckInPanelRow()] });
             const message = await interaction.fetchReply();
-            await repository(context).savePanel(message);
+            const saved = await repository(context).savePanel(panelScope(interaction, message.channelId), message);
+            await disableReplacedPanels(interaction.client, saved.replaced);
         },
 
         buttonHandlers: {
-            game_checkin_credentials: showCredentialGuide,
-            game_checkin_notifications: cycleNotifications,
+            game_checkin_credentials: async (interaction, context) => {
+                if (await requireCurrentPanel(interaction, context)) return showCredentialGuide(interaction, context);
+            },
+            game_checkin_notifications: async (interaction, context) => {
+                if (await requireCurrentPanel(interaction, context)) return cycleNotifications(interaction, context);
+            },
+            game_checkin_games: async (interaction, context) => {
+                if (await requireCurrentPanel(interaction, context)) return showGameSettings(interaction, context);
+            },
             game_checkin_credentials_hoyolab: interaction => showCredentialModal(interaction, 'hoyolab'),
-            game_checkin_credentials_skport: interaction => showCredentialModal(interaction, 'skport')
+            game_checkin_credentials_skport: interaction => showCredentialModal(interaction, 'skport'),
+            game_checkin_game_toggle: toggleGame
         },
 
         modalSubmitHandlers: {
@@ -270,8 +365,12 @@ function createCommand(config, {
         createCredentialGuide,
         createCredentialModal,
         createCredentialPlatformRow,
+        createGameSettingsEmbed,
+        createGameSettingsRows,
         createPanelEmbed,
-        createPanelRow,
+        createPanelRow: createGameCheckInPanelRow,
+        panelScope,
+        requireCurrentPanel,
         sendNotificationTest
     };
     return command;

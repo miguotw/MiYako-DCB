@@ -164,6 +164,10 @@ const commandsConfigSchema = strictObject({
             skipped: emoji('gameCheckIn.resultEmojis.skipped'),
             error: emoji('gameCheckIn.resultEmojis.error')
         }).default({ success: '🟢', already: '🟡', skipped: '🟠', error: '🔴' }),
+        toggleEmojis: strictObject({
+            enabled: emoji('gameCheckIn.toggleEmojis.enabled'),
+            disabled: emoji('gameCheckIn.toggleEmojis.disabled')
+        }).default({ enabled: '✅', disabled: '⏸️' }),
         checkInTime: dailyTime('gameCheckIn.checkInTime')
     }),
     ipQuery: strictObject({ enable: commandEnable(), emoji: emoji('ipQuery.emoji') }),

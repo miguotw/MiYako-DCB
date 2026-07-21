@@ -1,6 +1,12 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const {
+    enabledGameIDs,
+    gameIDsForPlatform,
+    getGameByID,
+    normalizeGameIDs
+} = require('./gameCheckInCatalog');
 
 const PLATFORMS = Object.freeze(['hoyolab', 'skport']);
 const NOTIFICATION_MODES = Object.freeze(['all', 'failures', 'off']);
@@ -10,7 +16,6 @@ const ATTEMPT_LEASE_MS = 20 * 60 * 1000;
 const SIGN_RETRY_DELAYS_MS = Object.freeze([15 * 60 * 1000, 60 * 60 * 1000]);
 const DM_RETRY_DELAYS_MS = Object.freeze([60 * 1000, 5 * 60 * 1000]);
 const PANEL_INDEX_KEY = 'panels';
-const MAX_PANELS = 100;
 
 function assertPlatform(platform) {
     if (!PLATFORMS.includes(platform)) throw new TypeError(`不支援的遊戲簽到平台：${platform}`);
@@ -45,6 +50,7 @@ function normalizeUserStore(value) {
             hoyolab: normalizeCredential(value?.credentials?.hoyolab),
             skport: normalizeCredential(value?.credentials?.skport)
         },
+        disabledGames: normalizeGameIDs(value?.disabledGames),
         notificationMode,
         daily: normalizeDaily(value?.daily),
         outbox: Array.isArray(value?.outbox) ? value.outbox : []
@@ -60,17 +66,67 @@ function normalizePanelStore(value) {
         const locator = `${channelID}:${messageID}`;
         if (!channelID || !messageID || seen.has(locator)) continue;
         seen.add(locator);
-        panels.push({
+        const panel = {
             channelID,
             messageID,
             updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date(0).toISOString()
-        });
+        };
+        const scopeType = ['guild', 'dm'].includes(item?.scopeType) ? item.scopeType : null;
+        const scopeID = String(item?.scopeID || '');
+        if (scopeType && scopeID) Object.assign(panel, { scopeType, scopeID });
+        panels.push(panel);
     }
     return { panels };
 }
 
+function normalizePanelScope(value) {
+    const scopeType = ['guild', 'dm'].includes(value?.type) ? value.type : value?.scopeType;
+    const scopeID = String(value?.id || value?.scopeID || '');
+    if (!['guild', 'dm'].includes(scopeType) || !scopeID) {
+        throw new TypeError('遊戲簽到主面板缺少有效的 Guild 或 DM scope。');
+    }
+    return { scopeType, scopeID };
+}
+
+function samePanel(left, right) {
+    return left.channelID === right.channelID && left.messageID === right.messageID;
+}
+
+function inPanelScope(panel, scope) {
+    return panel.scopeType === scope.scopeType && panel.scopeID === scope.scopeID;
+}
+
+function newestPanel(entries) {
+    return entries.reduce((latest, entry) => {
+        const parsedCurrent = Date.parse(entry.panel.updatedAt);
+        const parsedLatest = Date.parse(latest.panel.updatedAt);
+        const currentTime = Number.isFinite(parsedCurrent) ? parsedCurrent : 0;
+        const latestTime = Number.isFinite(parsedLatest) ? parsedLatest : 0;
+        if (currentTime > latestTime || (currentTime === latestTime && entry.index > latest.index)) return entry;
+        return latest;
+    });
+}
+
 function activePlatforms(store) {
     return PLATFORMS.filter(platform => Boolean(store.credentials[platform]));
+}
+
+function stateGameIDs(state, platform) {
+    return Array.isArray(state?.gameIDs)
+        ? normalizeGameIDs(state.gameIDs, platform)
+        : gameIDsForPlatform(platform);
+}
+
+function platformGameIDs(store, platform, date) {
+    const credential = store.credentials[platform];
+    if (!credential) return [];
+    const state = store.daily?.date === date ? store.daily.platforms[platform] : null;
+    if (state?.credentialRevision === credential.revision) return stateGameIDs(state, platform);
+    return enabledGameIDs(store.disabledGames, platform);
+}
+
+function participatingPlatforms(store, date) {
+    return activePlatforms(store).filter(platform => platformGameIDs(store, platform, date).length > 0);
 }
 
 function isFailureResult(result) {
@@ -84,7 +140,7 @@ function shouldNotify(mode, result) {
 function maybeQueueNotification(store, userID, idFactory, now) {
     const daily = store.daily;
     if (!daily || daily.notificationQueued) return false;
-    const platforms = activePlatforms(store);
+    const platforms = participatingPlatforms(store, daily.date);
     if (!platforms.length) {
         daily.notificationQueued = true;
         return false;
@@ -99,6 +155,7 @@ function maybeQueueNotification(store, userID, idFactory, now) {
         outcomes: states.flatMap(state => Array.isArray(state.result?.outcomes) ? state.result.outcomes : [])
     };
     daily.notificationQueued = true;
+    if (!result.outcomes.length) return false;
     if (!shouldNotify(store.notificationMode, result)) return false;
     if (store.outbox.some(item => item.date === daily.date && item.generation === daily.generation)) return false;
     store.outbox.push({
@@ -128,20 +185,24 @@ function createGameCheckInRepository(jsonRepository, {
         return (await jsonRepository.listKeys()).filter(key => key !== PANEL_INDEX_KEY);
     }
 
-    async function savePanel(message) {
+    async function savePanel(scopeValue, message) {
+        const scope = normalizePanelScope(scopeValue);
         const channelID = String(message?.channelId || '');
         const messageID = String(message?.id || '');
         if (!channelID || !messageID) throw new TypeError('遊戲簽到主面板缺少訊息 locator。');
-        const panel = { channelID, messageID, updatedAt: new Date(now()).toISOString() };
+        const panel = { ...scope, channelID, messageID, updatedAt: new Date(now()).toISOString() };
+        let replaced = [];
         await jsonRepository.update(PANEL_INDEX_KEY, current => {
             const store = normalizePanelStore(current);
-            store.panels = store.panels.filter(item =>
-                item.channelID !== channelID || item.messageID !== messageID);
+            replaced = store.panels.filter(item => !samePanel(item, panel)
+                && (inPanelScope(item, scope) || (!item.scopeType && item.channelID === channelID)));
+            store.panels = store.panels.filter(item => samePanel(item, panel)
+                ? false
+                : !replaced.some(replacedPanel => samePanel(item, replacedPanel)));
             store.panels.push(panel);
-            store.panels = store.panels.slice(-MAX_PANELS);
             return store;
         });
-        return panel;
+        return { panel, replaced };
     }
 
     async function listPanels() {
@@ -155,6 +216,40 @@ function createGameCheckInRepository(jsonRepository, {
                 item.channelID !== String(channelID) || item.messageID !== String(messageID));
             return store;
         });
+    }
+
+    async function claimPanelScope(channelID, messageID, scopeValue) {
+        const scope = normalizePanelScope(scopeValue);
+        const target = { channelID: String(channelID), messageID: String(messageID) };
+        let outcome = { tracked: false, replaced: [] };
+        await jsonRepository.update(PANEL_INDEX_KEY, current => {
+            const store = normalizePanelStore(current);
+            const targetIndex = store.panels.findIndex(panel => samePanel(panel, target));
+            if (targetIndex < 0) return store;
+            store.panels[targetIndex] = { ...store.panels[targetIndex], ...scope };
+            const scoped = store.panels
+                .map((panel, index) => ({ panel, index }))
+                .filter(entry => inPanelScope(entry.panel, scope));
+            const winner = newestPanel(scoped);
+            const replaced = scoped.filter(entry => entry.index !== winner.index).map(entry => entry.panel);
+            store.panels = store.panels.filter((panel, index) =>
+                !inPanelScope(panel, scope) || index === winner.index);
+            outcome = {
+                tracked: samePanel(winner.panel, target),
+                panel: winner.panel,
+                replaced
+            };
+            return store;
+        });
+        return outcome;
+    }
+
+    async function isCurrentPanel(scopeValue, messageID) {
+        const scope = normalizePanelScope(scopeValue);
+        const panels = (await listPanels());
+        const scoped = panels.filter(panel => inPanelScope(panel, scope));
+        if (scoped.length) return scoped.some(panel => panel.messageID === String(messageID));
+        return panels.some(panel => !panel.scopeType && panel.messageID === String(messageID));
     }
 
     async function setCredential(userID, platform, rawValue) {
@@ -201,6 +296,30 @@ function createGameCheckInRepository(jsonRepository, {
         return { previousMode, mode: record.notificationMode, record };
     }
 
+    async function toggleGame(userID, gameID, { date = null } = {}) {
+        const game = getGameByID(gameID);
+        if (!game) throw new TypeError(`不支援的遊戲簽到遊戲：${gameID}`);
+        let enabled;
+        const record = await jsonRepository.update(String(userID), current => {
+            const store = normalizeUserStore(current);
+            const previouslyEnabled = enabledGameIDs(store.disabledGames, game.platform).length;
+            const disabled = new Set(store.disabledGames);
+            if (disabled.has(game.id)) disabled.delete(game.id);
+            else disabled.add(game.id);
+            store.disabledGames = normalizeGameIDs([...disabled]);
+            enabled = !disabled.has(game.id);
+            const currentlyEnabled = enabledGameIDs(store.disabledGames, game.platform).length;
+            if (date && store.credentials[game.platform] && store.daily?.date === date
+                && !store.daily.platforms[game.platform]
+                && previouslyEnabled === 0 && currentlyEnabled > 0) {
+                store.daily.notificationQueued = false;
+                store.outbox = store.outbox.filter(item => item.date !== date);
+            }
+            return store;
+        });
+        return { enabled, game, record };
+    }
+
     function ensureDaily(store, date) {
         if (store.daily?.date === date) return store.daily;
         store.daily = { date, generation: 1, platforms: {}, notificationQueued: false };
@@ -223,6 +342,11 @@ function createGameCheckInRepository(jsonRepository, {
                 if (existing.status === 'retry_wait' && Date.parse(existing.nextAttemptAt) > currentTime) return store;
             }
 
+            const gameIDs = existing?.credentialRevision === credential.revision
+                ? stateGameIDs(existing, platform)
+                : enabledGameIDs(store.disabledGames, platform);
+            if (!gameIDs.length) return store;
+
             const attempts = existing?.credentialRevision === credential.revision
                 ? Math.min(Number(existing.attempts) || 0, MAX_ATTEMPTS - 1) + 1
                 : 1;
@@ -234,12 +358,14 @@ function createGameCheckInRepository(jsonRepository, {
                 generation: daily.generation,
                 credentialRevision: credential.revision,
                 credential: credential.value,
+                gameIDs,
                 attempts
             };
             daily.platforms[platform] = {
                 status: 'running',
                 reservationID: reservation.id,
                 credentialRevision: credential.revision,
+                gameIDs,
                 attempts,
                 startedAt: new Date(currentTime).toISOString(),
                 leaseExpiresAt: new Date(currentTime + ATTEMPT_LEASE_MS).toISOString()
@@ -268,6 +394,7 @@ function createGameCheckInRepository(jsonRepository, {
                 daily.platforms[reservation.platform] = {
                     status: 'retry_wait',
                     credentialRevision: credential.revision,
+                    gameIDs: reservation.gameIDs,
                     attempts: state.attempts,
                     nextAttemptAt: new Date(retryAt).toISOString(),
                     result
@@ -276,6 +403,7 @@ function createGameCheckInRepository(jsonRepository, {
                 daily.platforms[reservation.platform] = {
                     status: 'complete',
                     credentialRevision: credential.revision,
+                    gameIDs: reservation.gameIDs,
                     attempts: state.attempts,
                     completedAt: new Date(now()).toISOString(),
                     result
@@ -303,7 +431,7 @@ function createGameCheckInRepository(jsonRepository, {
         const due = [];
         for (const userID of await listUserIDs()) {
             const store = await readUser(userID);
-            for (const platform of activePlatforms(store)) {
+            for (const platform of participatingPlatforms(store, date)) {
                 const credential = store.credentials[platform];
                 const state = store.daily?.date === date ? store.daily.platforms[platform] : null;
                 if (!state || state.credentialRevision !== credential.revision
@@ -321,9 +449,9 @@ function createGameCheckInRepository(jsonRepository, {
         const currentTime = now();
         for (const userID of await listUserIDs()) {
             const store = await readUser(userID);
-            if (activePlatforms(store).length && store.daily?.date !== date) return currentTime;
+            if (participatingPlatforms(store, date).length && store.daily?.date !== date) return currentTime;
             if (store.daily?.date !== date) continue;
-            for (const platform of activePlatforms(store)) {
+            for (const platform of participatingPlatforms(store, date)) {
                 const state = store.daily.platforms[platform];
                 if (!state || state.credentialRevision !== store.credentials[platform].revision) return currentTime;
                 const candidate = state.status === 'running' ? Date.parse(state.leaseExpiresAt)
@@ -407,8 +535,11 @@ function createGameCheckInRepository(jsonRepository, {
         savePanel,
         listPanels,
         removePanel,
+        claimPanelScope,
+        isCurrentPanel,
         setCredential,
         cycleNotification,
+        toggleGame,
         reservePlatform,
         completePlatform,
         finalizeReady,
@@ -425,10 +556,10 @@ function createGameCheckInRepository(jsonRepository, {
 module.exports = {
     ATTEMPT_LEASE_MS,
     MAX_ATTEMPTS,
-    MAX_PANELS,
     NOTIFICATION_MODES,
     PLATFORMS,
     SIGN_RETRY_DELAYS_MS,
     createGameCheckInRepository,
-    normalizeUserStore
+    normalizeUserStore,
+    platformGameIDs
 };

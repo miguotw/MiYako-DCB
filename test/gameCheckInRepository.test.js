@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { createJsonRepository } = require('../core/jsonRepository');
+const { gameIDsForPlatform } = require('../util/gameCheckInCatalog');
 const {
     ATTEMPT_LEASE_MS,
     SIGN_RETRY_DELAYS_MS,
@@ -44,6 +45,7 @@ test('遊戲簽到 repository 以使用者隔離憑證、採 failure-only 預設
     const first = await setup.repository.readUser('123456789012345678');
     assert.equal(first.notificationMode, 'failures');
     assert.equal(first.credentials.hoyolab, null);
+    assert.deepEqual(first.disabledGames, []);
 
     const added = await setup.repository.setCredential('123456789012345678', 'hoyolab', 'cookie-secret');
     assert.equal(added.changed, true);
@@ -67,20 +69,206 @@ test('遊戲簽到 repository 以使用者隔離憑證、採 failure-only 預設
     assert.equal(cleared.disabled, true);
     assert.equal(cleared.record.credentials.hoyolab, null);
 
-    await setup.repository.savePanel({ channelId: 'channel-1', id: 'message-1' });
-    await setup.repository.savePanel({ channelId: 'channel-1', id: 'message-1' });
-    await setup.repository.savePanel({ channelId: 'channel-2', id: 'message-2' });
-    assert.deepEqual(await setup.repository.listPanels(), [
-        { channelID: 'channel-1', messageID: 'message-1', updatedAt: new Date(setup.now()).toISOString() },
-        { channelID: 'channel-2', messageID: 'message-2', updatedAt: new Date(setup.now()).toISOString() }
-    ]);
-    await setup.repository.removePanel('channel-1', 'message-1');
-    assert.deepEqual((await setup.repository.listPanels()).map(panel => panel.messageID), ['message-2']);
     assert.deepEqual(await setup.repository.listUserIDs(), ['123456789012345678', '222222222222222222']);
     if (process.platform !== 'win32') {
         assert.equal(fs.statSync(path.join(setup.root, '123456789012345678.json')).mode & 0o777, 0o600);
     }
     await assert.rejects(() => setup.repository.setCredential('123456789012345678', 'unknown', 'x'), /不支援/);
+});
+
+test('主面板 repository 每個 Guild 或 DM scope 僅保留最新 locator 並可收斂舊格式', async t => {
+    const setup = fixture(t);
+    const guildOne = { type: 'guild', id: 'guild-1' };
+    const guildTwo = { type: 'guild', id: 'guild-2' };
+    const dm = { type: 'dm', id: 'dm-channel' };
+    const first = await setup.repository.savePanel(guildOne, { channelId: 'channel-1', id: 'message-1' });
+    assert.deepEqual(first.replaced, []);
+    const replacement = await setup.repository.savePanel(guildOne, {
+        channelId: 'channel-2', id: 'message-2'
+    });
+    assert.deepEqual(replacement.replaced.map(panel => panel.messageID), ['message-1']);
+    await setup.repository.savePanel(guildTwo, { channelId: 'channel-3', id: 'message-3' });
+    await setup.repository.savePanel(dm, { channelId: 'dm-channel', id: 'dm-message-1' });
+    const dmReplacement = await setup.repository.savePanel(dm, {
+        channelId: 'dm-channel', id: 'dm-message-2'
+    });
+    assert.deepEqual(dmReplacement.replaced.map(panel => panel.messageID), ['dm-message-1']);
+    assert.deepEqual((await setup.repository.listPanels()).map(panel => [
+        panel.scopeType, panel.scopeID, panel.messageID
+    ]), [
+        ['guild', 'guild-1', 'message-2'],
+        ['guild', 'guild-2', 'message-3'],
+        ['dm', 'dm-channel', 'dm-message-2']
+    ]);
+    assert.equal(await setup.repository.isCurrentPanel(guildOne, 'message-1'), false);
+    assert.equal(await setup.repository.isCurrentPanel(guildOne, 'message-2'), true);
+
+    await setup.json.update('panels', current => ({
+        panels: [
+            ...current.panels,
+            {
+                channelID: 'legacy-channel-1', messageID: 'legacy-message-1',
+                updatedAt: '2026-07-20T00:00:00.000Z'
+            },
+            {
+                channelID: 'legacy-channel-2', messageID: 'legacy-message-2',
+                updatedAt: '2026-07-21T00:00:00.000Z'
+            }
+        ]
+    }));
+    const legacyScope = { type: 'guild', id: 'legacy-guild' };
+    assert.equal((await setup.repository.claimPanelScope(
+        'legacy-channel-1', 'legacy-message-1', legacyScope
+    )).tracked, true);
+    const claimed = await setup.repository.claimPanelScope(
+        'legacy-channel-2', 'legacy-message-2', legacyScope
+    );
+    assert.equal(claimed.tracked, true);
+    assert.deepEqual(claimed.replaced.map(panel => panel.messageID), ['legacy-message-1']);
+    assert.equal(await setup.repository.isCurrentPanel(legacyScope, 'legacy-message-1'), false);
+    assert.equal(await setup.repository.isCurrentPanel(legacyScope, 'legacy-message-2'), true);
+
+    await setup.repository.removePanel('legacy-channel-2', 'legacy-message-2');
+    assert.equal(await setup.repository.isCurrentPanel(legacyScope, 'legacy-message-2'), false);
+    await assert.rejects(
+        () => setup.repository.savePanel({ type: 'unknown', id: 'x' }, { channelId: 'c', id: 'm' }),
+        /scope/
+    );
+});
+
+test('單一遊戲偏好會隔離使用者、忽略未知 ID，且憑證更新與清除皆保留設定', async t => {
+    const setup = fixture(t);
+    const firstUser = '123456789012345678';
+    const secondUser = '222222222222222222';
+
+    const disabled = await setup.repository.toggleGame(firstUser, 'hoyolab:genshin');
+    assert.equal(disabled.enabled, false);
+    assert.deepEqual(disabled.record.disabledGames, ['hoyolab:genshin']);
+    assert.deepEqual((await setup.repository.readUser(secondUser)).disabledGames, []);
+
+    await setup.repository.setCredential(firstUser, 'hoyolab', 'first-cookie');
+    await setup.repository.setCredential(firstUser, 'hoyolab', 'second-cookie');
+    await setup.repository.setCredential(firstUser, 'hoyolab', '');
+    assert.deepEqual((await setup.repository.readUser(firstUser)).disabledGames, ['hoyolab:genshin']);
+
+    await setup.json.update(firstUser, current => ({
+        ...current,
+        disabledGames: ['unknown:future', 'skport:endfield', 'skport:endfield']
+    }));
+    assert.deepEqual((await setup.repository.readUser(firstUser)).disabledGames, ['skport:endfield']);
+    await assert.rejects(() => setup.repository.toggleGame(firstUser, 'unknown:future'), /不支援/);
+});
+
+test('reservation 固定當日遊戲快照，重試與舊資料沿用快照，隔日才採用新設定', async t => {
+    const setup = fixture(t);
+    const userID = '123456789012345678';
+    const date = '2026-07-21';
+    await setup.repository.setCredential(userID, 'hoyolab', 'cookie');
+    await setup.repository.toggleGame(userID, 'hoyolab:starRail');
+
+    const first = await setup.repository.reservePlatform(userID, 'hoyolab', date);
+    assert.deepEqual(first.gameIDs, gameIDsForPlatform('hoyolab').filter(id => id !== 'hoyolab:starRail'));
+    await setup.repository.toggleGame(userID, 'hoyolab:starRail');
+    await setup.repository.toggleGame(userID, 'hoyolab:genshin');
+    await setup.repository.completePlatform(first, result('failure', true));
+    setup.advance(SIGN_RETRY_DELAYS_MS[0]);
+    const retry = await setup.repository.reservePlatform(userID, 'hoyolab', date);
+    assert.deepEqual(retry.gameIDs, first.gameIDs);
+    await setup.repository.completePlatform(retry, result('success'));
+
+    const nextDay = await setup.repository.reservePlatform(userID, 'hoyolab', '2026-07-22');
+    assert.deepEqual(nextDay.gameIDs, gameIDsForPlatform('hoyolab').filter(id => id !== 'hoyolab:genshin'));
+
+    await setup.json.update(userID, current => ({
+        ...current,
+        disabledGames: gameIDsForPlatform('hoyolab'),
+        daily: {
+            date: '2026-07-23', generation: 1, notificationQueued: false,
+            platforms: {
+                hoyolab: {
+                    status: 'running', reservationID: 'legacy', credentialRevision: 1,
+                    attempts: 1, leaseExpiresAt: new Date(setup.now() - 1).toISOString()
+                }
+            }
+        }
+    }));
+    const legacyRetry = await setup.repository.reservePlatform(userID, 'hoyolab', '2026-07-23');
+    assert.deepEqual(legacyRetry.gameIDs, gameIDsForPlatform('hoyolab'));
+});
+
+test('全部遊戲停用時不建立 reservation 或空白通知', async t => {
+    const setup = fixture(t);
+    const userID = '123456789012345678';
+    const date = '2026-07-21';
+    await setup.repository.setCredential(userID, 'hoyolab', 'cookie');
+    await setup.repository.cycleNotification(userID); // failures -> off
+    await setup.repository.cycleNotification(userID); // off -> all
+    for (const gameID of gameIDsForPlatform('hoyolab')) {
+        await setup.repository.toggleGame(userID, gameID);
+    }
+
+    assert.deepEqual(await setup.repository.listDuePlatforms(date, setup.now() - 1), []);
+    assert.equal(await setup.repository.reservePlatform(userID, 'hoyolab', date), null);
+    assert.equal(await setup.repository.earliestPending(date), null);
+    await setup.repository.finalizeReady(date);
+    assert.deepEqual(await setup.repository.listDueOutbox(), []);
+    assert.equal((await setup.repository.readUser(userID)).credentials.hoyolab.value, 'cookie');
+});
+
+test('當日尚未開始的平台採用最新開關，已開始的平台維持原快照', async t => {
+    const setup = fixture(t);
+    const userID = '123456789012345678';
+    const date = '2026-07-21';
+    await setup.repository.setCredential(userID, 'hoyolab', 'cookie');
+    await setup.repository.setCredential(userID, 'skport', 'token');
+    const hoyolab = await setup.repository.reservePlatform(userID, 'hoyolab', date);
+
+    for (const gameID of gameIDsForPlatform('skport')) {
+        await setup.repository.toggleGame(userID, gameID);
+    }
+    assert.deepEqual(await setup.repository.listDuePlatforms(date, setup.now() - 1), []);
+
+    await setup.repository.toggleGame(userID, 'skport:endfield');
+    assert.deepEqual(await setup.repository.listDuePlatforms(date, setup.now() - 1), [
+        { userID, platform: 'skport' }
+    ]);
+    const skport = await setup.repository.reservePlatform(userID, 'skport', date);
+    assert.deepEqual(skport.gameIDs, ['skport:endfield']);
+
+    for (const gameID of hoyolab.gameIDs) {
+        if (!(await setup.repository.readUser(userID)).disabledGames.includes(gameID)) {
+            await setup.repository.toggleGame(userID, gameID);
+        }
+    }
+    setup.advance(ATTEMPT_LEASE_MS);
+    const due = await setup.repository.listDuePlatforms(date, setup.now() - 1);
+    assert.equal(due.some(item => item.platform === 'hoyolab'), true);
+    const recovered = await setup.repository.reservePlatform(userID, 'hoyolab', date);
+    assert.deepEqual(recovered.gameIDs, hoyolab.gameIDs);
+});
+
+test('重新啟用當日尚未開始的平台會撤回待送彙總，完成後再建立完整通知', async t => {
+    const setup = fixture(t);
+    const userID = '123456789012345678';
+    const date = '2026-07-21';
+    await setup.repository.setCredential(userID, 'hoyolab', 'cookie');
+    await setup.repository.setCredential(userID, 'skport', 'token');
+    await setup.repository.cycleNotification(userID); // failures -> off
+    await setup.repository.cycleNotification(userID); // off -> all
+    for (const gameID of gameIDsForPlatform('skport')) {
+        await setup.repository.toggleGame(userID, gameID);
+    }
+
+    const hoyolab = await setup.repository.reservePlatform(userID, 'hoyolab', date);
+    await setup.repository.completePlatform(hoyolab, result('success'));
+    assert.equal((await setup.repository.listDueOutbox()).length, 1);
+
+    await setup.repository.toggleGame(userID, 'skport:endfield', { date });
+    assert.deepEqual(await setup.repository.listDueOutbox(), []);
+    const skport = await setup.repository.reservePlatform(userID, 'skport', date);
+    await setup.repository.completePlatform(skport, result('success', false, 'skport'));
+    const [outbox] = await setup.repository.listDueOutbox();
+    assert.deepEqual(outbox.result.outcomes.map(item => item.platform), ['hoyolab', 'skport']);
 });
 
 test('平台 reservation single-flight、暫時失敗退避三次並在全部完成後建立 outbox', async t => {

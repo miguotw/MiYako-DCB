@@ -112,6 +112,18 @@ test('實際 enabled manifests 推導出預設最小 Gateway Intents 聯集', ()
     assert.equal(catalog.intents.includes(GatewayIntentBits.DirectMessages), false);
 });
 
+test('遊戲簽到 manifest 註冊遊戲設定 exact 與 toggle prefix 路由', () => {
+    const config = loadConfig();
+    const manifest = createFeatureManifests(config).find(item => item.name === 'gameCheckIn');
+    const games = manifest.interactions.find(route => route.kind === 'button' && route.id === 'game_checkin_games');
+    const toggle = manifest.interactions.find(route => route.kind === 'button'
+        && route.id === 'game_checkin_game_toggle');
+    assert.equal(games.match, 'exact');
+    assert.equal(toggle.match, 'prefix');
+    assert.equal(games.access, 'public');
+    assert.equal(toggle.access, 'public');
+});
+
 test('停用四種 logger 後不會加入 manifest 或額外 Gateway Intent', () => {
     const config = disabledLoggerConfig();
     const manifests = createFeatureManifests(config);

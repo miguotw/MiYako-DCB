@@ -10,7 +10,7 @@ const PREFIX_ROUTES = new Set([
     'select:twitch_stream_remove', 'select:package_panel_select_carrier',
     'select:package_panel_select_carrier_2', 'button:package_panel_extra_fields',
     'modal:package_panel_extra_fields_modal', 'button:temporary_voice_remove_page',
-    'modal:game_checkin_credentials_modal'
+    'modal:game_checkin_credentials_modal', 'button:game_checkin_game_toggle'
 ]);
 
 const EXACT_VARIANTS = new Map([

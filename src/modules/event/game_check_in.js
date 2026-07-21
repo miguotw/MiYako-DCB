@@ -10,7 +10,10 @@ const {
     nextDateKey,
     scheduledEpoch
 } = require('../../../util/gameCheckInSchedule');
-const { createGameCheckInPanelEmbed } = require('../../../util/gameCheckInViews');
+const {
+    createGameCheckInPanelEmbed,
+    createGameCheckInPanelRow
+} = require('../../../util/gameCheckInViews');
 
 const USER_CONCURRENCY = 2;
 const EMBED_FIELD_VALUE_LIMIT = 1024;
@@ -118,7 +121,8 @@ function createGameCheckInDeadlineCoordinator(config, {
         try {
             result = await adapters.run[candidate.platform](reservation.credential, {
                 http: context.http,
-                signal
+                signal,
+                gameIDs: reservation.gameIDs
             });
         } catch (error) {
             if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : error;
@@ -150,7 +154,7 @@ function createGameCheckInDeadlineCoordinator(config, {
         }
         sendLog(
             context.client,
-            `🎮 遊戲自動簽到已觸發：共 ${grouped.size} 位使用者。`
+            `🎮 遊戲自動簽到已觸發：共 ${grouped.size} 位使用者、${due.length} 個平台。`
         );
         await runWithConcurrency([...grouped.values()], USER_CONCURRENCY, async candidates => {
             for (const candidate of candidates) {
@@ -178,6 +182,22 @@ function createGameCheckInDeadlineCoordinator(config, {
         });
     }
 
+    function panelScope(message, panel) {
+        const guildID = String(message.guildId || message.guild?.id || message.channel?.guild?.id || '');
+        return guildID
+            ? { type: 'guild', id: guildID }
+            : { type: 'dm', id: String(message.channelId || panel.channelID) };
+    }
+
+    async function disablePanel(panel, message = null) {
+        try {
+            const target = message || await fetchPanelMessage(panel);
+            if (target) await target.edit({ components: [createGameCheckInPanelRow(true)] });
+        } catch (error) {
+            sendLog(context.client, '⚠️ 停用被取代的遊戲自動簽到面板失敗。', 'WARN', error);
+        }
+    }
+
     async function syncPanels() {
         const panels = typeof repository.listPanels === 'function' ? await repository.listPanels() : [];
         if (!panels.length) return;
@@ -189,7 +209,23 @@ function createGameCheckInDeadlineCoordinator(config, {
                     await repository.removePanel?.(panel.channelID, panel.messageID);
                     continue;
                 }
-                await message.edit({ embeds: [createGameCheckInPanelEmbed(config, nextTriggerAt)] });
+                const scope = panelScope(message, panel);
+                const claim = typeof repository.claimPanelScope === 'function'
+                    ? await repository.claimPanelScope(panel.channelID, panel.messageID, scope)
+                    : { tracked: true, replaced: [] };
+                for (const replaced of claim.replaced) await disablePanel(replaced);
+                if (!claim.tracked) {
+                    await disablePanel(panel, message);
+                    continue;
+                }
+                await message.edit({
+                    embeds: [createGameCheckInPanelEmbed(config, nextTriggerAt)],
+                    components: [createGameCheckInPanelRow()]
+                });
+                if (typeof repository.isCurrentPanel === 'function'
+                    && !await repository.isCurrentPanel(scope, panel.messageID)) {
+                    await disablePanel(panel, message);
+                }
             } catch (error) {
                 sendLog(context.client, '⚠️ 更新遊戲自動簽到主面板倒數失敗。', 'WARN', error);
             }
@@ -259,6 +295,12 @@ function createGameCheckInDeadlineCoordinator(config, {
         return stop;
     }
 
+    function wake() {
+        if (!handle) return false;
+        handle.reschedule(now());
+        return true;
+    }
+
     async function stop() {
         const currentHandle = handle;
         handle = null;
@@ -270,6 +312,7 @@ function createGameCheckInDeadlineCoordinator(config, {
     return {
         start,
         stop,
+        wake,
         _test: { deliverOutbox, nextDeadline, processDue, reconcile, syncPanels, timing }
     };
 }

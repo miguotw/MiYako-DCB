@@ -1,40 +1,48 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { gameIDsForPlatform, getGameByID, normalizeGameIDs } = require('./gameCheckInCatalog');
+
+const SKPORT_ARKNIGHTS = getGameByID('skport:arknights');
+const SKPORT_ENDFIELD = getGameByID('skport:endfield');
 
 const HOYOLAB_GAMES = Object.freeze([
     {
-        id: 'genshin', name: '原神',
+        id: 'genshin',
         infoUrl: 'https://sg-hk4e-api.hoyolab.com/event/sol/info',
         signUrl: 'https://sg-hk4e-api.hoyolab.com/event/sol/sign',
         actId: 'e202102251931481'
     },
     {
-        id: 'starRail', name: '崩壞：星穹鐵道',
+        id: 'starRail',
         infoUrl: 'https://sg-public-api.hoyolab.com/event/luna/os/info',
         signUrl: 'https://sg-public-api.hoyolab.com/event/luna/os/sign',
         actId: 'e202303301540311'
     },
     {
-        id: 'honkai3', name: '崩壞3rd',
+        id: 'honkai3',
         infoUrl: 'https://sg-public-api.hoyolab.com/event/mani/info',
         signUrl: 'https://sg-public-api.hoyolab.com/event/mani/sign',
         actId: 'e202110291205111'
     },
     {
-        id: 'tearsOfThemis', name: '未定事件簿',
+        id: 'tearsOfThemis',
         infoUrl: 'https://sg-public-api.hoyolab.com/event/luna/os/info',
         signUrl: 'https://sg-public-api.hoyolab.com/event/luna/os/sign',
         actId: 'e202308141137581'
     },
     {
-        id: 'zenlessZoneZero', name: '絕區零',
+        id: 'zenlessZoneZero',
         infoUrl: 'https://sg-public-api.hoyolab.com/event/luna/zzz/os/info',
         signUrl: 'https://sg-public-api.hoyolab.com/event/luna/zzz/os/sign',
         actId: 'e202406031448091',
         headers: { 'x-rpc-signgame': 'zzz' }
     }
-]);
+].map(game => Object.freeze({
+    ...game,
+    gameID: `hoyolab:${game.id}`,
+    name: getGameByID(`hoyolab:${game.id}`).name
+})));
 
 const HOYOLAB_HEADERS = Object.freeze({
     Accept: 'application/json, text/plain, */*',
@@ -183,11 +191,13 @@ async function validateHoyolabCredential(value, { http, signal } = {}) {
     );
 }
 
-function outcome(platform, game, status, message, account = null) {
-    return { platform, game, account, status, message };
+function outcome(platform, game, status, message, account = null, gameID = null) {
+    const value = { platform, game, account, status, message };
+    if (gameID) value.gameID = gameID;
+    return value;
 }
 
-async function runHoyolabCheckIn(value, { http, signal } = {}) {
+async function runHoyolabCheckIn(value, { http, signal, gameIDs } = {}) {
     let cookie;
     try {
         cookie = parseHoyolabCookie(value);
@@ -197,26 +207,29 @@ async function runHoyolabCheckIn(value, { http, signal } = {}) {
 
     const outcomes = [];
     let retryable = false;
-    let boundGames = 0;
-    for (const game of HOYOLAB_GAMES) {
+    const selectedIDs = new Set(Array.isArray(gameIDs)
+        ? normalizeGameIDs(gameIDs, 'hoyolab')
+        : gameIDsForPlatform('hoyolab'));
+    const selectedGames = HOYOLAB_GAMES.filter(game => selectedIDs.has(game.gameID));
+    if (!selectedGames.length) return { platform: 'hoyolab', retryable: false, outcomes };
+    for (const game of selectedGames) {
         let info;
         try {
             info = await getHoyolabInfo(game, cookie, http, signal);
         } catch (error) {
             if (!(error instanceof GameCheckInAdapterError)) throw error;
             retryable ||= error.retryable;
-            outcomes.push(outcome('hoyolab', game.name, 'failure', error.message));
+            outcomes.push(outcome('hoyolab', game.name, 'failure', error.message, null, game.gameID));
             continue;
         }
 
         if (Number(info.retcode) !== 0) {
-            if (isHoyolabAuthError(info)) outcomes.push(outcome('hoyolab', game.name, 'failure', 'HoYoLAB Cookie 已失效。'));
-            else outcomes.push(outcome('hoyolab', game.name, 'skipped', '帳號未綁定此遊戲。'));
+            if (isHoyolabAuthError(info)) outcomes.push(outcome('hoyolab', game.name, 'failure', 'HoYoLAB Cookie 已失效。', null, game.gameID));
+            else outcomes.push(outcome('hoyolab', game.name, 'skipped', '帳號未綁定此遊戲。', null, game.gameID));
             continue;
         }
-        boundGames += 1;
         if (isAlreadySigned(info)) {
-            outcomes.push(outcome('hoyolab', game.name, 'already', '今日已完成簽到。'));
+            outcomes.push(outcome('hoyolab', game.name, 'already', '今日已完成簽到。', null, game.gameID));
             continue;
         }
 
@@ -234,24 +247,21 @@ async function runHoyolabCheckIn(value, { http, signal } = {}) {
         } catch (error) {
             if (!(error instanceof GameCheckInAdapterError)) throw error;
             retryable ||= error.retryable;
-            outcomes.push(outcome('hoyolab', game.name, 'failure', error.message));
+            outcomes.push(outcome('hoyolab', game.name, 'failure', error.message, null, game.gameID));
             continue;
         }
 
         if (signed.data?.gt_result?.is_risk) {
-            outcomes.push(outcome('hoyolab', game.name, 'failure', '簽到受到 CAPTCHA 風險驗證阻擋。'));
+            outcomes.push(outcome('hoyolab', game.name, 'failure', '簽到受到 CAPTCHA 風險驗證阻擋。', null, game.gameID));
         } else if (Number(signed.retcode) === 0 || String(signed.message).toUpperCase() === 'OK') {
-            outcomes.push(outcome('hoyolab', game.name, 'success', '簽到成功。'));
+            outcomes.push(outcome('hoyolab', game.name, 'success', '簽到成功。', null, game.gameID));
         } else if (isAlreadySigned(signed)) {
-            outcomes.push(outcome('hoyolab', game.name, 'already', '今日已完成簽到。'));
+            outcomes.push(outcome('hoyolab', game.name, 'already', '今日已完成簽到。', null, game.gameID));
         } else if (isHoyolabAuthError(signed)) {
-            outcomes.push(outcome('hoyolab', game.name, 'failure', 'HoYoLAB Cookie 已失效。'));
+            outcomes.push(outcome('hoyolab', game.name, 'failure', 'HoYoLAB Cookie 已失效。', null, game.gameID));
         } else {
-            outcomes.push(outcome('hoyolab', game.name, 'failure', 'HoYoLAB 拒絕了簽到請求。'));
+            outcomes.push(outcome('hoyolab', game.name, 'failure', 'HoYoLAB 拒絕了簽到請求。', null, game.gameID));
         }
-    }
-    if (!boundGames && !outcomes.some(item => item.status === 'failure')) {
-        outcomes.push(outcome('hoyolab', 'HoYoLAB', 'failure', '帳號沒有可支援的已綁定遊戲。'));
     }
     return { platform: 'hoyolab', retryable, outcomes };
 }
@@ -339,7 +349,9 @@ async function authorizeSkport(value, { http, signal, validation = false } = {})
         if (app.appCode === 'arknights') {
             for (const item of app.bindingList || []) {
                 tasks.push({
-                    game: '明日方舟', account: item.nickName || String(item.uid),
+                    gameID: SKPORT_ARKNIGHTS.id,
+                    game: SKPORT_ARKNIGHTS.name,
+                    account: item.nickName || String(item.uid),
                     url: 'https://zonai.skport.com/api/v1/game/attendance',
                     path: '/api/v1/game/attendance',
                     body: JSON.stringify({ uid: item.uid, gameId: '1' }),
@@ -351,7 +363,8 @@ async function authorizeSkport(value, { http, signal, validation = false } = {})
             for (const bindingItem of app.bindingList || []) {
                 for (const role of bindingItem.roles || []) {
                     tasks.push({
-                        game: '明日方舟：終末地',
+                        gameID: SKPORT_ENDFIELD.id,
+                        game: SKPORT_ENDFIELD.name,
                         account: `${role.nickName || role.roleId}（${role.serverName || role.serverId}）`,
                         url: 'https://zonai.skport.com/web/v1/game/endfield/attendance',
                         path: '/web/v1/game/endfield/attendance', body: '',
@@ -361,7 +374,9 @@ async function authorizeSkport(value, { http, signal, validation = false } = {})
             }
         }
     }
-    if (!tasks.length) throw skportAuthError('SKPORT_NO_ROLES', '此 SKPORT 帳號沒有可支援的已綁定角色。', validation);
+    if (!tasks.length && validation) {
+        throw skportAuthError('SKPORT_NO_ROLES', '此 SKPORT 帳號沒有可支援的已綁定角色。', true);
+    }
     return { cred, token, tasks };
 }
 
@@ -384,7 +399,16 @@ async function runSkportCheckIn(value, options = {}) {
 
     const outcomes = [];
     let retryable = false;
-    for (const task of auth.tasks) {
+    const selectedIDs = new Set(Array.isArray(options.gameIDs)
+        ? normalizeGameIDs(options.gameIDs, 'skport')
+        : gameIDsForPlatform('skport'));
+    for (const gameID of selectedIDs) {
+        if (!auth.tasks.some(item => item.gameID === gameID)) {
+            const game = getGameByID(gameID);
+            outcomes.push(outcome('skport', game.name, 'skipped', '帳號未綁定此遊戲。', null, game.id));
+        }
+    }
+    for (const task of auth.tasks.filter(item => selectedIDs.has(item.gameID))) {
         const timestamp = String(Math.floor(Date.now() / 1000));
         const headers = {
             ...SKPORT_HEADERS,
@@ -404,18 +428,18 @@ async function runSkportCheckIn(value, options = {}) {
         } catch (error) {
             if (!(error instanceof GameCheckInAdapterError)) throw error;
             retryable ||= error.retryable;
-            outcomes.push(outcome('skport', task.game, 'failure', error.message, task.account));
+            outcomes.push(outcome('skport', task.game, 'failure', error.message, task.account, task.gameID));
             continue;
         }
         if (Number(data.code) === 0 || String(data.message).toUpperCase() === 'OK') {
-            outcomes.push(outcome('skport', task.game, 'success', '簽到成功。', task.account));
+            outcomes.push(outcome('skport', task.game, 'success', '簽到成功。', task.account, task.gameID));
         } else if (/already|已.{0,4}簽到/i.test(String(data.message || ''))) {
-            outcomes.push(outcome('skport', task.game, 'already', '今日已完成簽到。', task.account));
+            outcomes.push(outcome('skport', task.game, 'already', '今日已完成簽到。', task.account, task.gameID));
         } else if (Number(data.code) === 10000) {
             retryable = true;
-            outcomes.push(outcome('skport', task.game, 'failure', 'SKPORT 短效 Token 無效，將重新授權後重試。', task.account));
+            outcomes.push(outcome('skport', task.game, 'failure', 'SKPORT 短效 Token 無效，將重新授權後重試。', task.account, task.gameID));
         } else {
-            outcomes.push(outcome('skport', task.game, 'failure', 'SKPORT 拒絕了簽到請求。', task.account));
+            outcomes.push(outcome('skport', task.game, 'failure', 'SKPORT 拒絕了簽到請求。', task.account, task.gameID));
         }
     }
     return { platform: 'skport', retryable, outcomes };
