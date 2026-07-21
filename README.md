@@ -50,6 +50,7 @@ chmod 600 config/config.yml config/configCommands.yml config/configModules.yml
 
 - `packageTracking.maxActivePackages`：每位使用者 active 加 reserved 包裹上限，預設 20，範圍 1–100。
 - `gameCheckIn.checkInTime`：每日簽到的 `HH:mm` 時間；時區校正沿用 `config.yml` 的 `log.timezone`，語意與自動抽選相同：`0` 代表主機本機時間，其他數值是在主機時間上人工校正的小時數。
+- `gameCheckIn.credentialEncryptionKey`：遊戲簽到憑證的 AES-256-GCM 主金鑰。功能啟用時必須填入 64 字元十六進位字串，可用 `openssl rand -hex 32` 產生；不得提交或傳送給他人。
 - `gameCheckIn.resultEmojis`：分別設定簽到成功、重複簽到、未綁定遊戲與錯誤的結果標題 Emoji。
 - `gameCheckIn.toggleEmojis`：設定啟用/停用簽到 Embed 圖例中「啟用」與「停用」狀態的 Emoji；遊戲按鈕固定以綠色表示啟用、紅色表示停用。
 - `music.maxQueueTracks`：每個 Guild 的序列上限。
@@ -196,11 +197,13 @@ Twitch OAuth token provider 與 Helix client 使用共用 HTTP policy；Helix ID
 
 主面板會顯示 Discord 動態倒數時間戳，並持久保存訊息 locator；每個 Guild 或 DM channel 只追蹤最新一個面板，新面板會停用被取代面板的全部按鈕，舊格式 locator 也會在啟動同步時收斂。啟動補跑或每日排程完成後會更新為下一次自動簽到時間。真正有待處理的平台時，後臺日誌會記錄觸發日期、使用者數、平台數與處理完成訊息，但不包含憑證。
 
-HoYoLAB 支援原神、崩壞：星穹鐵道、崩壞3rd、未定事件簿與絕區零；實作參考 [canaria3406/hoyolab-auto-sign](https://github.com/canaria3406/hoyolab-auto-sign)。SKPORT 使用長效 `account_token` 動態交換短效憑證並探索明日方舟繁中服及明日方舟：終末地的全部已綁定角色／伺服器；流程參考 [canaria3406/skport-auto-sign PR #4](https://github.com/canaria3406/skport-auto-sign/pull/4)。兩者皆為第三方、非官方且可能變動的 API adapter，平台拒絕、CAPTCHA 或憑證失效會安全回報，不會輸出完整上游 response。
+HoYoLAB 支援原神、崩壞：星穹鐵道、崩壞3rd、未定事件簿與絕區零；實作參考 [canaria3406/hoyolab-auto-sign](https://github.com/canaria3406/hoyolab-auto-sign)。SKPORT 使用長效 `account_token` 動態交換短效憑證並探索明日方舟繁中服及明日方舟：終末地的全部已綁定角色／伺服器；流程參考 [canaria3406/skport-auto-sign PR #4](https://github.com/canaria3406/skport-auto-sign/pull/4)。兩者皆為第三方、非官方且可能變動的 API adapter；已知的重複簽到、驗證失敗與暫時性錯誤會分別回報，未知拒絕僅保留安全的數字錯誤碼或 HTTP 狀態，不會輸出完整上游 response。
 
 通知模式依序為啟用所有通知、僅失敗時通知、停用所有通知，預設只通知失敗。切換至啟用所有通知或僅失敗時通知時，通知測試會以 ephemeral 互動回覆顯示；正式簽到結果仍由 persisted outbox 嘗試 DM。使用者需在 Discord「使用者設定 → Content & Social → Direct messages」允許共同伺服器私人訊息。簽到與 DM 都可能因平台或 Discord 的外部狀態失敗。
 
-憑證目前以 `plain-v1` 格式保存於 owner-scoped JSON，僅由 `runtime/data/` 的 `0700` 目錄與 `0600` 檔案權限保護，尚未加密。備份 `runtime/data/` 等同備份所有使用者憑證，必須視為敏感資料限制存取；`format` 邊界只為未來人工導入加密格式保留，本版不會靜默 migration。
+憑證以 `aes-256-gcm-v1` 格式保存於 owner-scoped JSON，使用 `gameCheckIn.credentialEncryptionKey` 設定的 AES-256-GCM 主金鑰加密。每次寫入都使用新的隨機 IV，驗證資料會綁定 Discord 使用者、平台、revision 與更新時間；JSON、outbox 與日誌不保存憑證明文。啟動時會在 scheduler 建立前驗證全部加密憑證，金鑰錯誤或資料遭竄改會阻止 Bot 啟動，且不會輸出金鑰、密文或憑證。
+
+本版不讀取或遷移舊 `plain-v1` 憑證；舊值會視為未設定，升級前應由部署者離線清理殘留明文，之後請使用者重新輸入。初版不支援金鑰輪替；遺失或直接更換主金鑰會使既有憑證無法解密並阻止啟動。備份時應分別妥善保護 `runtime/data/` 與設定金鑰，避免存放於同一份可被同時取得的備份。
 
 ## 執行期路徑與 legacy 資料
 

@@ -59,6 +59,10 @@ const SKPORT_HEADERS = Object.freeze({
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:147.0) Gecko/20100101 Firefox/147.0',
     Referer: 'https://game.skport.com/',
     Origin: 'https://game.skport.com',
+    'Sec-Fetch-Dest': 'empty',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Site': 'same-site',
+    Priority: 'u=0',
     platform: '3',
     vName: '1.0.0'
 });
@@ -99,6 +103,10 @@ async function requestData(request, signal, label) {
         throw new GameCheckInAdapterError('PLATFORM_INVALID_RESPONSE', `${label}回傳了無法辨識的資料。`, { retryable: true });
     }
     return response.data;
+}
+
+function isResponseDataObject(value) {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function parseHoyolabCookie(value) {
@@ -291,6 +299,55 @@ function skportAuthError(code, message, validation = false) {
     return new GameCheckInAdapterError(code, message, { validation });
 }
 
+function skportResponseCode(data) {
+    const code = Number(data?.code);
+    return Number.isSafeInteger(code) ? code : null;
+}
+
+function isSkportAlreadySigned(data, gameID) {
+    const code = skportResponseCode(data);
+    const message = String(data?.message || '');
+    return (gameID === SKPORT_ENDFIELD.id && [1001, 10001].includes(code))
+        || /already|do not sign in again|(?:已|請勿|请勿|重複|重复).{0,6}(?:簽到|签到)/i.test(message);
+}
+
+function skportFailureMessage(data, gameID, httpStatus = null) {
+    const code = skportResponseCode(data);
+    if (gameID === SKPORT_ENDFIELD.id && code === 10002) {
+        return 'SKPORT 身分驗證失敗，請重新輸入 account_token（錯誤代碼 10002）。';
+    }
+    if (code !== null) return `SKPORT 拒絕了簽到請求（錯誤代碼 ${code}）。`;
+    return Number.isSafeInteger(httpStatus)
+        ? `SKPORT 拒絕了簽到請求（HTTP ${httpStatus}）。`
+        : 'SKPORT 拒絕了簽到請求。';
+}
+
+async function requestSkportAttendance(task, http, headers, signal) {
+    let response;
+    try {
+        // 終末地的簽章使用空字串，但參考 client 的 HTTP request 不傳送 payload。
+        response = await http.post(task.url, task.body || undefined, { headers, signal });
+    } catch (error) {
+        const normalized = normalizeRequestError(error, signal, `SKPORT ${task.game}`);
+        const status = Number(error?.response?.status);
+        if (!normalized.retryable && Number.isSafeInteger(status)) {
+            return {
+                data: isResponseDataObject(error.response?.data) ? error.response.data : {},
+                httpStatus: status
+            };
+        }
+        throw normalized;
+    }
+    if (!isResponseDataObject(response?.data)) {
+        throw new GameCheckInAdapterError(
+            'PLATFORM_INVALID_RESPONSE',
+            `SKPORT ${task.game}回傳了無法辨識的資料。`,
+            { retryable: true }
+        );
+    }
+    return { data: response.data, httpStatus: null };
+}
+
 async function authorizeSkport(value, { http, signal, validation = false } = {}) {
     if (!http?.get || !http?.post) throw new TypeError('SKPORT adapter 缺少 HTTP client');
     const accountToken = validateSkportToken(value);
@@ -418,28 +475,28 @@ async function runSkportCheckIn(value, options = {}) {
             timestamp
         };
         headers.sign = generateSkportSign(task.path, 'POST', headers, '', task.body, auth.token);
-        let data;
+        let attendance;
         try {
-            data = await requestData(
-                () => options.http.post(task.url, task.body || '', { headers, signal: options.signal }),
-                options.signal,
-                `SKPORT ${task.game}`
-            );
+            attendance = await requestSkportAttendance(task, options.http, headers, options.signal);
         } catch (error) {
             if (!(error instanceof GameCheckInAdapterError)) throw error;
             retryable ||= error.retryable;
             outcomes.push(outcome('skport', task.game, 'failure', error.message, task.account, task.gameID));
             continue;
         }
+        const { data, httpStatus } = attendance;
         if (Number(data.code) === 0 || String(data.message).toUpperCase() === 'OK') {
             outcomes.push(outcome('skport', task.game, 'success', '簽到成功。', task.account, task.gameID));
-        } else if (/already|已.{0,4}簽到/i.test(String(data.message || ''))) {
+        } else if (isSkportAlreadySigned(data, task.gameID)) {
             outcomes.push(outcome('skport', task.game, 'already', '今日已完成簽到。', task.account, task.gameID));
         } else if (Number(data.code) === 10000) {
             retryable = true;
             outcomes.push(outcome('skport', task.game, 'failure', 'SKPORT 短效 Token 無效，將重新授權後重試。', task.account, task.gameID));
         } else {
-            outcomes.push(outcome('skport', task.game, 'failure', 'SKPORT 拒絕了簽到請求。', task.account, task.gameID));
+            outcomes.push(outcome(
+                'skport', task.game, 'failure', skportFailureMessage(data, task.gameID, httpStatus),
+                task.account, task.gameID
+            ));
         }
     }
     return { platform: 'skport', retryable, outcomes };

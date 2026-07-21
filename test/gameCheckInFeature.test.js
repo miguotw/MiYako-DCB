@@ -19,6 +19,11 @@ const {
 } = require('../src/modules/event/game_check_in');
 const { GameCheckInAdapterError } = require('../util/gameCheckInAdapters');
 const { gameIDsForPlatform } = require('../util/gameCheckInCatalog');
+const {
+    CREDENTIAL_FORMAT,
+    GameCheckInCredentialCryptoError,
+    createGameCheckInCredentialCodec
+} = require('../util/gameCheckInCredentialCodec');
 const { createGameCheckInRepository } = require('../util/gameCheckInRepository');
 const { createValidConfigDocuments } = require('./helpers/configFixture');
 
@@ -28,6 +33,10 @@ const config = {
     commands: configDocuments['configCommands.yml'],
     modules: configDocuments['configModules.yml']
 };
+
+function createCredentialCodec() {
+    return createGameCheckInCredentialCodec(config.commands.gameCheckIn.credentialEncryptionKey);
+}
 
 function createInteraction({
     userID = '123456789012345678',
@@ -88,7 +97,10 @@ function createCommandFixture(t, overrides = {}) {
     const logs = [];
     const wakes = [];
     const now = overrides.now || (() => new Date(2026, 6, 21, 9, 0).getTime());
-    const repository = createGameCheckInRepository(store.gameCheckIn, { now });
+    const repository = createGameCheckInRepository(store.gameCheckIn, {
+        now,
+        credentialCodec: createCredentialCodec()
+    });
     const adapters = overrides.adapters || {
         validate: {
             async hoyolab(value) { validations.push(['hoyolab', value]); return { games: ['genshin'] }; },
@@ -328,10 +340,9 @@ test('Modal 分欄組合 HoYoLAB 憑證，唯讀驗證成功才保存且空白�
     await setup.command.modalSubmitHandlers.game_checkin_credentials_modal(submitted, setup.context);
     assert.deepEqual(setup.validations, [['hoyolab', 'ltoken_v2=secret; ltuid_v2=1;']]);
     assert.equal(submitted.calls.some(call => call[0] === 'dm'), false);
-    assert.equal(
-        (await setup.repository.readUser(submitted.user.id)).credentials.hoyolab.value,
-        'ltoken_v2=secret; ltuid_v2=1;'
-    );
+    const savedCredential = (await setup.repository.readUser(submitted.user.id)).credentials.hoyolab;
+    assert.equal(savedCredential.format, CREDENTIAL_FORMAT);
+    assert.doesNotMatch(JSON.stringify(await setup.context.store.gameCheckIn.read(submitted.user.id)), /secret|ltoken|ltuid/);
     assert.match(setup.logs.at(-1)[1], /遊戲簽到 miguo_tw 的 HoYoLAB 憑證已更新。/);
     assert.doesNotMatch(setup.logs.at(-1)[1], /secret|ltoken|ltuid/);
 
@@ -371,11 +382,12 @@ test('驗證錯誤保留舊憑證且不將秘密放入回覆', async t => {
     };
     const setup = createCommandFixture(t, { adapters });
     await setup.repository.setCredential('123456789012345678', 'hoyolab', 'old-secret');
+    const oldCredential = (await setup.repository.readUser('123456789012345678')).credentials.hoyolab;
     const interaction = createInteraction({
         customId: 'game_checkin_credentials_modal:hoyolab', ltokenV2: 'new-secret', ltuidV2: '123'
     });
     await setup.command.modalSubmitHandlers.game_checkin_credentials_modal(interaction, setup.context);
-    assert.equal((await setup.repository.readUser(interaction.user.id)).credentials.hoyolab.value, 'old-secret');
+    assert.deepEqual((await setup.repository.readUser(interaction.user.id)).credentials.hoyolab, oldCredential);
     const reply = JSON.stringify(interaction.calls.at(-1)[1]);
     assert.match(reply, /Cookie 已失效/);
     assert.doesNotMatch(reply, /new-secret|old-secret/);
@@ -569,7 +581,9 @@ test('啟動同步會辨識舊格式同 Guild 面板，只追蹤最新一個並�
         .every(button => button.data.disabled === true), true);
     assert.equal(edits.latest.at(-1).components[0].components
         .every(button => button.data.disabled === false), true);
-    const repository = createGameCheckInRepository(store.gameCheckIn);
+    const repository = createGameCheckInRepository(store.gameCheckIn, {
+        credentialCodec: createCredentialCodec()
+    });
     assert.deepEqual((await repository.listPanels()).map(panel => ({
         scopeType: panel.scopeType,
         scopeID: panel.scopeID,
@@ -581,12 +595,49 @@ test('啟動同步會辨識舊格式同 Guild 面板，只追蹤最新一個並�
     await coordinator.stop();
 });
 
+test('Coordinator 在 scheduler 建立前驗證全部 AES 憑證，錯誤金鑰會阻止啟動', async t => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'miyako-game-checkin-key-validation-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const store = createStoreRegistry({ dataRoot: root });
+    const repository = createGameCheckInRepository(store.gameCheckIn, {
+        credentialCodec: createCredentialCodec()
+    });
+    await repository.setCredential('123456789012345678', 'hoyolab', 'private-cookie');
+
+    const wrongKeyConfig = structuredClone(config);
+    wrongKeyConfig.commands.gameCheckIn.credentialEncryptionKey = '44'.repeat(32);
+    let scheduled = false;
+    const coordinator = createGameCheckInDeadlineCoordinator(wrongKeyConfig, {
+        logTools: { sendLog() {} }
+    });
+    await assert.rejects(() => coordinator.start({
+        store,
+        client: {},
+        scheduler: {
+            scheduleDeadline() {
+                scheduled = true;
+                return { reschedule() {}, async stop() {} };
+            }
+        }
+    }), error => {
+        assert.ok(error instanceof GameCheckInCredentialCryptoError);
+        assert.match(error.message, /123456789012345678.*hoyolab/);
+        assert.doesNotMatch(error.message, /private-cookie|44{10}/);
+        return true;
+    });
+    assert.equal(scheduled, false);
+    assert.equal(coordinator.wake(), false);
+});
+
 test('真實 repository 與 coordinator 可在重啟補跑後持久化結果及送出 failure-only DM', async t => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'miyako-game-checkin-coordinator-'));
     t.after(() => fs.rmSync(root, { recursive: true, force: true }));
     const store = createStoreRegistry({ dataRoot: root });
     const currentTime = Date.parse('2026-07-21T10:05:00Z');
-    const repository = createGameCheckInRepository(store.gameCheckIn, { now: () => currentTime });
+    const repository = createGameCheckInRepository(store.gameCheckIn, {
+        now: () => currentTime,
+        credentialCodec: createCredentialCodec()
+    });
     await repository.setCredential('123456789012345678', 'hoyolab', 'private-cookie');
 
     let descriptor;

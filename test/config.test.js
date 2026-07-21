@@ -17,7 +17,8 @@ const {
 const {
     createConfigFixture,
     createValidConfigDocuments,
-    removeConfigFixture
+    removeConfigFixture,
+    TEST_GAME_CHECK_IN_ENCRYPTION_KEY
 } = require('./helpers/configFixture');
 
 const originalConfigDirectory = process.env.MIYAKO_CONFIG_DIR;
@@ -61,6 +62,7 @@ test('loadConfig 回傳統一 camelCase 結構，空白外部憑證可停用輪�
         assert.equal(config.commands.packageTracking.trackTwToken, '');
         assert.equal(config.commands.packageTracking.maxActivePackages, 20);
         assert.equal(config.commands.gameCheckIn.checkInTime, '10:00');
+        assert.equal(config.commands.gameCheckIn.credentialEncryptionKey, TEST_GAME_CHECK_IN_ENCRYPTION_KEY);
         assert.deepEqual(config.commands.gameCheckIn.resultEmojis, {
             success: '✅', already: '⚠️', skipped: '⚠️', error: '⚠️'
         });
@@ -183,6 +185,48 @@ test('packageTracking.maxActivePackages 未填時預設 20，邊界 1 與 100 �
             removeConfigFixture(fixture.directory);
             _resetConfigCacheForTests();
         }
+    }
+});
+
+test('遊戲簽到加密金鑰啟用時必須是 32-byte hex，停用時可留空', () => {
+    for (const value of [TEST_GAME_CHECK_IN_ENCRYPTION_KEY, TEST_GAME_CHECK_IN_ENCRYPTION_KEY.toUpperCase()]) {
+        const documents = createValidConfigDocuments();
+        documents['configCommands.yml'].gameCheckIn.credentialEncryptionKey = value;
+        const fixture = useFixture({ documents });
+        try {
+            assert.equal(loadConfig().commands.gameCheckIn.credentialEncryptionKey, value);
+        } finally {
+            removeConfigFixture(fixture.directory);
+            _resetConfigCacheForTests();
+        }
+    }
+
+    for (const value of ['', 'a'.repeat(63), 'z'.repeat(64), undefined]) {
+        const documents = createValidConfigDocuments();
+        if (value === undefined) delete documents['configCommands.yml'].gameCheckIn.credentialEncryptionKey;
+        else documents['configCommands.yml'].gameCheckIn.credentialEncryptionKey = value;
+        const fixture = useFixture({ documents });
+        try {
+            assert.throws(() => loadConfig(), error => {
+                assert.ok(error instanceof ConfigError);
+                assert.match(error.message, /credentialEncryptionKey/);
+                if (typeof value === 'string' && value) assert.doesNotMatch(error.message, new RegExp(value));
+                return true;
+            });
+        } finally {
+            removeConfigFixture(fixture.directory);
+            _resetConfigCacheForTests();
+        }
+    }
+
+    const disabled = createValidConfigDocuments();
+    disabled['configCommands.yml'].gameCheckIn.enable = false;
+    disabled['configCommands.yml'].gameCheckIn.credentialEncryptionKey = '';
+    const fixture = useFixture({ documents: disabled });
+    try {
+        assert.equal(loadConfig().commands.gameCheckIn.credentialEncryptionKey, '');
+    } finally {
+        removeConfigFixture(fixture.directory);
     }
 });
 

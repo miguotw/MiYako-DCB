@@ -133,6 +133,9 @@ gameCheckIn:
   enable: true
   emoji: "🎮"
 
+  # 使用 `openssl rand -hex 32` 產生；此提示文字不可直接用於部署。
+  credentialEncryptionKey: "請使用 openssl rand -hex 32 產生並替換此文字"
+
   # 自動簽到結果中，各狀態標題使用的 Emoji。
   resultEmojis:
     success: "✅"

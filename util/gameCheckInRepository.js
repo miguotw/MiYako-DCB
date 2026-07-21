@@ -2,6 +2,11 @@
 
 const crypto = require('node:crypto');
 const {
+    CREDENTIAL_FORMAT,
+    GameCheckInCredentialCryptoError,
+    normalizeEncryptedCredential
+} = require('./gameCheckInCredentialCodec');
+const {
     enabledGameIDs,
     gameIDsForPlatform,
     getGameByID,
@@ -22,13 +27,7 @@ function assertPlatform(platform) {
 }
 
 function normalizeCredential(value) {
-    if (!value || value.format !== 'plain-v1' || typeof value.value !== 'string') return null;
-    return {
-        format: 'plain-v1',
-        value: value.value,
-        revision: Number.isSafeInteger(value.revision) && value.revision > 0 ? value.revision : 1,
-        updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : new Date(0).toISOString()
-    };
+    return normalizeEncryptedCredential(value);
 }
 
 function normalizeDaily(value) {
@@ -173,9 +172,13 @@ function maybeQueueNotification(store, userID, idFactory, now) {
 
 function createGameCheckInRepository(jsonRepository, {
     now = () => Date.now(),
-    idFactory = () => crypto.randomUUID()
+    idFactory = () => crypto.randomUUID(),
+    credentialCodec
 } = {}) {
     if (!jsonRepository) throw new TypeError('遊戲簽到 repository 缺少 JSON repository');
+    if (typeof credentialCodec?.encrypt !== 'function' || typeof credentialCodec?.decrypt !== 'function') {
+        throw new TypeError('遊戲簽到 repository 缺少憑證加解密 codec');
+    }
 
     async function readUser(userID) {
         return normalizeUserStore(await jsonRepository.read(String(userID)));
@@ -183,6 +186,25 @@ function createGameCheckInRepository(jsonRepository, {
 
     async function listUserIDs() {
         return (await jsonRepository.listKeys()).filter(key => key !== PANEL_INDEX_KEY);
+    }
+
+    async function validateStoredCredentials() {
+        for (const userID of await listUserIDs()) {
+            const raw = await jsonRepository.read(userID);
+            for (const platform of PLATFORMS) {
+                const credential = raw?.credentials?.[platform];
+                if (credential?.format !== CREDENTIAL_FORMAT) continue;
+                try {
+                    credentialCodec.decrypt(credential, { userID, platform });
+                } catch (error) {
+                    throw new GameCheckInCredentialCryptoError(
+                        `Discord 使用者 ${userID} 的 ${platform} 遊戲簽到憑證無法解密。`,
+                        { cause: error }
+                    );
+                }
+            }
+        }
+        return true;
     }
 
     async function savePanel(scopeValue, message) {
@@ -254,24 +276,32 @@ function createGameCheckInRepository(jsonRepository, {
 
     async function setCredential(userID, platform, rawValue) {
         assertPlatform(platform);
+        const normalizedUserID = String(userID);
         const value = String(rawValue || '').trim();
         let change;
-        const record = await jsonRepository.update(String(userID), current => {
+        const record = await jsonRepository.update(normalizedUserID, current => {
             const store = normalizeUserStore(current);
             const previous = store.credentials[platform];
             const wasActive = activePlatforms(store).length > 0;
-            const changed = value ? previous?.value !== value : Boolean(previous);
+            const previousValue = previous
+                ? credentialCodec.decrypt(previous, { userID: normalizedUserID, platform })
+                : null;
+            const changed = value ? previousValue !== value : Boolean(previous);
             if (!changed) {
                 change = { changed: false, firstActive: false, disabled: !value };
                 return store;
             }
 
-            store.credentials[platform] = value ? {
-                format: 'plain-v1',
-                value,
-                revision: (previous?.revision || 0) + 1,
-                updatedAt: new Date(now()).toISOString()
-            } : null;
+            const revision = (previous?.revision || 0) + 1;
+            const updatedAt = new Date(now()).toISOString();
+            store.credentials[platform] = value
+                ? credentialCodec.encrypt(value, {
+                    userID: normalizedUserID,
+                    platform,
+                    revision,
+                    updatedAt
+                })
+                : null;
             if (store.daily) {
                 store.daily.generation += 1;
                 delete store.daily.platforms[platform];
@@ -357,7 +387,10 @@ function createGameCheckInRepository(jsonRepository, {
                 date,
                 generation: daily.generation,
                 credentialRevision: credential.revision,
-                credential: credential.value,
+                credential: credentialCodec.decrypt(credential, {
+                    userID: String(userID),
+                    platform
+                }),
                 gameIDs,
                 attempts
             };
@@ -532,6 +565,7 @@ function createGameCheckInRepository(jsonRepository, {
     return Object.freeze({
         readUser,
         listUserIDs,
+        validateStoredCredentials,
         savePanel,
         listPanels,
         removePanel,

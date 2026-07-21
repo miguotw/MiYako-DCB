@@ -3,6 +3,7 @@
 const { EmbedBuilder } = require('discord.js');
 const { createLogTools } = require('../../../core/sendLog');
 const { createGameCheckInAdapters } = require('../../../util/gameCheckInAdapters');
+const { createGameCheckInCredentialCodec } = require('../../../util/gameCheckInCredentialCodec');
 const { createGameCheckInRepository } = require('../../../util/gameCheckInRepository');
 const {
     dateKeyAt,
@@ -280,19 +281,27 @@ function createGameCheckInDeadlineCoordinator(config, {
             throw new Error('遊戲簽到 feature 缺少 deadline scheduler context。');
         }
         if (!nextContext.store?.gameCheckIn) throw new Error('遊戲簽到 feature 缺少 repository context。');
-        context = nextContext;
-        repository = repositoryFactory(context.store.gameCheckIn, { now });
-        handle = context.scheduler.scheduleDeadline({
-            name: 'gameCheckIn.deadline',
-            deadlineAt: now(),
-            timeoutMs: 30 * 60 * 1000,
-            run: reconcile
-        });
-        sendLog(
-            context.client,
-            `✅ 遊戲簽到排程已啟動，每日 ${settings.checkInTime} 執行一次。`
-        );
-        return stop;
+        try {
+            const credentialCodec = createGameCheckInCredentialCodec(settings.credentialEncryptionKey);
+            repository = repositoryFactory(nextContext.store.gameCheckIn, { now, credentialCodec });
+            await repository.validateStoredCredentials?.();
+            context = nextContext;
+            handle = context.scheduler.scheduleDeadline({
+                name: 'gameCheckIn.deadline',
+                deadlineAt: now(),
+                timeoutMs: 30 * 60 * 1000,
+                run: reconcile
+            });
+            sendLog(
+                context.client,
+                `✅ 遊戲簽到排程已啟動，每日 ${settings.checkInTime} 執行一次。`
+            );
+            return stop;
+        } catch (error) {
+            repository = null;
+            context = null;
+            throw error;
+        }
     }
 
     function wake() {

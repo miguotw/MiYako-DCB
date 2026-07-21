@@ -19,6 +19,7 @@ const {
     createGameCheckInAdapters
 } = require('../../util/gameCheckInAdapters');
 const { gamesForPlatform, getGameByID } = require('../../util/gameCheckInCatalog');
+const { createGameCheckInCredentialCodec } = require('../../util/gameCheckInCredentialCodec');
 const { createGameCheckInRepository } = require('../../util/gameCheckInRepository');
 const { dateKeyAt, nextCheckInEpoch } = require('../../util/gameCheckInSchedule');
 const {
@@ -43,6 +44,7 @@ function createCommand(config, {
     const { errorReply, validationReply } = createReplyTools(config);
     const { sendLog } = logTools;
     const repositoryCache = new WeakMap();
+    let credentialCodec = null;
     const color = config.embed.color.default;
     const emoji = config.commands.gameCheckIn.emoji;
     const toggleEmojis = config.commands.gameCheckIn.toggleEmojis;
@@ -50,7 +52,12 @@ function createCommand(config, {
     function repository(context) {
         const json = context?.store?.gameCheckIn;
         if (!json) throw new Error('遊戲簽到功能缺少 gameCheckIn repository context。');
-        if (!repositoryCache.has(json)) repositoryCache.set(json, repositoryFactory(json));
+        if (!repositoryCache.has(json)) {
+            credentialCodec ||= createGameCheckInCredentialCodec(
+                config.commands.gameCheckIn.credentialEncryptionKey
+            );
+            repositoryCache.set(json, repositoryFactory(json, { credentialCodec }));
+        }
         return repositoryCache.get(json);
     }
 

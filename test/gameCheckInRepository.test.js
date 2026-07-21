@@ -8,6 +8,11 @@ const test = require('node:test');
 const { createJsonRepository } = require('../core/jsonRepository');
 const { gameIDsForPlatform } = require('../util/gameCheckInCatalog');
 const {
+    CREDENTIAL_FORMAT,
+    GameCheckInCredentialCryptoError,
+    createGameCheckInCredentialCodec
+} = require('../util/gameCheckInCredentialCodec');
+const {
     ATTEMPT_LEASE_MS,
     SIGN_RETRY_DELAYS_MS,
     createGameCheckInRepository
@@ -19,14 +24,17 @@ function fixture(t) {
     let currentTime = Date.parse('2026-07-21T02:00:00.000Z');
     let sequence = 0;
     const json = createJsonRepository({ directory: root });
+    const credentialCodec = createGameCheckInCredentialCodec('22'.repeat(32));
     const repository = createGameCheckInRepository(json, {
         now: () => currentTime,
-        idFactory: () => `id-${++sequence}`
+        idFactory: () => `id-${++sequence}`,
+        credentialCodec
     });
     return {
         root,
         json,
         repository,
+        credentialCodec,
         now: () => currentTime,
         advance(milliseconds) { currentTime += milliseconds; }
     };
@@ -50,9 +58,10 @@ test('遊戲簽到 repository 以使用者隔離憑證、採 failure-only 預設
     const added = await setup.repository.setCredential('123456789012345678', 'hoyolab', 'cookie-secret');
     assert.equal(added.changed, true);
     assert.equal(added.firstActive, true);
-    assert.equal(added.record.credentials.hoyolab.format, 'plain-v1');
+    assert.equal(added.record.credentials.hoyolab.format, CREDENTIAL_FORMAT);
     assert.equal(added.record.credentials.hoyolab.revision, 1);
-    assert.equal(added.record.credentials.hoyolab.value, 'cookie-secret');
+    assert.equal(added.record.credentials.hoyolab.value, undefined);
+    assert.doesNotMatch(JSON.stringify(await setup.json.read('123456789012345678')), /cookie-secret/);
 
     const unchanged = await setup.repository.setCredential('123456789012345678', 'hoyolab', 'cookie-secret');
     assert.equal(unchanged.changed, false);
@@ -60,6 +69,10 @@ test('遊戲簽到 repository 以使用者隔離憑證、採 failure-only 預設
     assert.equal(secondPlatform.firstActive, false);
     await setup.repository.setCredential('222222222222222222', 'hoyolab', 'other-secret');
     assert.equal((await setup.repository.readUser('222222222222222222')).credentials.skport, null);
+    const reservation = await setup.repository.reservePlatform(
+        '123456789012345678', 'hoyolab', '2026-07-21'
+    );
+    assert.equal(reservation.credential, 'cookie-secret');
 
     assert.equal((await setup.repository.cycleNotification('123456789012345678')).mode, 'off');
     assert.equal((await setup.repository.cycleNotification('123456789012345678')).mode, 'all');
@@ -74,6 +87,61 @@ test('遊戲簽到 repository 以使用者隔離憑證、採 failure-only 預設
         assert.equal(fs.statSync(path.join(setup.root, '123456789012345678.json')).mode & 0o777, 0o600);
     }
     await assert.rejects(() => setup.repository.setCredential('123456789012345678', 'unknown', 'x'), /不支援/);
+});
+
+test('舊 plain-v1 憑證視為未設定且不會在讀取或啟動驗證時自動改寫', async t => {
+    const setup = fixture(t);
+    const userID = '123456789012345678';
+    await setup.json.update(userID, () => ({
+        credentials: {
+            hoyolab: {
+                format: 'plain-v1', value: 'legacy-cookie', revision: 1,
+                updatedAt: '2026-07-21T00:00:00.000Z'
+            },
+            skport: null
+        }
+    }));
+
+    assert.equal((await setup.repository.readUser(userID)).credentials.hoyolab, null);
+    assert.equal(await setup.repository.validateStoredCredentials(), true);
+    assert.equal((await setup.json.read(userID)).credentials.hoyolab.value, 'legacy-cookie');
+    assert.deepEqual(await setup.repository.listDuePlatforms('2026-07-21', setup.now() - 1), []);
+});
+
+test('啟動驗證拒絕錯誤金鑰、損壞 envelope，且錯誤不包含金鑰、密文或明文', async t => {
+    const setup = fixture(t);
+    const userID = '123456789012345678';
+    await setup.repository.setCredential(userID, 'hoyolab', 'private-cookie');
+    assert.equal(await setup.repository.validateStoredCredentials(), true);
+
+    const wrongKey = createGameCheckInRepository(setup.json, {
+        credentialCodec: createGameCheckInCredentialCodec('33'.repeat(32))
+    });
+    await assert.rejects(() => wrongKey.validateStoredCredentials(), error => {
+        assert.ok(error instanceof GameCheckInCredentialCryptoError);
+        assert.match(error.message, new RegExp(`${userID}.*hoyolab`));
+        assert.doesNotMatch(error.message, /private-cookie|22{10}|33{10}/);
+        return true;
+    });
+
+    const encrypted = (await setup.json.read(userID)).credentials.hoyolab;
+    await setup.json.update(userID, current => ({
+        ...current,
+        credentials: {
+            ...current.credentials,
+            hoyolab: { ...encrypted, authTag: '' }
+        }
+    }));
+    await assert.rejects(() => setup.repository.validateStoredCredentials(), error => {
+        assert.ok(error instanceof GameCheckInCredentialCryptoError);
+        assert.doesNotMatch(error.message, new RegExp(encrypted.ciphertext.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+        return true;
+    });
+});
+
+test('repository 缺少憑證 codec 時拒絕建立', async t => {
+    const setup = fixture(t);
+    assert.throws(() => createGameCheckInRepository(setup.json), /缺少憑證加解密 codec/);
 });
 
 test('主面板 repository 每個 Guild 或 DM scope 僅保留最新 locator 並可收斂舊格式', async t => {
@@ -212,7 +280,7 @@ test('全部遊戲停用時不建立 reservation 或空白通知', async t => {
     assert.equal(await setup.repository.earliestPending(date), null);
     await setup.repository.finalizeReady(date);
     assert.deepEqual(await setup.repository.listDueOutbox(), []);
-    assert.equal((await setup.repository.readUser(userID)).credentials.hoyolab.value, 'cookie');
+    assert.equal((await setup.repository.readUser(userID)).credentials.hoyolab.format, CREDENTIAL_FORMAT);
 });
 
 test('當日尚未開始的平台採用最新開關，已開始的平台維持原快照', async t => {
