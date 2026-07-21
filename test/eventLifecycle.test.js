@@ -12,6 +12,7 @@ const { createLogger } = require('../core/logger');
 const { createStoreRegistry } = require('../core/storeRegistry');
 const { createFeature } = require('../src/features/factory');
 const { createManifest: createDataCollectionManifest } = require('../src/features/dataCollection');
+const { createManifest: createGameCheckInManifest } = require('../src/features/gameCheckIn');
 const { createManifest: createPresenceManifest } = require('../src/features/presence');
 const { createManifest: createRaffleManifest } = require('../src/features/raffle');
 const { createInitializer: createMemberLifecycle } = require('../src/modules/event/member_lifecycle');
@@ -173,7 +174,7 @@ test('deadline feature manifest 可在空 repository 啟動並反向停止', asy
             }
         }
     };
-    for (const manifest of [createDataCollectionManifest(config), createRaffleManifest(config)]) {
+    for (const manifest of [createDataCollectionManifest(config), createRaffleManifest(config), createGameCheckInManifest(config)]) {
         await manifest.start(context);
         await manifest.stop(context);
     }

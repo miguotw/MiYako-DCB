@@ -2,7 +2,8 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { loadConfig } = require('../core/config');
 const { createLogTools } = require('../core/sendLog');
-const { sanitizeLogText, sendLog } = createLogTools(loadConfig());
+const config = loadConfig();
+const { sanitizeLogText, sendLog } = createLogTools(config);
 
 test('Logger 清理 code fence、控制字元、Token 與呼叫端敏感值', () => {
     const token = 'abcdefghijklmnopqrstuvwx.abcdef.abcdefghijklmnopqrstuvwxyz';
@@ -13,8 +14,9 @@ test('Logger 清理 code fence、控制字元、Token 與呼叫端敏感值', ()
 });
 
 test('Logger 遮罩 Authorization、access token 與 URL token 參數', () => {
-    const output = sanitizeLogText('Authorization: Bearer abcdef access_token="secret-value" https://x.test?a=1&token=url-secret');
-    assert.doesNotMatch(output, /abcdef|secret-value|url-secret/);
+    const encryptionKey = config.commands.gameCheckIn.credentialEncryptionKey;
+    const output = sanitizeLogText(`Authorization: Bearer abcdef access_token="secret-value" https://x.test?a=1&token=url-secret ${encryptionKey}`);
+    assert.doesNotMatch(output, new RegExp(`abcdef|secret-value|url-secret|${encryptionKey}`));
 });
 
 test('Discord Logger 固定停用 mentions', async () => {

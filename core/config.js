@@ -51,6 +51,13 @@ const messageList = label => z.array(trimmedText(`${label}內容`))
     .min(1, `${label}至少需要一筆內容`);
 const emoji = label => trimmedText(label, 100);
 const commandEnable = () => z.boolean().default(true);
+const dailyTime = label => z.string()
+    .trim()
+    .regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, `${label}必須使用 HH:mm 格式`);
+const aes256Key = label => z.string()
+    .trim()
+    .refine(value => value === '' || /^[0-9a-f]{64}$/i.test(value), `${label}必須是 64 字元十六進位字串`)
+    .default('');
 
 const commandName = label => trimmedText(label, 32)
     .refine(value => DISCORD_COMMAND_NAME.test(value), `${label}不符合 Discord Slash Command 名稱規則`)
@@ -151,6 +158,30 @@ const commandsConfigSchema = strictObject({
         historyStatusMaxLength: integerRange('packageTracking.historyStatusMaxLength', 1, 1024),
         archiveAfterDays: integerRange('packageTracking.archiveAfterDays', 1, 3650),
         maxActivePackages: integerRange('packageTracking.maxActivePackages', 1, 100).default(20)
+    }),
+    gameCheckIn: strictObject({
+        enable: commandEnable(),
+        emoji: emoji('gameCheckIn.emoji'),
+        credentialEncryptionKey: aes256Key('gameCheckIn.credentialEncryptionKey'),
+        resultEmojis: strictObject({
+            success: emoji('gameCheckIn.resultEmojis.success'),
+            already: emoji('gameCheckIn.resultEmojis.already'),
+            skipped: emoji('gameCheckIn.resultEmojis.skipped'),
+            error: emoji('gameCheckIn.resultEmojis.error')
+        }).default({ success: '🟢', already: '🟡', skipped: '🟠', error: '🔴' }),
+        toggleEmojis: strictObject({
+            enabled: emoji('gameCheckIn.toggleEmojis.enabled'),
+            disabled: emoji('gameCheckIn.toggleEmojis.disabled')
+        }).default({ enabled: '✅', disabled: '⏸️' }),
+        checkInTime: dailyTime('gameCheckIn.checkInTime')
+    }).superRefine((gameCheckIn, context) => {
+        if (gameCheckIn.enable && !gameCheckIn.credentialEncryptionKey) {
+            context.addIssue({
+                code: 'custom',
+                path: ['credentialEncryptionKey'],
+                message: '啟用遊戲簽到時必須設定 64 字元十六進位加密金鑰'
+            });
+        }
     }),
     ipQuery: strictObject({ enable: commandEnable(), emoji: emoji('ipQuery.emoji') }),
     minecraft: strictObject({

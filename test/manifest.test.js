@@ -21,7 +21,7 @@ function disabledLoggerConfig() {
 const FEATURE_FILES = [
     'about', 'hitokoto', 'ipQuery', 'minecraft', 'ping', 'unixTimestamp',
     'announcement', 'messageDelete', 'userInfo', 'music', 'packageTracking',
-    'dataCollection', 'raffle', 'temporaryVoice', 'twitchStream', 'keywords',
+    'gameCheckIn', 'dataCollection', 'raffle', 'temporaryVoice', 'twitchStream', 'keywords',
     'memberLifecycle', 'memberLogger', 'messageLogger', 'roleLogger', 'voiceLogger', 'presence'
 ];
 
@@ -37,6 +37,7 @@ const COMMAND_FEATURES = new Map([
     ['userInfo', config => config.commands.userInfo],
     ['music', config => config.commands.music],
     ['packageTracking', config => config.commands.packageTracking],
+    ['gameCheckIn', config => config.commands.gameCheckIn],
     ['dataCollection', config => config.commands.dataCollection],
     ['raffle', config => config.commands.raffle],
     ['temporaryVoice', config => config.modules.temporaryVoice],
@@ -76,7 +77,7 @@ test('runtime/deploy 共用 catalog 的 command JSON 與 enabled command descrip
     assert.equal(catalog.commandJson.length, catalog.commands.length);
     assert.deepEqual(
         catalog.commandJson.map(command => command.name),
-        ['關於みやこ', '一言', '網際協定位址資訊', '麥塊', '延遲', '時間戳', '音樂', '物流追蹤', config.startup.adminCommandName]
+        ['關於みやこ', '一言', '網際協定位址資訊', '麥塊', '延遲', '時間戳', '音樂', '物流追蹤', '遊戲簽到', config.startup.adminCommandName]
     );
 
     const admin = catalog.commands.find(command => command.name === config.startup.adminCommandName);
@@ -109,6 +110,18 @@ test('實際 enabled manifests 推導出預設最小 Gateway Intents 聯集', ()
 
     assert.deepEqual(new Set(catalog.intents), new Set(minimumIntents));
     assert.equal(catalog.intents.includes(GatewayIntentBits.DirectMessages), false);
+});
+
+test('遊戲簽到 manifest 註冊遊戲設定 exact 與 toggle prefix 路由', () => {
+    const config = loadConfig();
+    const manifest = createFeatureManifests(config).find(item => item.name === 'gameCheckIn');
+    const games = manifest.interactions.find(route => route.kind === 'button' && route.id === 'game_checkin_games');
+    const toggle = manifest.interactions.find(route => route.kind === 'button'
+        && route.id === 'game_checkin_game_toggle');
+    assert.equal(games.match, 'exact');
+    assert.equal(toggle.match, 'prefix');
+    assert.equal(games.access, 'public');
+    assert.equal(toggle.access, 'public');
 });
 
 test('停用四種 logger 後不會加入 manifest 或額外 Gateway Intent', () => {
@@ -154,7 +167,7 @@ test('停用四種 logger 後不會加入 manifest 或額外 Gateway Intent', ()
     assert.equal(isolatedCatalog.intents.includes(disabledOnlyIntent), false);
 });
 
-test('15 個指令開關會停用整個 feature、互動、啟動與 intents', () => {
+test('16 個指令開關會停用整個 feature、互動、啟動與 intents', () => {
     for (const [featureName, selectConfig] of COMMAND_FEATURES) {
         const config = structuredClone(loadConfig());
         selectConfig(config).enable = false;

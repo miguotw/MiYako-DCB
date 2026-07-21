@@ -128,6 +128,30 @@ packageTracking:
 
 
 #-------------------------------
+# /遊戲簽到 相關設定：
+gameCheckIn:
+  enable: true
+  emoji: "🎮"
+
+  # 使用 `openssl rand -hex 32` 產生；此提示文字不可直接用於部署。
+  credentialEncryptionKey: "請使用 openssl rand -hex 32 產生並替換此文字"
+
+  # 自動簽到結果中，各狀態標題使用的 Emoji。
+  resultEmojis:
+    success: "✅"
+    already: "⚠️"
+    skipped: "⚠️"
+    error: "⚠️"
+
+  # 啟用/停用簽到 Embed 圖例中，啟用與停用狀態使用的 Emoji。
+  toggleEmojis:
+    enabled: "🟢"
+    disabled: "🔴"
+
+  # 每日自動簽到時間，格式為 HH:mm。
+  checkInTime: "04:00"
+
+#-------------------------------
 # /網際協定位址資訊 相關設定：
 ipQuery:
   enable: true
