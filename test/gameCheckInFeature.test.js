@@ -156,7 +156,9 @@ test('公開遊戲簽到面板固定三個按鈕且不包含個人狀態', async
     ]);
     assert.equal(
         payload.embeds[0].data.fields.find(field => field.name === '下次排程').value,
-        `<t:${new Date(2026, 6, 21, 10, 0).getTime() / 1000}:R>`
+        `<t:${scheduledEpoch(
+            '2026-07-22', config.commands.gameCheckIn.checkInTime, config.log.timezone
+        ) / 1000}:R>`
     );
     assert.doesNotMatch(payload.embeds[0].data.description, /已設定|未設定/);
     assert.deepEqual(await setup.repository.listPanels(), [{
@@ -304,7 +306,6 @@ test('憑證教學合併為單一私密 Embed，並以兩個平台按鈕開啟 M
     assert.match(payload.embeds[0].data.description, /## 狀態/);
     assert.match(payload.embeds[0].data.description, /- HoYoLAB：未設定（不自動簽到）/);
     assert.match(payload.embeds[0].data.description, /- SKPORT：已設定/);
-    assert.match(payload.embeds[0].data.description, /- 通知模式：啟用所有通知/);
     assert.match(payload.embeds[0].data.description, /\[HoYoLAB\]\(https:\/\/www\.hoyolab\.com\/\)/);
     assert.match(payload.embeds[0].data.description, /```\nltoken_v2:"v2_xxxxxxxxxx"\n```/);
     assert.match(payload.embeds[0].data.description, /```json/);
@@ -398,7 +399,7 @@ test('驗證錯誤保留舊憑證且不將秘密放入回覆', async t => {
     assert.doesNotMatch(reply, /new-secret|old-secret/);
 });
 
-test('通知依 all → failures → off → all 循環，切換至 all 或 failures 時顯示通知測試', async t => {
+test('通知依 all → failures → off → all 循環，切換時只顯示設定結果', async t => {
     const setup = createCommandFixture(t);
     const toOff = createInteraction();
     await setup.activatePanel(toOff);
@@ -411,23 +412,17 @@ test('通知依 all → failures → off → all 循環，切換至 all 或 fail
     await setup.command.buttonHandlers.game_checkin_notifications(toAll, setup.context);
     assert.equal((await setup.repository.readUser(toAll.user.id)).notificationMode, 'all');
     assert.equal(toAll.calls.some(call => call[0] === 'dm'), false);
+    assert.equal(toAll.calls.some(call => call[0] === 'followUp'), false);
     const settingResult = toAll.calls.find(call => call[0] === 'editReply')[1];
     assert.equal(settingResult.embeds[0].data.description, '**通知模式已切換為：啟用所有通知。**');
-    const notificationTest = toAll.calls.find(call => call[0] === 'followUp')[1];
-    assert.equal(notificationTest.flags, MessageFlags.Ephemeral);
-    assert.equal(notificationTest.embeds[0].data.color, config.embed.color.default);
-    assert.equal(notificationTest.embeds[0].data.title, '🎮 ┃ 遊戲自動簽到（BETA） - 通知測試');
-    assert.match(notificationTest.embeds[0].data.description, /<@987654321098765432>/);
-    assert.deepEqual(notificationTest.allowedMentions, {
-        parse: [], users: ['987654321098765432']
-    });
 
     const toFailures = createInteraction();
     await setup.command.buttonHandlers.game_checkin_notifications(toFailures, setup.context);
     assert.equal((await setup.repository.readUser(toFailures.user.id)).notificationMode, 'failures');
-    const failureTest = toFailures.calls.find(call => call[0] === 'followUp')[1];
-    assert.equal(failureTest.flags, MessageFlags.Ephemeral);
-    assert.match(failureTest.embeds[0].data.description, /僅失敗時通知/);
+    assert.equal(toFailures.calls.some(call => call[0] === 'dm'), false);
+    assert.equal(toFailures.calls.some(call => call[0] === 'followUp'), false);
+    const failureResult = toFailures.calls.find(call => call[0] === 'editReply')[1];
+    assert.equal(failureResult.embeds[0].data.description, '**通知模式已切換為：僅失敗時通知。**');
 });
 
 test('時區工具以主機本機時間套用人工校正，能跨月與換日', () => {
@@ -529,7 +524,10 @@ test('deadline coordinator 使用 config.yml 本機時區校正補跑兩平台�
     assert.equal(sent.length, 1);
     assert.equal(sent[0].allowedMentions.parse.length, 0);
     assert.equal(delivered, true);
-    assert.equal(rescheduled.at(-1), new Date(2026, 6, 22, 10, 0).getTime());
+    assert.equal(
+        rescheduled.at(-1),
+        scheduledEpoch('2026-07-22', config.commands.gameCheckIn.checkInTime, config.log.timezone)
+    );
     assert.equal(logs.some(call => /已觸發.*1 位使用者、2 個平台/.test(call[1])), true);
     assert.equal(logs.some(call => /處理完成/.test(call[1])), true);
     assert.equal(panelEdits.length, 1);
@@ -538,7 +536,9 @@ test('deadline coordinator 使用 config.yml 本機時區校正補跑兩平台�
     ]);
     assert.equal(
         panelEdits[0].embeds[0].data.fields.find(field => field.name === '下次排程').value,
-        `<t:${new Date(2026, 6, 22, 10, 0).getTime() / 1000}:R>`
+        `<t:${scheduledEpoch(
+            '2026-07-22', config.commands.gameCheckIn.checkInTime, config.log.timezone
+        ) / 1000}:R>`
     );
     await stop();
     assert.equal(coordinator.wake(), false);

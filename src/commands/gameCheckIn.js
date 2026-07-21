@@ -224,23 +224,6 @@ function createCommand(config, {
             .setDescription(description);
     }
 
-    async function sendNotificationTest(interaction, mode) {
-        const botID = String(interaction.client.user?.id || '');
-        const botName = botID ? `<@${botID}>` : '目前的機器人';
-        const payload = {
-            embeds: [new EmbedBuilder()
-                .setColor(config.embed.color.default)
-                .setTitle(`${emoji} ┃ 遊戲自動簽到（BETA） - 通知測試`)
-                .setDescription([
-                    `**目前通知模式：${MODE_NAMES[mode]}**`,
-                    `這是由 ${botName} 發送的遊戲自動簽到通知測試。`
-                ].join('\n'))],
-            flags: MessageFlags.Ephemeral,
-            allowedMentions: { parse: [], users: botID ? [botID] : [] }
-        };
-        await interaction.followUp(payload);
-    }
-
     async function showCredentialGuide(interaction, context) {
         const record = await repository(context).readUser(interaction.user.id);
         await interaction.reply({
@@ -325,11 +308,9 @@ function createCommand(config, {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         try {
             const updated = await repository(context).cycleNotification(interaction.user.id);
-            const needsTest = updated.mode !== 'off';
             await interaction.editReply({
                 embeds: [createResultEmbed('通知設定完成', `**通知模式已切換為：${MODE_NAMES[updated.mode]}。**`)]
             });
-            if (needsTest) await sendNotificationTest(interaction, updated.mode);
         } catch (error) {
             return errorReply(interaction, error, { context: '切換遊戲簽到通知模式' });
         }
@@ -376,8 +357,7 @@ function createCommand(config, {
         createPanelEmbed,
         createPanelRow: createGameCheckInPanelRow,
         panelScope,
-        requireCurrentPanel,
-        sendNotificationTest
+        requireCurrentPanel
     };
     return command;
 }
