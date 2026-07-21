@@ -19,6 +19,8 @@ const {
     createGameCheckInAdapters
 } = require('../../util/gameCheckInAdapters');
 const { createGameCheckInRepository } = require('../../util/gameCheckInRepository');
+const { nextCheckInEpoch } = require('../../util/gameCheckInSchedule');
+const { createGameCheckInPanelEmbed } = require('../../util/gameCheckInViews');
 
 const PLATFORM_NAMES = Object.freeze({ hoyolab: 'HoYoLAB', skport: 'SKPORT' });
 const MODE_NAMES = Object.freeze({
@@ -29,10 +31,12 @@ const MODE_NAMES = Object.freeze({
 
 function createCommand(config, {
     adapters = createGameCheckInAdapters(),
-    repositoryFactory = createGameCheckInRepository
+    logTools = createLogTools(config),
+    repositoryFactory = createGameCheckInRepository,
+    now = () => Date.now()
 } = {}) {
     const { errorReply, validationReply } = createReplyTools(config);
-    const { sendLog } = createLogTools(config);
+    const { sendLog } = logTools;
     const repositoryCache = new WeakMap();
     const color = config.embed.color.default;
     const emoji = config.commands.gameCheckIn.emoji;
@@ -45,19 +49,12 @@ function createCommand(config, {
     }
 
     function createPanelEmbed() {
-        return new EmbedBuilder()
-            .setColor(color)
-            .setTitle(`${emoji} ┃ 遊戲自動簽到`)
-            .setDescription([
-                '設定 HoYoLAB／SKPORT 憑證後，機器人會每日自動為已綁定的支援遊戲簽到。',
-                '',
-                '**支援遊戲**',
-                'HoYoLAB：原神、崩壞：星穹鐵道、崩壞 3、未定事件簿、絕區零',
-                'SKPORT：明日方舟（繁中服）、明日方舟：終末地',
-                '',
-                '憑證與個人設定只會在私密互動中處理；請勿將憑證張貼到頻道或交給他人。',
-                '通知會嘗試透過 DM 傳送，請確認 Discord 允許共同伺服器成員傳送私人訊息。'
-            ].join('\n'));
+        const nextTriggerAt = nextCheckInEpoch(
+            now(),
+            config.commands.gameCheckIn.checkInTime,
+            config.log.timezone
+        );
+        return createGameCheckInPanelEmbed(config, nextTriggerAt);
     }
 
     function createPanelRow() {
@@ -77,7 +74,7 @@ function createCommand(config, {
         const status = platform => record.credentials[platform] ? '已設定' : '未設定（不自動簽到）';
         return new EmbedBuilder()
             .setColor(color)
-            .setTitle('遊戲自動簽到 - 輸入/更新憑證')
+            .setTitle(`${emoji} ┃ 遊戲自動簽到（BETA） - 輸入/更新憑證`)
             .setDescription([
                 '## 狀態',
                 `- HoYoLAB：${status('hoyolab')}`,
@@ -100,7 +97,7 @@ function createCommand(config, {
                 '123456789',
                 '```',
                 '-# Cookie 為 HttpOnly 時無法用 document.cookie 取得，請從 Cookies 表格複製。',
-                '### SKPORT 帳號 token 取得方式',
+                '### SKPORT 帳號 Token 取得方式',
                 '1. 使用瀏覽器登入 [Gryphline](https://user.gryphline.com/) 。',
                 '2. 使用瀏覽器開啟 https://web-api.gryphline.com/cookie_store/account_token 。',
                 '3. 畫面會顯示類似以下 JSON，只複製 `data.content` 的值。',
@@ -168,21 +165,22 @@ function createCommand(config, {
             .setDescription(description);
     }
 
-    async function testDirectMessage(interaction, mode) {
+    async function sendNotificationTest(interaction, mode) {
+        const botID = String(interaction.client.user?.id || '');
+        const botName = botID ? `<@${botID}>` : '目前的機器人';
         const payload = {
             embeds: [new EmbedBuilder()
-                .setColor(config.embed.color.success)
-                .setTitle(`${emoji} ┃ 遊戲簽到通知測試`)
-                .setDescription(`目前通知模式：**${MODE_NAMES[mode]}**\n這則訊息表示機器人目前可以傳送 DM 給你。`)],
-            allowedMentions: { parse: [] }
+                .setColor(config.embed.color.default)
+                .setTitle(`${emoji} ┃ 遊戲自動簽到（BETA） - 通知測試`)
+                .setDescription([
+                    `**目前通知模式：${MODE_NAMES[mode]}**`,
+                    `這是由 ${botName} 發送的遊戲自動簽到通知測試。`,
+                    '正式簽到結果會嘗試透過 DM 傳送。'
+                ].join('\n'))],
+            flags: MessageFlags.Ephemeral,
+            allowedMentions: { parse: [], users: botID ? [botID] : [] }
         };
-        try {
-            await interaction.user.send(payload);
-            return true;
-        } catch {
-            sendLog(interaction.client, '⚠️ 遊戲簽到通知測試 DM 無法送達。', 'WARN');
-            return false;
-        }
+        await interaction.followUp(payload);
     }
 
     async function showCredentialGuide(interaction, context) {
@@ -217,7 +215,12 @@ function createCommand(config, {
             await interaction.editReply({
                 embeds: [createResultEmbed('憑證設定完成', `${PLATFORM_NAMES[platform]} 憑證${action}。`)]
             });
-            sendLog(interaction.client, `🎮 遊戲簽到 ${PLATFORM_NAMES[platform]} 憑證已${value ? '更新' : '停用'}。`);
+            const username = interaction.user?.username || interaction.user?.tag
+                || String(interaction.user?.id || '未知使用者');
+            sendLog(
+                interaction.client,
+                `🎮 遊戲簽到 ${username} 的 ${PLATFORM_NAMES[platform]} 憑證已${value ? '更新' : '停用'}。`
+            );
         } catch (error) {
             if (error instanceof GameCheckInAdapterError) {
                 return validationReply(interaction, `**${error.message}**`, { method: 'editReply' });
@@ -231,11 +234,10 @@ function createCommand(config, {
         try {
             const updated = await repository(context).cycleNotification(interaction.user.id);
             const needsTest = updated.previousMode === 'off' && updated.mode === 'all';
-            const dmTest = needsTest ? await testDirectMessage(interaction, updated.mode) : null;
             const lines = [`通知模式已切換為：**${MODE_NAMES[updated.mode]}**。`];
-            if (dmTest === true) lines.push('通知測試 DM 已成功送達。');
-            if (dmTest === false) lines.push('設定已保存，但測試 DM 無法送達；請到 Discord「使用者設定 → Content & Social → Direct messages」允許共同伺服器私人訊息。');
-            await interaction.editReply({ embeds: [createResultEmbed('通知設定完成', lines.join('\n'), dmTest !== false)] });
+            if (needsTest) lines.push('已另外顯示一則臨時通知測試。');
+            await interaction.editReply({ embeds: [createResultEmbed('通知設定完成', lines.join('\n'))] });
+            if (needsTest) await sendNotificationTest(interaction, updated.mode);
         } catch (error) {
             return errorReply(interaction, error, { context: '切換遊戲簽到通知模式' });
         }
@@ -246,8 +248,10 @@ function createCommand(config, {
             .setName('遊戲簽到')
             .setDescription('開啟遊戲自動簽到設定面板'),
 
-        async execute(interaction) {
-            return interaction.reply({ embeds: [createPanelEmbed()], components: [createPanelRow()] });
+        async execute(interaction, context) {
+            await interaction.reply({ embeds: [createPanelEmbed()], components: [createPanelRow()] });
+            const message = await interaction.fetchReply();
+            await repository(context).savePanel(message);
         },
 
         buttonHandlers: {
@@ -268,7 +272,7 @@ function createCommand(config, {
         createCredentialPlatformRow,
         createPanelEmbed,
         createPanelRow,
-        testDirectMessage
+        sendNotificationTest
     };
     return command;
 }

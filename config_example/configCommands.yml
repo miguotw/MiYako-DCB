@@ -133,6 +133,13 @@ gameCheckIn:
   enable: true
   emoji: "🎮"
 
+  # 自動簽到結果中，各狀態標題使用的 Emoji。
+  resultEmojis:
+    success: "🟢"
+    already: "🟡"
+    skipped: "🟠"
+    error: "🔴"
+
   # 每日自動簽到時間，格式為 HH:mm。
   checkInTime: "10:00"
 

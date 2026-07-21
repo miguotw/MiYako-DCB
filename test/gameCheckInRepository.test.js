@@ -66,6 +66,16 @@ test('遊戲簽到 repository 以使用者隔離憑證、採 failure-only 預設
     const cleared = await setup.repository.setCredential('123456789012345678', 'hoyolab', '');
     assert.equal(cleared.disabled, true);
     assert.equal(cleared.record.credentials.hoyolab, null);
+
+    await setup.repository.savePanel({ channelId: 'channel-1', id: 'message-1' });
+    await setup.repository.savePanel({ channelId: 'channel-1', id: 'message-1' });
+    await setup.repository.savePanel({ channelId: 'channel-2', id: 'message-2' });
+    assert.deepEqual(await setup.repository.listPanels(), [
+        { channelID: 'channel-1', messageID: 'message-1', updatedAt: new Date(setup.now()).toISOString() },
+        { channelID: 'channel-2', messageID: 'message-2', updatedAt: new Date(setup.now()).toISOString() }
+    ]);
+    await setup.repository.removePanel('channel-1', 'message-1');
+    assert.deepEqual((await setup.repository.listPanels()).map(panel => panel.messageID), ['message-2']);
     assert.deepEqual(await setup.repository.listUserIDs(), ['123456789012345678', '222222222222222222']);
     if (process.platform !== 'win32') {
         assert.equal(fs.statSync(path.join(setup.root, '123456789012345678.json')).mode & 0o777, 0o600);

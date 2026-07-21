@@ -4,43 +4,76 @@ const { EmbedBuilder } = require('discord.js');
 const { createLogTools } = require('../../../core/sendLog');
 const { createGameCheckInAdapters } = require('../../../util/gameCheckInAdapters');
 const { createGameCheckInRepository } = require('../../../util/gameCheckInRepository');
+const {
+    dateKeyAt,
+    nextCheckInEpoch,
+    nextDateKey,
+    scheduledEpoch
+} = require('../../../util/gameCheckInSchedule');
+const { createGameCheckInPanelEmbed } = require('../../../util/gameCheckInViews');
 
 const USER_CONCURRENCY = 2;
-const DAY_MS = 24 * 60 * 60 * 1000;
+const EMBED_FIELD_VALUE_LIMIT = 1024;
 
-function dateKeyAt(epoch, timezone) {
-    const shifted = new Date(epoch + timezone * 60 * 60 * 1000);
-    const year = shifted.getUTCFullYear();
-    const month = String(shifted.getUTCMonth() + 1).padStart(2, '0');
-    const day = String(shifted.getUTCDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+function inlineCode(value) {
+    return `\`${String(value).replace(/`/g, 'ˋ')}\``;
 }
 
-function scheduledEpoch(date, time, timezone) {
-    const [year, month, day] = date.split('-').map(Number);
-    const [hour, minute] = time.split(':').map(Number);
-    return Date.UTC(year, month - 1, day, hour, minute) - timezone * 60 * 60 * 1000;
+function truncateFieldValue(value) {
+    const text = String(value);
+    if (text.length <= EMBED_FIELD_VALUE_LIMIT) return text;
+    const suffix = '\n…（結果過長，已截斷）';
+    return `${text.slice(0, EMBED_FIELD_VALUE_LIMIT - suffix.length)}${suffix}`;
 }
 
-function nextDateKey(date) {
-    const [year, month, day] = date.split('-').map(Number);
-    return dateKeyAt(Date.UTC(year, month - 1, day) + DAY_MS, 0);
+function conciseReason(outcome) {
+    const message = String(outcome.message || '未知錯誤。').replace(/\s+/g, ' ').trim();
+    const game = String(outcome.game || '').replace(/\s+/g, ' ').trim();
+    if (!game) return message;
+    const escapedGame = game.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return message.replace(
+        new RegExp(`^((?:HoYoLAB|SKPORT)\\s*)?${escapedGame}\\s*`, 'i'),
+        (_match, platform = '') => platform ? `${platform.trim()} ` : ''
+    ).trim() || '未知錯誤。';
+}
+
+function gameList(items) {
+    return [...new Set(items.map(item => item.label))].map(inlineCode).join('、');
 }
 
 function resultEmbed(config, item) {
-    const symbols = { success: '✅', already: '☑️', skipped: '➖', failure: '❌' };
-    const lines = (item.result?.outcomes || []).map(outcome => {
-        const account = outcome.account ? `／${outcome.account}` : '';
-        return `${symbols[outcome.status] || '•'} **${outcome.game}${account}**：${outcome.message}`;
+    const emojis = config.commands.gameCheckIn.resultEmojis;
+    const groups = { success: [], already: [], skipped: [], failure: [] };
+    for (const outcome of item.result?.outcomes || []) {
+        const game = String(outcome.game || '未知遊戲').replace(/\s+/g, ' ').trim();
+        const normalized = { ...outcome, label: game };
+        const status = ['success', 'already', 'skipped'].includes(outcome.status)
+            ? outcome.status
+            : 'failure';
+        groups[status].push(normalized);
+    }
+    const fields = [];
+    if (groups.success.length) fields.push({
+        name: `${emojis.success} 簽到成功`, value: truncateFieldValue(gameList(groups.success))
     });
-    let description = lines.join('\n') || '本次沒有可顯示的簽到結果。';
-    if (description.length > 3900) description = `${description.slice(0, 3890)}\n…（結果過長，已截斷）`;
-    return new EmbedBuilder()
-        .setColor(lines.some(line => line.startsWith('❌')) ? config.embed.color.error : config.embed.color.success)
-        .setTitle(`${config.commands.gameCheckIn.emoji} ┃ 遊戲自動簽到結果`)
-        .setDescription(description)
-        .setFooter({ text: `簽到日期：${item.date}` })
-        .setTimestamp();
+    if (groups.already.length) fields.push({
+        name: `${emojis.already} 重複簽到`, value: truncateFieldValue(gameList(groups.already))
+    });
+    if (groups.skipped.length) fields.push({
+        name: `${emojis.skipped} 未綁定遊戲`, value: truncateFieldValue(gameList(groups.skipped))
+    });
+    if (groups.failure.length) {
+        const failures = [...new Set(groups.failure
+            .map(item => `${inlineCode(item.label)} ${conciseReason(item)}`))]
+            .join('\n');
+        fields.push({ name: `${emojis.error} 錯誤`, value: truncateFieldValue(failures) });
+    }
+    const embed = new EmbedBuilder()
+        .setColor(config.embed.color.default)
+        .setTitle(`${config.commands.gameCheckIn.emoji} ┃ 遊戲自動簽到（BETA） - 結果`);
+    if (fields.length) embed.addFields(fields);
+    else embed.setDescription('本次沒有可顯示的簽到結果。');
+    return embed;
 }
 
 function isPermanentDiscordDmError(error) {
@@ -109,11 +142,16 @@ function createGameCheckInDeadlineCoordinator(config, {
 
     async function processDue(date, scheduledAt, signal) {
         const due = await repository.listDuePlatforms(date, scheduledAt);
+        if (!due.length) return repository.finalizeReady(date);
         const grouped = new Map();
         for (const candidate of due) {
             if (!grouped.has(candidate.userID)) grouped.set(candidate.userID, []);
             grouped.get(candidate.userID).push(candidate);
         }
+        sendLog(
+            context.client,
+            `🎮 遊戲自動簽到已觸發：共 ${grouped.size} 位使用者。`
+        );
         await runWithConcurrency([...grouped.values()], USER_CONCURRENCY, async candidates => {
             for (const candidate of candidates) {
                 if (signal?.aborted) throw signal.reason || new Error('遊戲簽到工作已取消。');
@@ -121,6 +159,41 @@ function createGameCheckInDeadlineCoordinator(config, {
             }
         });
         await repository.finalizeReady(date);
+        sendLog(context.client, `✅ 遊戲自動簽到處理完成。`);
+    }
+
+    async function fetchPanelMessage(panel) {
+        let channel = context.client.channels?.cache?.get(panel.channelID);
+        if (!channel && typeof context.client.channels?.fetch === 'function') {
+            try {
+                channel = await context.client.channels.fetch(panel.channelID);
+            } catch (error) {
+                if (Number(error?.code) !== 10003) throw error;
+            }
+        }
+        if (!channel?.messages) return null;
+        return channel.messages.fetch(panel.messageID).catch(error => {
+            if (Number(error?.code) === 10008) return null;
+            throw error;
+        });
+    }
+
+    async function syncPanels() {
+        const panels = typeof repository.listPanels === 'function' ? await repository.listPanels() : [];
+        if (!panels.length) return;
+        const nextTriggerAt = nextCheckInEpoch(now(), settings.checkInTime, timezone);
+        for (const panel of panels) {
+            try {
+                const message = await fetchPanelMessage(panel);
+                if (!message) {
+                    await repository.removePanel?.(panel.channelID, panel.messageID);
+                    continue;
+                }
+                await message.edit({ embeds: [createGameCheckInPanelEmbed(config, nextTriggerAt)] });
+            } catch (error) {
+                sendLog(context.client, '⚠️ 更新遊戲自動簽到主面板倒數失敗。', 'WARN', error);
+            }
+        }
     }
 
     async function deliverOutbox() {
@@ -162,6 +235,7 @@ function createGameCheckInDeadlineCoordinator(config, {
         await deliverOutbox();
         if (current >= todayAt) await processDue(date, todayAt, signal);
         await deliverOutbox();
+        await syncPanels();
         handle?.reschedule(await nextDeadline());
     }
 
@@ -178,7 +252,10 @@ function createGameCheckInDeadlineCoordinator(config, {
             timeoutMs: 30 * 60 * 1000,
             run: reconcile
         });
-        sendLog(context.client, `✅ 遊戲簽到排程已啟動，每日 ${settings.checkInTime}（UTC${timezone >= 0 ? '+' : ''}${timezone}）。`);
+        sendLog(
+            context.client,
+            `✅ 遊戲簽到排程已啟動，每日 ${settings.checkInTime} 執行一次。`
+        );
         return stop;
     }
 
@@ -193,7 +270,7 @@ function createGameCheckInDeadlineCoordinator(config, {
     return {
         start,
         stop,
-        _test: { deliverOutbox, nextDeadline, processDue, reconcile, timing }
+        _test: { deliverOutbox, nextDeadline, processDue, reconcile, syncPanels, timing }
     };
 }
 

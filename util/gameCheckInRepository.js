@@ -9,6 +9,8 @@ const MAX_ATTEMPTS = 3;
 const ATTEMPT_LEASE_MS = 20 * 60 * 1000;
 const SIGN_RETRY_DELAYS_MS = Object.freeze([15 * 60 * 1000, 60 * 60 * 1000]);
 const DM_RETRY_DELAYS_MS = Object.freeze([60 * 1000, 5 * 60 * 1000]);
+const PANEL_INDEX_KEY = 'panels';
+const MAX_PANELS = 100;
 
 function assertPlatform(platform) {
     if (!PLATFORMS.includes(platform)) throw new TypeError(`不支援的遊戲簽到平台：${platform}`);
@@ -47,6 +49,24 @@ function normalizeUserStore(value) {
         daily: normalizeDaily(value?.daily),
         outbox: Array.isArray(value?.outbox) ? value.outbox : []
     };
+}
+
+function normalizePanelStore(value) {
+    const panels = [];
+    const seen = new Set();
+    for (const item of Array.isArray(value?.panels) ? value.panels : []) {
+        const channelID = String(item?.channelID || '');
+        const messageID = String(item?.messageID || '');
+        const locator = `${channelID}:${messageID}`;
+        if (!channelID || !messageID || seen.has(locator)) continue;
+        seen.add(locator);
+        panels.push({
+            channelID,
+            messageID,
+            updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date(0).toISOString()
+        });
+    }
+    return { panels };
 }
 
 function activePlatforms(store) {
@@ -105,7 +125,36 @@ function createGameCheckInRepository(jsonRepository, {
     }
 
     async function listUserIDs() {
-        return jsonRepository.listKeys();
+        return (await jsonRepository.listKeys()).filter(key => key !== PANEL_INDEX_KEY);
+    }
+
+    async function savePanel(message) {
+        const channelID = String(message?.channelId || '');
+        const messageID = String(message?.id || '');
+        if (!channelID || !messageID) throw new TypeError('遊戲簽到主面板缺少訊息 locator。');
+        const panel = { channelID, messageID, updatedAt: new Date(now()).toISOString() };
+        await jsonRepository.update(PANEL_INDEX_KEY, current => {
+            const store = normalizePanelStore(current);
+            store.panels = store.panels.filter(item =>
+                item.channelID !== channelID || item.messageID !== messageID);
+            store.panels.push(panel);
+            store.panels = store.panels.slice(-MAX_PANELS);
+            return store;
+        });
+        return panel;
+    }
+
+    async function listPanels() {
+        return normalizePanelStore(await jsonRepository.read(PANEL_INDEX_KEY)).panels;
+    }
+
+    async function removePanel(channelID, messageID) {
+        return jsonRepository.update(PANEL_INDEX_KEY, current => {
+            const store = normalizePanelStore(current);
+            store.panels = store.panels.filter(item =>
+                item.channelID !== String(channelID) || item.messageID !== String(messageID));
+            return store;
+        });
     }
 
     async function setCredential(userID, platform, rawValue) {
@@ -355,6 +404,9 @@ function createGameCheckInRepository(jsonRepository, {
     return Object.freeze({
         readUser,
         listUserIDs,
+        savePanel,
+        listPanels,
+        removePanel,
         setCredential,
         cycleNotification,
         reservePlatform,
@@ -373,6 +425,7 @@ function createGameCheckInRepository(jsonRepository, {
 module.exports = {
     ATTEMPT_LEASE_MS,
     MAX_ATTEMPTS,
+    MAX_PANELS,
     NOTIFICATION_MODES,
     PLATFORMS,
     SIGN_RETRY_DELAYS_MS,

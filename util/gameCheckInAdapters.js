@@ -16,7 +16,7 @@ const HOYOLAB_GAMES = Object.freeze([
         actId: 'e202303301540311'
     },
     {
-        id: 'honkai3', name: '崩壞 3',
+        id: 'honkai3', name: '崩壞3rd',
         infoUrl: 'https://sg-public-api.hoyolab.com/event/mani/info',
         signUrl: 'https://sg-public-api.hoyolab.com/event/mani/sign',
         actId: 'e202110291205111'
