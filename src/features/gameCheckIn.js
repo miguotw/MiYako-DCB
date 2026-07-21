@@ -8,7 +8,7 @@ function createManifest(config) {
     const coordinator = createGameCheckInDeadlineCoordinator(config);
     return createFeature({
         name: 'gameCheckIn',
-        command: createCommand(config, { wake: coordinator.wake }),
+        command: createCommand(config),
         initializer: (_client, context) => coordinator.start(context),
         enabled: config.commands.gameCheckIn.enable
     });

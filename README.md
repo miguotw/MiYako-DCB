@@ -49,7 +49,7 @@ chmod 600 config/config.yml config/configCommands.yml config/configModules.yml
 重要容量設定：
 
 - `packageTracking.maxActivePackages`：每位使用者 active 加 reserved 包裹上限，預設 20，範圍 1–100。
-- `gameCheckIn.checkInTime`／`timezone`：每日簽到的 `HH:mm` 時間與整數 UTC 偏移；範例為 UTC+8 的 10:00。
+- `gameCheckIn.checkInTime`：每日簽到的 `HH:mm` 時間；時區沿用 `config.yml` 的 `log.timezone`。
 - `music.maxQueueTracks`：每個 Guild 的序列上限。
 - `music.maxFileSizeMiB`：單一下載檔案上限。
 - `music.maxCacheSizeMiB`：整體音樂 cache 上限，必須不小於單檔上限。
@@ -188,7 +188,7 @@ Twitch OAuth token provider 與 Helix client 使用共用 HTTP policy；Helix ID
 
 ### 遊戲自動簽到
 
-`/遊戲簽到` 的主面板是公開且不含個人狀態的通用入口；憑證教學、平台選擇、Modal、驗證結果與通知設定全部是 ephemeral。每位 Discord 使用者可保存一組 HoYoLAB Cookie 與一組 SKPORT `account_token`，空白提交會清除該平台並停用自動簽到。既有秘密不會重新顯示。
+`/遊戲簽到` 的主面板是公開且不含個人狀態的通用入口；憑證教學、平台選擇、Modal、驗證結果與通知設定全部是 ephemeral。每位 Discord 使用者可保存一組 HoYoLAB Cookie 與一組 SKPORT `account_token`；HoYoLAB 表單分別輸入 `ltoken_v2` 與 `ltuid_v2` 的值，不需自行組合 Cookie。兩個 HoYoLAB 欄位或 SKPORT 欄位留空提交會清除該平台並停用自動簽到，既有秘密不會重新顯示。送出非空憑證只會查詢帳號／角色以確認有效性，不會立即簽到；自動簽到會等到下一個正常排程時間。
 
 HoYoLAB 支援原神、崩壞：星穹鐵道、崩壞 3、未定事件簿與絕區零；實作參考 [canaria3406/hoyolab-auto-sign](https://github.com/canaria3406/hoyolab-auto-sign)。SKPORT 使用長效 `account_token` 動態交換短效憑證並探索明日方舟繁中服及明日方舟：終末地的全部已綁定角色／伺服器；流程參考 [canaria3406/skport-auto-sign PR #4](https://github.com/canaria3406/skport-auto-sign/pull/4)。兩者皆為第三方、非官方且可能變動的 API adapter，平台拒絕、CAPTCHA 或憑證失效會安全回報，不會輸出完整上游 response。
 

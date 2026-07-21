@@ -158,8 +158,7 @@ const commandsConfigSchema = strictObject({
     gameCheckIn: strictObject({
         enable: commandEnable(),
         emoji: emoji('gameCheckIn.emoji'),
-        checkInTime: dailyTime('gameCheckIn.checkInTime'),
-        timezone: integerRange('gameCheckIn.timezone', -12, 14)
+        checkInTime: dailyTime('gameCheckIn.checkInTime')
     }),
     ipQuery: strictObject({ enable: commandEnable(), emoji: emoji('ipQuery.emoji') }),
     minecraft: strictObject({

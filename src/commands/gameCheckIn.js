@@ -15,7 +15,11 @@ const {
 } = require('discord.js');
 const { createReplyTools } = require('../../core/Reply');
 const { createLogTools } = require('../../core/sendLog');
-const { GameCheckInAdapterError, createGameCheckInAdapters } = require('../../util/gameCheckInAdapters');
+const {
+    buildHoyolabCookie,
+    GameCheckInAdapterError,
+    createGameCheckInAdapters
+} = require('../../util/gameCheckInAdapters');
 const { createGameCheckInRepository } = require('../../util/gameCheckInRepository');
 
 const PLATFORM_NAMES = Object.freeze({ hoyolab: 'HoYoLAB', skport: 'SKPORT' });
@@ -27,8 +31,7 @@ const MODE_NAMES = Object.freeze({
 
 function createCommand(config, {
     adapters = createGameCheckInAdapters(),
-    repositoryFactory = createGameCheckInRepository,
-    wake = () => {}
+    repositoryFactory = createGameCheckInRepository
 } = {}) {
     const { errorReply, validationReply } = createReplyTools(config);
     const { sendLog } = createLogTools(config);
@@ -82,7 +85,7 @@ function createCommand(config, {
                 `SKPORT：**${status('skport')}**`,
                 `通知：**${MODE_NAMES[record.notificationMode]}**`,
                 '',
-                '請先閱讀下方教學，再從選單選擇平台。Modal 留空送出會清除該平台憑證。',
+                '請先閱讀下方教學，再從選單選擇平台。SKPORT 欄位或兩個 HoYoLAB 欄位皆留空送出，會清除該平台憑證。',
                 '**既有憑證不會重新顯示。**'
             ].join('\n'));
         const hoyolab = new EmbedBuilder()
@@ -91,9 +94,14 @@ function createCommand(config, {
             .setDescription([
                 '1. 使用瀏覽器登入 HoYoLAB，按 F12 開啟開發者工具。',
                 '2. 到 Application／儲存空間 → Cookies → `https://www.hoyolab.com`。',
-                '3. 複製 Cookie 並組成完整 header；至少需包含 `ltoken_v2` 與 `ltuid_v2`。',
-                '```http',
-                'ltoken_v2=v2_xxxxxxxxxx; ltuid_v2=123456789;',
+                '3. 分別找到 `ltoken_v2` 與 `ltuid_v2`，只複製各自 Value 欄位的內容。',
+                '`ltoken_v2` Value 範例：',
+                '```text',
+                'v2_xxxxxxxxxx',
+                '```',
+                '`ltuid_v2` Value 範例：',
+                '```text',
+                '123456789',
                 '```',
                 'Cookie 為 HttpOnly 時無法用 `document.cookie` 取得，請從 Cookies 表格複製。'
             ].join('\n'));
@@ -133,18 +141,40 @@ function createCommand(config, {
 
     function createCredentialModal(platform) {
         const isHoyolab = platform === 'hoyolab';
-        return new ModalBuilder()
+        const modal = new ModalBuilder()
             .setCustomId(`game_checkin_credentials_modal:${platform}`)
-            .setTitle(`${PLATFORM_NAMES[platform]} 憑證`)
-            .addComponents(new ActionRowBuilder().addComponents(
-                new TextInputBuilder()
-                    .setCustomId('credential')
-                    .setLabel(isHoyolab ? 'Cookie（留空停用）' : 'account_token（留空停用）')
-                    .setPlaceholder(isHoyolab ? 'ltoken_v2=...; ltuid_v2=...;' : '只貼上 data.content 的值')
-                    .setStyle(TextInputStyle.Paragraph)
-                    .setRequired(false)
-                    .setMaxLength(isHoyolab ? 4000 : 2048)
-            ));
+            .setTitle(`${PLATFORM_NAMES[platform]} 憑證`);
+        if (isHoyolab) {
+            return modal.addComponents(
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId('ltoken_v2')
+                        .setLabel('ltoken_v2 的值（兩欄皆留空可停用）')
+                        .setPlaceholder('v2_xxxxxxxxxx')
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(false)
+                        .setMaxLength(2048)
+                ),
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId('ltuid_v2')
+                        .setLabel('ltuid_v2 的值（兩欄皆留空可停用）')
+                        .setPlaceholder('123456789')
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(false)
+                        .setMaxLength(32)
+                )
+            );
+        }
+        return modal.addComponents(new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+                .setCustomId('credential')
+                .setLabel('account_token（留空停用）')
+                .setPlaceholder('只貼上 data.content 的值')
+                .setStyle(TextInputStyle.Paragraph)
+                .setRequired(false)
+                .setMaxLength(2048)
+        ));
     }
 
     function createResultEmbed(title, description, success = true) {
@@ -194,11 +224,15 @@ function createCommand(config, {
             return validationReply(interaction, '**憑證表單已失效，請重新開啟設定。**', { method: 'reply', ephemeral: true });
         }
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-        const value = interaction.fields.getTextInputValue('credential').trim();
         try {
+            const value = platform === 'hoyolab'
+                ? buildHoyolabCookie(
+                    interaction.fields.getTextInputValue('ltoken_v2'),
+                    interaction.fields.getTextInputValue('ltuid_v2')
+                )
+                : interaction.fields.getTextInputValue('credential').trim();
             if (value) await adapters.validate[platform](value, { http: context.http, signal: context.signal });
             const changed = await repository(context).setCredential(interaction.user.id, platform, value);
-            wake();
             let dmTest = null;
             if (changed.firstActive && changed.record.notificationMode !== 'off') {
                 dmTest = await testDirectMessage(interaction, changed.record.notificationMode);

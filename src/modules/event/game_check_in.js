@@ -65,15 +65,16 @@ function createGameCheckInDeadlineCoordinator(config, {
     now = () => Date.now()
 } = {}) {
     const settings = config.commands.gameCheckIn;
+    const timezone = config.log.timezone;
     const { sendLog } = logTools;
     let context = null;
     let repository = null;
     let handle = null;
 
     function timing(epoch = now()) {
-        const date = dateKeyAt(epoch, settings.timezone);
-        const todayAt = scheduledEpoch(date, settings.checkInTime, settings.timezone);
-        const tomorrowAt = scheduledEpoch(nextDateKey(date), settings.checkInTime, settings.timezone);
+        const date = dateKeyAt(epoch, timezone);
+        const todayAt = scheduledEpoch(date, settings.checkInTime, timezone);
+        const tomorrowAt = scheduledEpoch(nextDateKey(date), settings.checkInTime, timezone);
         return { date, todayAt, tomorrowAt };
     }
 
@@ -164,10 +165,6 @@ function createGameCheckInDeadlineCoordinator(config, {
         handle?.reschedule(await nextDeadline());
     }
 
-    function wake() {
-        handle?.reschedule(now());
-    }
-
     async function start(nextContext) {
         if (typeof nextContext.scheduler?.scheduleDeadline !== 'function') {
             throw new Error('遊戲簽到 feature 缺少 deadline scheduler context。');
@@ -181,7 +178,7 @@ function createGameCheckInDeadlineCoordinator(config, {
             timeoutMs: 30 * 60 * 1000,
             run: reconcile
         });
-        sendLog(context.client, `✅ 遊戲簽到排程已啟動，每日 ${settings.checkInTime}（UTC${settings.timezone >= 0 ? '+' : ''}${settings.timezone}）。`);
+        sendLog(context.client, `✅ 遊戲簽到排程已啟動，每日 ${settings.checkInTime}（UTC${timezone >= 0 ? '+' : ''}${timezone}）。`);
         return stop;
     }
 
@@ -196,7 +193,6 @@ function createGameCheckInDeadlineCoordinator(config, {
     return {
         start,
         stop,
-        wake,
         _test: { deliverOutbox, nextDeadline, processDue, reconcile, timing }
     };
 }

@@ -6,7 +6,6 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { MessageFlags } = require('discord.js');
-const { loadConfig } = require('../core/config');
 const { createStoreRegistry } = require('../core/storeRegistry');
 const { createCommand } = require('../src/commands/gameCheckIn');
 const {
@@ -20,14 +19,22 @@ const {
 } = require('../src/modules/event/game_check_in');
 const { GameCheckInAdapterError } = require('../util/gameCheckInAdapters');
 const { createGameCheckInRepository } = require('../util/gameCheckInRepository');
+const { createValidConfigDocuments } = require('./helpers/configFixture');
 
-const config = loadConfig();
+const configDocuments = createValidConfigDocuments();
+const config = {
+    ...configDocuments['config.yml'],
+    commands: configDocuments['configCommands.yml'],
+    modules: configDocuments['configModules.yml']
+};
 
 function createInteraction({
     userID = '123456789012345678',
     customId = '',
     values = [],
     credential = '',
+    ltokenV2 = '',
+    ltuidV2 = '',
     dmError = null
 } = {}) {
     const calls = [];
@@ -46,7 +53,11 @@ function createInteraction({
                 return { id: 'dm-message' };
             }
         },
-        fields: { getTextInputValue: () => credential },
+        fields: {
+            getTextInputValue(name) {
+                return { credential, ltoken_v2: ltokenV2, ltuid_v2: ltuidV2 }[name] ?? '';
+            }
+        },
         async reply(payload) { this.replied = true; calls.push(['reply', payload]); return payload; },
         async deferReply(payload) { this.deferred = true; calls.push(['deferReply', payload]); },
         async editReply(payload) { this.replied = true; calls.push(['editReply', payload]); return payload; },
@@ -60,7 +71,6 @@ function createCommandFixture(t, overrides = {}) {
     t.after(() => fs.rmSync(root, { recursive: true, force: true }));
     const store = createStoreRegistry({ dataRoot: root });
     const validations = [];
-    let wakes = 0;
     const adapters = overrides.adapters || {
         validate: {
             async hoyolab(value) { validations.push(['hoyolab', value]); return { games: ['genshin'] }; },
@@ -68,13 +78,12 @@ function createCommandFixture(t, overrides = {}) {
         },
         run: {}
     };
-    const command = createCommand(config, { adapters, wake: () => { wakes += 1; } });
+    const command = createCommand(config, { adapters });
     return {
         command,
         context: { store, http: {}, signal: new AbortController().signal },
         repository: createGameCheckInRepository(store.gameCheckIn),
-        validations,
-        wakes: () => wakes
+        validations
     };
 }
 
@@ -107,7 +116,7 @@ test('憑證教學私密顯示 Markdown 範例，平台選擇開啟不回填秘�
     const payload = guide.calls.at(-1)[1];
     assert.equal(payload.flags, MessageFlags.Ephemeral);
     assert.equal(payload.embeds.length, 3);
-    assert.match(payload.embeds[1].data.description, /```http/);
+    assert.match(payload.embeds[1].data.description, /```text/);
     assert.match(payload.embeds[2].data.description, /```json/);
     assert.equal(payload.components[0].components[0].toJSON().options.length, 2);
 
@@ -115,32 +124,45 @@ test('憑證教學私密顯示 Markdown 範例，平台選擇開啟不回填秘�
     await setup.command.componentHandlers.game_checkin_platform(selected, setup.context);
     const modal = selected.calls.at(-1)[1];
     assert.equal(modal.data.custom_id, 'game_checkin_credentials_modal:hoyolab');
-    const input = modal.components[0].components[0].data;
-    assert.equal(input.required, false);
-    assert.equal(input.value, undefined);
+    assert.equal(modal.components.length, 2);
+    assert.deepEqual(modal.components.map(row => row.components[0].data.custom_id), ['ltoken_v2', 'ltuid_v2']);
+    for (const row of modal.components) {
+        assert.equal(row.components[0].data.required, false);
+        assert.equal(row.components[0].data.value, undefined);
+    }
 
     const invalid = createInteraction({ values: ['unknown'] });
     await setup.command.componentHandlers.game_checkin_platform(invalid, setup.context);
     assert.equal(invalid.calls.at(-1)[0], 'reply');
 });
 
-test('Modal 唯讀驗證成功才保存，首次啟用測試 DM，空白會停用平台', async t => {
+test('Modal 分欄組合 HoYoLAB 憑證，唯讀驗證成功才保存且空白會停用平台', async t => {
     const setup = createCommandFixture(t);
     const submitted = createInteraction({
         customId: 'game_checkin_credentials_modal:hoyolab',
-        credential: 'ltoken_v2=secret; ltuid_v2=1;'
+        ltokenV2: 'secret',
+        ltuidV2: '1'
     });
     await setup.command.modalSubmitHandlers.game_checkin_credentials_modal(submitted, setup.context);
     assert.deepEqual(setup.validations, [['hoyolab', 'ltoken_v2=secret; ltuid_v2=1;']]);
     assert.equal(submitted.calls.some(call => call[0] === 'dm'), true);
-    assert.equal((await setup.repository.readUser(submitted.user.id)).credentials.hoyolab.value.includes('secret'), true);
-    assert.equal(setup.wakes(), 1);
+    assert.equal(
+        (await setup.repository.readUser(submitted.user.id)).credentials.hoyolab.value,
+        'ltoken_v2=secret; ltuid_v2=1;'
+    );
 
-    const cleared = createInteraction({ customId: 'game_checkin_credentials_modal:hoyolab', credential: '' });
+    const cleared = createInteraction({ customId: 'game_checkin_credentials_modal:hoyolab' });
     await setup.command.modalSubmitHandlers.game_checkin_credentials_modal(cleared, setup.context);
     assert.equal((await setup.repository.readUser(cleared.user.id)).credentials.hoyolab, null);
     assert.equal(setup.validations.length, 1);
-    assert.equal(setup.wakes(), 2);
+
+    const partial = createInteraction({
+        customId: 'game_checkin_credentials_modal:hoyolab',
+        ltokenV2: 'only-one-field'
+    });
+    await setup.command.modalSubmitHandlers.game_checkin_credentials_modal(partial, setup.context);
+    assert.match(JSON.stringify(partial.calls.at(-1)[1]), /必須同時填寫/);
+    assert.equal(setup.validations.length, 1);
 
     const expired = createInteraction({ customId: 'game_checkin_credentials_modal:unknown', credential: 'x' });
     await setup.command.modalSubmitHandlers.game_checkin_credentials_modal(expired, setup.context);
@@ -158,7 +180,7 @@ test('驗證錯誤保留舊憑證且不將秘密放入回覆', async t => {
     const setup = createCommandFixture(t, { adapters });
     await setup.repository.setCredential('123456789012345678', 'hoyolab', 'old-secret');
     const interaction = createInteraction({
-        customId: 'game_checkin_credentials_modal:hoyolab', credential: 'new-secret'
+        customId: 'game_checkin_credentials_modal:hoyolab', ltokenV2: 'new-secret', ltuidV2: '123'
     });
     await setup.command.modalSubmitHandlers.game_checkin_credentials_modal(interaction, setup.context);
     assert.equal((await setup.repository.readUser(interaction.user.id)).credentials.hoyolab.value, 'old-secret');
@@ -196,7 +218,8 @@ test('時區工具以 UTC epoch 套用偏移，能跨月與換日', () => {
     assert.equal(isPermanentDiscordDmError({ code: 500 }), false);
 });
 
-test('deadline coordinator 補跑兩平台、彙總 DM 並排到下一日', async () => {
+test('deadline coordinator 使用 config.yml 共用時區補跑兩平台、彙總 DM 並排到下一日', async () => {
+    const utc8Config = { ...config, log: { ...config.log, timezone: 8 } };
     let now = Date.parse('2026-07-21T02:00:00Z');
     const completed = [];
     let delivered = false;
@@ -226,7 +249,7 @@ test('deadline coordinator 補跑兩平台、彙總 DM 並排到下一日', asyn
     const sent = [];
     let descriptor;
     const rescheduled = [];
-    const coordinator = createGameCheckInDeadlineCoordinator(config, {
+    const coordinator = createGameCheckInDeadlineCoordinator(utc8Config, {
         now: () => now,
         repositoryFactory: () => repository,
         adapters: { run: {
@@ -252,8 +275,6 @@ test('deadline coordinator 補跑兩平台、彙總 DM 並排到下一日', asyn
     assert.equal(sent[0].allowedMentions.parse.length, 0);
     assert.equal(delivered, true);
     assert.equal(rescheduled.at(-1), Date.parse('2026-07-22T02:00:00Z'));
-    coordinator.wake();
-    assert.equal(rescheduled.at(-1), now);
     await stop();
 });
 
@@ -261,7 +282,7 @@ test('真實 repository 與 coordinator 可在重啟補跑後持久化結果及�
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'miyako-game-checkin-coordinator-'));
     t.after(() => fs.rmSync(root, { recursive: true, force: true }));
     const store = createStoreRegistry({ dataRoot: root });
-    const currentTime = Date.parse('2026-07-21T02:05:00Z');
+    const currentTime = Date.parse('2026-07-21T10:05:00Z');
     const repository = createGameCheckInRepository(store.gameCheckIn, { now: () => currentTime });
     await repository.setCredential('123456789012345678', 'hoyolab', 'private-cookie');
 

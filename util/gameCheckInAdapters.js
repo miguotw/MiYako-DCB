@@ -112,6 +112,27 @@ function parseHoyolabCookie(value) {
     return cookie;
 }
 
+function buildHoyolabCookie(ltokenV2, ltuidV2) {
+    const token = String(ltokenV2 || '').trim();
+    const uid = String(ltuidV2 || '').trim();
+    if (!token && !uid) return '';
+    if (!token || !uid) {
+        throw new GameCheckInAdapterError(
+            'HOYOLAB_COOKIE_MISSING_FIELDS',
+            'ltoken_v2 與 ltuid_v2 必須同時填寫；若要停用，請將兩欄都留空。',
+            { validation: true }
+        );
+    }
+    if (token.length > 2048 || /[;\r\n\0]/.test(token) || !/^\d{1,32}$/.test(uid)) {
+        throw new GameCheckInAdapterError(
+            'HOYOLAB_COOKIE_INVALID',
+            'HoYoLAB 憑證欄位格式不正確，請只貼上各欄位的值。',
+            { validation: true }
+        );
+    }
+    return `ltoken_v2=${token}; ltuid_v2=${uid};`;
+}
+
 function hoyolabHeaders(cookie, game) {
     return { ...HOYOLAB_HEADERS, ...game.headers, Cookie: cookie };
 }
@@ -414,6 +435,7 @@ function createGameCheckInAdapters() {
 }
 
 module.exports = {
+    buildHoyolabCookie,
     GameCheckInAdapterError,
     HOYOLAB_GAMES,
     createGameCheckInAdapters,
