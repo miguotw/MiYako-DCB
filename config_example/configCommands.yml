@@ -128,6 +128,19 @@ packageTracking:
 
 
 #-------------------------------
+# /遊戲簽到 相關設定：
+gameCheckIn:
+  enable: true
+  emoji: "🎮"
+
+  # 每日自動簽到時間，格式為 HH:mm。
+  checkInTime: "10:00"
+
+  # 上述時間使用的 UTC 整數偏移，可設定 -12～14。
+  timezone: 8
+
+
+#-------------------------------
 # /網際協定位址資訊 相關設定：
 ipQuery:
   enable: true

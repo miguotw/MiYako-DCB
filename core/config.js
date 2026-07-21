@@ -51,6 +51,9 @@ const messageList = label => z.array(trimmedText(`${label}內容`))
     .min(1, `${label}至少需要一筆內容`);
 const emoji = label => trimmedText(label, 100);
 const commandEnable = () => z.boolean().default(true);
+const dailyTime = label => z.string()
+    .trim()
+    .regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, `${label}必須使用 HH:mm 格式`);
 
 const commandName = label => trimmedText(label, 32)
     .refine(value => DISCORD_COMMAND_NAME.test(value), `${label}不符合 Discord Slash Command 名稱規則`)
@@ -151,6 +154,12 @@ const commandsConfigSchema = strictObject({
         historyStatusMaxLength: integerRange('packageTracking.historyStatusMaxLength', 1, 1024),
         archiveAfterDays: integerRange('packageTracking.archiveAfterDays', 1, 3650),
         maxActivePackages: integerRange('packageTracking.maxActivePackages', 1, 100).default(20)
+    }),
+    gameCheckIn: strictObject({
+        enable: commandEnable(),
+        emoji: emoji('gameCheckIn.emoji'),
+        checkInTime: dailyTime('gameCheckIn.checkInTime'),
+        timezone: integerRange('gameCheckIn.timezone', -12, 14)
     }),
     ipQuery: strictObject({ enable: commandEnable(), emoji: emoji('ipQuery.emoji') }),
     minecraft: strictObject({

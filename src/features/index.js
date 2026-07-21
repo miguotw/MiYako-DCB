@@ -10,6 +10,7 @@ const featureModules = [
     require('./userInfo'),
     require('./music'),
     require('./packageTracking'),
+    require('./gameCheckIn'),
     require('./dataCollection'),
     require('./raffle'),
     require('./temporaryVoice'),
