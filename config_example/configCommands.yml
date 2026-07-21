@@ -149,7 +149,7 @@ gameCheckIn:
     disabled: "🔴"
 
   # 每日自動簽到時間，格式為 HH:mm。
-  checkInTime: "10:00"
+  checkInTime: "04:00"
 
 #-------------------------------
 # /網際協定位址資訊 相關設定：
