@@ -16,7 +16,8 @@ function createGameCheckInPanelEmbed(config, nextTriggerAt) {
         .setColor(config.embed.color.default)
         .setTitle(`${config.commands.gameCheckIn.emoji} ┃ 遊戲自動簽到（BETA）`)
         .setDescription([
-            '設定憑證後，機器人會每日自動為已綁定的支援遊戲簽到。',
+            '還在每天往返不同網站，只為完成繁瑣的遊戲簽到嗎？',
+            `只需設定一次憑證，<@${config.startup.clientId}> 便會每日自動完成所有已綁定遊戲的簽到，省時又省心！`,
             '> -# 1. 提交的憑證將使用 AES 安全加密，憑證只會在私密互動中處理，請勿將憑證張貼到頻道或交給他人。',
             '> -# 2. 通知會透過私訊傳送，請確認 Discord 允許共同伺服器成員傳送私人訊息。'
         ].join('\n'))

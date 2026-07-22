@@ -165,6 +165,10 @@ test('公開遊戲簽到面板固定三個按鈕且不包含個人狀態', async
             '2026-07-22', config.commands.gameCheckIn.checkInTime, config.log.timezone
         ) / 1000}:R>`
     );
+    assert.match(
+        payload.embeds[0].data.description,
+        new RegExp(`<@${config.startup.clientId}> 便會每日自動完成所有已綁定遊戲的簽到`)
+    );
     assert.doesNotMatch(payload.embeds[0].data.description, /已設定|未設定/);
     assert.deepEqual(await setup.repository.listPanels(), [{
         scopeType: 'guild',
