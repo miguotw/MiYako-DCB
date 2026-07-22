@@ -114,6 +114,7 @@ npm run undeploy:guild
 │   ├── undeployGuildCommands.js # 無參數 Guild 撤銷 CLI
 │   └── verifyCoverage.js        # 完整 coverage gate
 ├── test/                        # node:test 單元、整合、smoke 與 lifecycle 測試
+├── assets/                      # 受版本控制的 production 靜態圖片
 ├── config_example/              # 無 secret 的 strict 設定範例
 └── runtime/                     # 執行期資料；完全忽略於 Git
 ```
@@ -213,9 +214,9 @@ HoYoLAB 支援原神、崩壞：星穹鐵道、崩壞3rd、未定事件簿與絕
 - 音樂 cache：`runtime/cache/music/`
 - yt-dlp binary：`runtime/bin/yt-dlp`
 - Minecraft 暫存：`runtime/tmp/minecraft/`
-- Minecraft 預設靜態圖示：專案根目錄的 `assets/minecraft/default_icon.png`
+- 靜態圖片：專案根目錄的 `assets/minecraft/default_icon.png` 與 `assets/gameCheckIn/banner.png`
 
-舊 `assets/` JSON、音樂 cache、binary 與功能 Store 是 legacy 資料；新版本不讀取、不搬移也不刪除。只有 Minecraft 的版本控制內預設圖示仍是靜態 asset，路徑由 `PROJECT_ROOT` 解析，不受 CWD 影響。
+舊 `assets/` JSON、音樂 cache、binary 與功能 Store 是 legacy 資料；新版本不讀取、不搬移也不刪除。受版本控制的 production 靜態圖片路徑由 `PROJECT_ROOT` 解析，不受 CWD 影響。
 
 ## 資料備份與恢復
 

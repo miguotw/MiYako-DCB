@@ -12,6 +12,7 @@ const {
     scheduledEpoch
 } = require('../../../util/gameCheckInSchedule');
 const {
+    createGameCheckInPanelBanner,
     createGameCheckInPanelEmbed,
     createGameCheckInPanelRow
 } = require('../../../util/gameCheckInViews');
@@ -221,7 +222,8 @@ function createGameCheckInDeadlineCoordinator(config, {
                 }
                 await message.edit({
                     embeds: [createGameCheckInPanelEmbed(config, nextTriggerAt)],
-                    components: [createGameCheckInPanelRow()]
+                    components: [createGameCheckInPanelRow()],
+                    files: [createGameCheckInPanelBanner()]
                 });
                 if (typeof repository.isCurrentPanel === 'function'
                     && !await repository.isCurrentPanel(scope, panel.messageID)) {

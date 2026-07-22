@@ -1,6 +1,15 @@
 'use strict';
 
+const path = require('node:path');
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
+const { PROJECT_ROOT } = require('../core/config');
+
+const PANEL_BANNER_NAME = 'game-check-in-banner.png';
+const PANEL_BANNER_PATH = path.join(PROJECT_ROOT, 'assets', 'gameCheckIn', 'banner.png');
+
+function createGameCheckInPanelBanner() {
+    return { attachment: PANEL_BANNER_PATH, name: PANEL_BANNER_NAME };
+}
 
 function createGameCheckInPanelEmbed(config, nextTriggerAt) {
     return new EmbedBuilder()
@@ -14,7 +23,8 @@ function createGameCheckInPanelEmbed(config, nextTriggerAt) {
         .addFields(
             {name: '支援遊戲',value: `HoYoLAB | \`原神\`、\`崩壞：星穹鐵道\`、\`崩壞3rd\`、\`未定事件簿\`、\`絕區零\`\nSKPORT | \`明日方舟（繁中服）\`、\`明日方舟：終末地\``},
             {name: '下次排程',value: `<t:${Math.floor(nextTriggerAt / 1000)}:R>`}
-        );
+        )
+        .setImage(`attachment://${PANEL_BANNER_NAME}`);
 }
 
 function createGameCheckInPanelRow(disabled = false) {
@@ -37,4 +47,8 @@ function createGameCheckInPanelRow(disabled = false) {
     );
 }
 
-module.exports = { createGameCheckInPanelEmbed, createGameCheckInPanelRow };
+module.exports = {
+    createGameCheckInPanelBanner,
+    createGameCheckInPanelEmbed,
+    createGameCheckInPanelRow
+};
