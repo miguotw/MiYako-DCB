@@ -151,6 +151,14 @@ gameCheckIn:
   # 每日自動簽到時間，格式為 HH:mm。
   checkInTime: "04:00"
 
+  # 每批最多兩位使用者；第二位相對第一位的隨機啟動間隔（毫秒）。
+  userDelayMinMs: 500
+  userDelayMaxMs: 2500
+
+  # 前一批全部完成後，下一批開始前的隨機等待間隔（毫秒）。
+  batchDelayMinMs: 5000
+  batchDelayMaxMs: 15000
+
 #-------------------------------
 # /網際協定位址資訊 相關設定：
 ipQuery:

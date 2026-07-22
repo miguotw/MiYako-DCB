@@ -50,6 +50,8 @@ chmod 600 config/config.yml config/configCommands.yml config/configModules.yml
 
 - `packageTracking.maxActivePackages`：每位使用者 active 加 reserved 包裹上限，預設 20，範圍 1–100。
 - `gameCheckIn.checkInTime`：每日簽到的 `HH:mm` 時間；時區校正沿用 `config.yml` 的 `log.timezone`，語意與自動抽選相同：`0` 代表主機本機時間，其他數值是在主機時間上人工校正的小時數。
+- `gameCheckIn.userDelayMinMs/userDelayMaxMs`：同一批第二位使用者相對第一位的隨機啟動間隔，預設 500–2500ms，允許 0–10000ms。
+- `gameCheckIn.batchDelayMinMs/batchDelayMaxMs`：前一批完成至下一批開始的隨機間隔，預設 5000–15000ms，允許 0–60000ms。
 - `gameCheckIn.credentialEncryptionKey`：遊戲簽到憑證的 AES-256-GCM 主金鑰。功能啟用時必須填入 64 字元十六進位字串，可用 `openssl rand -hex 32` 產生；不得提交或傳送給他人。
 - `gameCheckIn.resultEmojis`：分別設定簽到成功、重複簽到、未綁定遊戲與錯誤的結果標題 Emoji。
 - `gameCheckIn.toggleEmojis`：設定啟用/停用簽到 Embed 圖例中「啟用」與「停用」狀態的 Emoji；遊戲按鈕固定以綠色表示啟用、紅色表示停用。
@@ -197,6 +199,8 @@ Twitch OAuth token provider 與 Helix client 使用共用 HTTP policy；Helix ID
 「啟用/停用簽到」可分別停用 HoYoLAB 五款與 SKPORT 兩款支援遊戲，預設全部啟用，也允許全部停用。停用單一遊戲不會清除平台憑證；若全部遊戲皆停用，排程不會建立簽到工作或傳送空白通知。尚未開始的平台會採用最新設定，已開始、等待重試或完成的平台則沿用當日遊戲快照，變更於下一日生效。
 
 主面板會顯示 Discord 動態倒數時間戳，並持久保存訊息 locator；每個 Guild 或 DM channel 只追蹤最新一個面板，新面板會停用被取代面板的全部按鈕，舊格式 locator 也會在啟動同步時收斂。啟動補跑或每日排程完成後會更新為下一次自動簽到時間。真正有待處理的平台時，後臺日誌會記錄觸發日期、使用者數、平台數與處理完成訊息，但不包含憑證。
+
+排程以每批最多兩位使用者處理：第一位立即開始，第二位依 `userDelayMinMs/userDelayMaxMs` 隨機錯開；整批完成後，再依 `batchDelayMinMs/batchDelayMaxMs` 等待下一批。使用者內的平台、遊戲與角色維持依序執行。單輪排程期限為 6 小時，隨機等待與 API 時間計入該輪期限；15／60 分鐘失敗重試使用持久 deadline，於後續 scheduler run 取得新的期限。
 
 HoYoLAB 支援原神、崩壞：星穹鐵道、崩壞3rd、未定事件簿與絕區零；實作參考 [canaria3406/hoyolab-auto-sign](https://github.com/canaria3406/hoyolab-auto-sign)。SKPORT 使用長效 `account_token` 動態交換短效憑證並探索明日方舟繁中服及明日方舟：終末地的全部已綁定角色／伺服器；流程參考 [canaria3406/skport-auto-sign PR #4](https://github.com/canaria3406/skport-auto-sign/pull/4)。兩者皆為第三方、非官方且可能變動的 API adapter；已知的重複簽到、驗證失敗與暫時性錯誤會分別回報，未知拒絕僅保留安全的數字錯誤碼或 HTTP 狀態，不會輸出完整上游 response。
 

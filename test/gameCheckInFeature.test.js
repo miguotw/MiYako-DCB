@@ -14,7 +14,7 @@ const {
     isPermanentDiscordDmError,
     nextDateKey,
     resultEmbed,
-    runWithConcurrency,
+    runInUserBatches,
     scheduledEpoch
 } = require('../src/modules/event/game_check_in');
 const { GameCheckInAdapterError } = require('../util/gameCheckInAdapters');
@@ -308,7 +308,7 @@ test('憑證教學合併為單一私密 Embed，並以兩個平台按鈕開啟 M
     assert.equal(payload.flags, MessageFlags.Ephemeral);
     assert.equal(payload.embeds.length, 1);
     assert.equal(payload.embeds[0].data.title, '🎮 ┃ 遊戲自動簽到（BETA） - 輸入/更新憑證');
-    assert.match(payload.embeds[0].data.description, /## 狀態/);
+    assert.match(payload.embeds[0].data.description, /## 目前設定狀態/);
     assert.match(payload.embeds[0].data.description, /- HoYoLAB：未設定（不自動簽到）/);
     assert.match(payload.embeds[0].data.description, /- SKPORT：已設定/);
     assert.match(payload.embeds[0].data.description, /\[HoYoLAB\]\(https:\/\/www\.hoyolab\.com\/\)/);
@@ -522,6 +522,7 @@ test('deadline coordinator 使用 config.yml 本機時區校正補跑兩平台�
         }
     });
     assert.equal(descriptor.name, 'gameCheckIn.deadline');
+    assert.equal(descriptor.timeoutMs, 6 * 60 * 60 * 1000);
     assert.equal(coordinator.wake(), true);
     assert.equal(rescheduled.at(-1), now);
     await descriptor.run({ signal: new AbortController().signal });
@@ -552,6 +553,64 @@ test('deadline coordinator 使用 config.yml 本機時區校正補跑兩平台�
     );
     await stop();
     assert.equal(coordinator.wake(), false);
+});
+
+test('Coordinator 依設定將多位使用者分成雙人批次，同一使用者的平台仍依序執行', async () => {
+    const pacedConfig = {
+        ...config,
+        commands: {
+            ...config.commands,
+            gameCheckIn: {
+                ...config.commands.gameCheckIn,
+                userDelayMinMs: 7,
+                userDelayMaxMs: 9,
+                batchDelayMinMs: 20,
+                batchDelayMaxMs: 30
+            }
+        }
+    };
+    const due = [
+        { userID: 'user-1', platform: 'hoyolab' },
+        { userID: 'user-1', platform: 'skport' },
+        { userID: 'user-2', platform: 'hoyolab' },
+        { userID: 'user-3', platform: 'skport' }
+    ];
+    const completed = [];
+    const delays = [];
+    let finalized = 0;
+    const repository = {
+        async listDuePlatforms() { return due; },
+        async reservePlatform(userID, platform, date) {
+            return {
+                id: `${userID}:${platform}`, userID, platform, date, generation: 1,
+                credentialRevision: 1, credential: `${userID}:${platform}`, gameIDs: []
+            };
+        },
+        async completePlatform(reservation) { completed.push(reservation.id); },
+        async finalizeReady() { finalized += 1; }
+    };
+    const coordinator = createGameCheckInDeadlineCoordinator(pacedConfig, {
+        repositoryFactory: () => repository,
+        adapters: { run: {
+            hoyolab: async () => ({ platform: 'hoyolab', retryable: false, outcomes: [] }),
+            skport: async () => ({ platform: 'skport', retryable: false, outcomes: [] })
+        } },
+        randomInt: (_minimum, maximum) => maximum - 1,
+        sleepFn: async delay => { delays.push(delay); },
+        logTools: { sendLog() {} }
+    });
+    await coordinator.start({
+        store: { gameCheckIn: {} },
+        client: {},
+        http: {},
+        scheduler: { scheduleDeadline: () => ({ reschedule() {}, async stop() {} }) }
+    });
+    await coordinator._test.processDue('2026-07-21', 0, new AbortController().signal);
+    assert.deepEqual(delays, [9, 30]);
+    assert.equal(completed.indexOf('user-1:hoyolab') < completed.indexOf('user-1:skport'), true);
+    assert.deepEqual(new Set(completed), new Set(due.map(item => `${item.userID}:${item.platform}`)));
+    assert.equal(finalized, 1);
+    await coordinator.stop();
 });
 
 test('啟動同步會辨識舊格式同 Guild 面板，只追蹤最新一個並停用其餘按鈕', async t => {
@@ -771,7 +830,7 @@ test('結果 Embed 依狀態分組顯示遊戲，錯誤項目保留原因', () =
     assert.equal(custom.data.fields[0].name, '⭐ 簽到成功');
 });
 
-test('結果 Embed 截斷過長內容，並行 helper 不超過指定工作數', async () => {
+test('結果 Embed 截斷過長內容', () => {
     const embed = resultEmbed(config, {
         date: '2026-07-21',
         result: { outcomes: Array.from({ length: 100 }, (_, index) => ({
@@ -780,14 +839,106 @@ test('結果 Embed 截斷過長內容，並行 helper 不超過指定工作數',
     });
     assert.equal(embed.data.color, config.embed.color.default);
     assert.equal(embed.data.fields.every(field => field.value.length <= 1024), true);
+});
 
+test('雙人批次會錯開使用者、等待整批完成，且不在最後一批後等待', async () => {
+    const started = [];
+    const releases = new Map();
+    const delays = [];
     let active = 0;
     let maximum = 0;
-    await runWithConcurrency([1, 2, 3, 4], 2, async () => {
-        active += 1;
-        maximum = Math.max(maximum, active);
-        await new Promise(resolve => setImmediate(resolve));
-        active -= 1;
+    const run = runInUserBatches([1, 2, 3, 4, 5], {
+        userDelayMinMs: 500,
+        userDelayMaxMs: 2500,
+        batchDelayMinMs: 5000,
+        batchDelayMaxMs: 15000,
+        randomInt: minimum => minimum,
+        sleepFn: async delay => { delays.push(delay); },
+        worker: async value => {
+            started.push(value);
+            active += 1;
+            maximum = Math.max(maximum, active);
+            await new Promise(resolve => releases.set(value, resolve));
+            active -= 1;
+        }
     });
+
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(started, [1, 2]);
+    assert.deepEqual(delays, [500]);
+    releases.get(1)();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(started, [1, 2]);
+    releases.get(2)();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(started, [1, 2, 3, 4]);
+    assert.deepEqual(delays, [500, 5000, 500]);
+    releases.get(3)();
+    releases.get(4)();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(started, [1, 2, 3, 4, 5]);
+    assert.deepEqual(delays, [500, 5000, 500, 5000]);
+    releases.get(5)();
+    await run;
     assert.equal(maximum, 2);
+});
+
+test('批次隨機間隔包含設定上下界，單一使用者不等待', async () => {
+    const delays = [];
+    const ranges = [];
+    await runInUserBatches([1, 2, 3], {
+        userDelayMinMs: 500,
+        userDelayMaxMs: 2500,
+        batchDelayMinMs: 5000,
+        batchDelayMaxMs: 15000,
+        randomInt(minimum, maximum) {
+            ranges.push([minimum, maximum]);
+            return maximum - 1;
+        },
+        sleepFn: async delay => { delays.push(delay); },
+        worker: async () => {}
+    });
+    assert.deepEqual(ranges, [[500, 2501], [5000, 15001]]);
+    assert.deepEqual(delays, [2500, 15000]);
+
+    let slept = false;
+    await runInUserBatches([1], {
+        userDelayMinMs: 500,
+        userDelayMaxMs: 2500,
+        batchDelayMinMs: 5000,
+        batchDelayMaxMs: 15000,
+        sleepFn: async () => { slept = true; },
+        worker: async () => {}
+    });
+    assert.equal(slept, false);
+});
+
+test('批次等待被取消時不啟動後續使用者，並等待 active worker 收斂', async () => {
+    for (const phase of ['user', 'batch']) {
+        const controller = new AbortController();
+        const reason = new Error(`${phase} cancelled`);
+        const started = [];
+        let sleepCount = 0;
+        await assert.rejects(() => runInUserBatches([1, 2, 3], {
+            userDelayMinMs: 500,
+            userDelayMaxMs: 500,
+            batchDelayMinMs: 5000,
+            batchDelayMaxMs: 5000,
+            signal: controller.signal,
+            sleepFn: async (_delay, signal) => {
+                sleepCount += 1;
+                if ((phase === 'user' && sleepCount === 1) || (phase === 'batch' && sleepCount === 2)) {
+                    controller.abort(reason);
+                    throw signal.reason;
+                }
+            },
+            worker: async value => {
+                started.push(value);
+                if (phase === 'user' && value === 1) {
+                    await new Promise(resolve => controller.signal.addEventListener('abort', resolve, { once: true }));
+                }
+            }
+        }), error => error === reason);
+        assert.deepEqual(started, phase === 'user' ? [1] : [1, 2]);
+    }
 });
