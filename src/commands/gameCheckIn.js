@@ -23,6 +23,7 @@ const { createGameCheckInCredentialCodec } = require('../../util/gameCheckInCred
 const { createGameCheckInRepository } = require('../../util/gameCheckInRepository');
 const { dateKeyAt, nextCheckInEpoch } = require('../../util/gameCheckInSchedule');
 const {
+    createGameCheckInPanelBanner,
     createGameCheckInPanelEmbed,
     createGameCheckInPanelRow
 } = require('../../util/gameCheckInViews');
@@ -322,7 +323,11 @@ function createCommand(config, {
             .setDescription('開啟遊戲自動簽到設定面板'),
 
         async execute(interaction, context) {
-            await interaction.reply({ embeds: [createPanelEmbed()], components: [createGameCheckInPanelRow()] });
+            await interaction.reply({
+                embeds: [createPanelEmbed()],
+                components: [createGameCheckInPanelRow()],
+                files: [createGameCheckInPanelBanner()]
+            });
             const message = await interaction.fetchReply();
             const saved = await repository(context).savePanel(panelScope(interaction, message.channelId), message);
             await disableReplacedPanels(interaction.client, saved.replaced);
