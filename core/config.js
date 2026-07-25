@@ -173,13 +173,31 @@ const commandsConfigSchema = strictObject({
             enabled: emoji('gameCheckIn.toggleEmojis.enabled'),
             disabled: emoji('gameCheckIn.toggleEmojis.disabled')
         }).default({ enabled: '✅', disabled: '⏸️' }),
-        checkInTime: dailyTime('gameCheckIn.checkInTime')
+        checkInTime: dailyTime('gameCheckIn.checkInTime'),
+        userDelayMinMs: integerRange('gameCheckIn.userDelayMinMs', 0, 10000).default(500),
+        userDelayMaxMs: integerRange('gameCheckIn.userDelayMaxMs', 0, 10000).default(2500),
+        batchDelayMinMs: integerRange('gameCheckIn.batchDelayMinMs', 0, 60000).default(5000),
+        batchDelayMaxMs: integerRange('gameCheckIn.batchDelayMaxMs', 0, 60000).default(15000)
     }).superRefine((gameCheckIn, context) => {
         if (gameCheckIn.enable && !gameCheckIn.credentialEncryptionKey) {
             context.addIssue({
                 code: 'custom',
                 path: ['credentialEncryptionKey'],
                 message: '啟用遊戲簽到時必須設定 64 字元十六進位加密金鑰'
+            });
+        }
+        if (gameCheckIn.userDelayMinMs > gameCheckIn.userDelayMaxMs) {
+            context.addIssue({
+                code: 'custom',
+                path: ['userDelayMaxMs'],
+                message: 'gameCheckIn.userDelayMaxMs 不得小於 userDelayMinMs'
+            });
+        }
+        if (gameCheckIn.batchDelayMinMs > gameCheckIn.batchDelayMaxMs) {
+            context.addIssue({
+                code: 'custom',
+                path: ['batchDelayMaxMs'],
+                message: 'gameCheckIn.batchDelayMaxMs 不得小於 batchDelayMinMs'
             });
         }
     }),

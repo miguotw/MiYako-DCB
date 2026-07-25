@@ -1,5 +1,7 @@
 'use strict';
 
+const crypto = require('node:crypto');
+const { setTimeout: setTimeoutPromise } = require('node:timers/promises');
 const { EmbedBuilder } = require('discord.js');
 const { createLogTools } = require('../../../core/sendLog');
 const { createGameCheckInAdapters } = require('../../../util/gameCheckInAdapters');
@@ -17,7 +19,8 @@ const {
     createGameCheckInPanelRow
 } = require('../../../util/gameCheckInViews');
 
-const USER_CONCURRENCY = 2;
+const USER_BATCH_SIZE = 2;
+const COORDINATOR_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const EMBED_FIELD_VALUE_LIMIT = 1024;
 
 function inlineCode(value) {
@@ -85,22 +88,88 @@ function isPermanentDiscordDmError(error) {
     return [10013, 50007].includes(Number(error?.code));
 }
 
-async function runWithConcurrency(groups, limit, worker) {
-    let index = 0;
-    async function consume() {
-        while (index < groups.length) {
-            const current = groups[index++];
-            await worker(current);
+function abortReason(signal) {
+    if (signal?.reason instanceof Error) return signal.reason;
+    const error = new Error('遊戲簽到工作已取消。');
+    error.name = 'AbortError';
+    return error;
+}
+
+function throwIfAborted(signal) {
+    if (signal?.aborted) throw abortReason(signal);
+}
+
+async function sleepWithSignal(milliseconds, signal) {
+    throwIfAborted(signal);
+    if (milliseconds === 0) return;
+    try {
+        await setTimeoutPromise(milliseconds, undefined, { signal });
+    } catch (error) {
+        if (signal?.aborted) throw abortReason(signal);
+        throw error;
+    }
+}
+
+function randomDelay(minimum, maximum, randomInt) {
+    return minimum === maximum ? minimum : randomInt(minimum, maximum + 1);
+}
+
+async function waitForRandomDelay(minimum, maximum, { randomInt, signal, sleepFn }) {
+    const milliseconds = randomDelay(minimum, maximum, randomInt);
+    throwIfAborted(signal);
+    if (milliseconds > 0) await sleepFn(milliseconds, signal);
+    throwIfAborted(signal);
+    return milliseconds;
+}
+
+async function runInUserBatches(groups, {
+    batchDelayMaxMs,
+    batchDelayMinMs,
+    randomInt = crypto.randomInt,
+    signal,
+    sleepFn = sleepWithSignal,
+    userDelayMaxMs,
+    userDelayMinMs,
+    worker
+}) {
+    for (let index = 0; index < groups.length; index += USER_BATCH_SIZE) {
+        const batch = groups.slice(index, index + USER_BATCH_SIZE);
+        const active = [];
+        try {
+            for (const [userIndex, group] of batch.entries()) {
+                if (userIndex > 0) {
+                    await waitForRandomDelay(userDelayMinMs, userDelayMaxMs, { randomInt, signal, sleepFn });
+                }
+                throwIfAborted(signal);
+                let task;
+                try {
+                    task = Promise.resolve(worker(group));
+                } catch (error) {
+                    task = Promise.reject(error);
+                }
+                task.catch(() => {});
+                active.push(task);
+            }
+        } catch (error) {
+            await Promise.allSettled(active);
+            throw error;
+        }
+        const settled = await Promise.allSettled(active);
+        const rejected = settled.find(result => result.status === 'rejected');
+        if (rejected) throw rejected.reason;
+        if (index + USER_BATCH_SIZE < groups.length) {
+            await waitForRandomDelay(batchDelayMinMs, batchDelayMaxMs, { randomInt, signal, sleepFn });
         }
     }
-    await Promise.all(Array.from({ length: Math.min(limit, groups.length) }, consume));
 }
 
 function createGameCheckInDeadlineCoordinator(config, {
     adapters = createGameCheckInAdapters(),
     repositoryFactory = createGameCheckInRepository,
     logTools = createLogTools(config),
-    now = () => Date.now()
+    now = () => Date.now(),
+    randomInt = crypto.randomInt,
+    sleepFn = sleepWithSignal
 } = {}) {
     const settings = config.commands.gameCheckIn;
     const timezone = config.log.timezone;
@@ -158,10 +227,19 @@ function createGameCheckInDeadlineCoordinator(config, {
             context.client,
             `🎮 遊戲自動簽到已觸發：共 ${grouped.size} 位使用者、${due.length} 個平台。`
         );
-        await runWithConcurrency([...grouped.values()], USER_CONCURRENCY, async candidates => {
-            for (const candidate of candidates) {
-                if (signal?.aborted) throw signal.reason || new Error('遊戲簽到工作已取消。');
-                await processPlatform(candidate, date, signal);
+        await runInUserBatches([...grouped.values()], {
+            batchDelayMaxMs: settings.batchDelayMaxMs,
+            batchDelayMinMs: settings.batchDelayMinMs,
+            randomInt,
+            signal,
+            sleepFn,
+            userDelayMaxMs: settings.userDelayMaxMs,
+            userDelayMinMs: settings.userDelayMinMs,
+            worker: async candidates => {
+                for (const candidate of candidates) {
+                    throwIfAborted(signal);
+                    await processPlatform(candidate, date, signal);
+                }
             }
         });
         await repository.finalizeReady(date);
@@ -291,7 +369,7 @@ function createGameCheckInDeadlineCoordinator(config, {
             handle = context.scheduler.scheduleDeadline({
                 name: 'gameCheckIn.deadline',
                 deadlineAt: now(),
-                timeoutMs: 30 * 60 * 1000,
+                timeoutMs: COORDINATOR_TIMEOUT_MS,
                 run: reconcile
             });
             sendLog(
@@ -334,6 +412,6 @@ module.exports = {
     isPermanentDiscordDmError,
     nextDateKey,
     resultEmbed,
-    runWithConcurrency,
+    runInUserBatches,
     scheduledEpoch
 };

@@ -114,13 +114,12 @@ function createCommand(config, {
             .setColor(color)
             .setTitle(`${emoji} ┃ 遊戲自動簽到（BETA） - 輸入/更新憑證`)
             .setDescription([
-                '## 狀態',
+                '## 目前設定狀態',
                 `- HoYoLAB：${status('hoyolab')}`,
                 `- SKPORT：${status('skport')}`,
                 '## 憑證取得方式',
-                '1. 請先閱讀下方教學，再選擇對應平台輸入。',
-                '2. 若曾經填寫過憑證，輸入時會覆蓋對應平台舊有憑證；留空時會清除舊有憑證。',
-                '3. 既有憑證不會重新顯示。',
+                '> -# 1. 請先閱讀下方教學，再選擇對應平台輸入。',
+                '> -# 2. 若曾經填寫過憑證，輸入時會覆蓋對應平台舊有憑證，留空時會清除舊有憑證，既有憑證不會重新顯示。',
                 '### HoYoLAB Cookie 取得方式',
                 '1. 使用瀏覽器登入 [HoYoLAB](https://www.hoyolab.com/) ，按 F12 開啟開發者工具。',
                 '2. 到 Application／儲存空間 → Cookies → `https://www.hoyolab.com`。',
