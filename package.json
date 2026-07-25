@@ -1,6 +1,6 @@
 {
   "name": "miyako-bot",
-  "version": "1.0.0",
+  "version": "4.0.0-rc.1",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
