@@ -229,6 +229,33 @@ test('只將抽取機制錯誤分類為可更新重試', () => {
     assert.equal(normalizeMediaError(new Error('unexpected parser bug')).code, undefined);
 });
 
+test('Bilibili HTTP 412 顯示來源網站風控說明，不誤報為 Bot 故障', () => {
+    const processError = new Error('yt-dlp 執行失敗');
+    processError.stderr = 'ERROR: [BiliBili] BV1test: Unable to download webpage: HTTP Error 412: Precondition Failed';
+
+    const normalized = normalizeMediaError(processError, 'bilibili');
+    assert.equal(normalized.code, 'MUSIC_VALIDATION');
+    assert.match(normalized.message, /Bilibili.*機房網路.*HTTP 412.*來源網站風控.*並非 Bot 功能故障/);
+    assert.equal(normalizeMediaError(new Error('HTTP Error 412: Precondition Failed'), 'youtube').code, undefined);
+});
+
+test('Bilibili 抽取流程將 HTTP 412 傳遞為可預期的使用者提示', async t => {
+    const binaryPath = installFakeYtDlp(t, async () => {
+        const error = new Error('ERROR: [BiliBili] BV1xx411c7mD: Unable to download webpage: HTTP Error 412: Precondition Failed');
+        error.stderr = error.message;
+        throw error;
+    });
+
+    await assert.rejects(
+        extractTracks('https://www.bilibili.com/video/BV1xx411c7mD', 'user', {
+            binaryPath, updateHours: 24, allowPlaylists: true
+        }),
+        error => error.code === 'MUSIC_VALIDATION'
+            && /來源網站風控/.test(error.message)
+            && /並非 Bot 功能故障/.test(error.message)
+    );
+});
+
 test('ffmpeg-static 提供可執行的 FFmpeg', async () => {
     assert.ok(ffmpegPath);
     assert.equal(fs.existsSync(ffmpegPath), true);
