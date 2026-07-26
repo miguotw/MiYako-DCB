@@ -151,6 +151,7 @@ test('公開遊戲簽到面板固定三個按鈕且不包含個人狀態', async
     assert.equal(payload.flags, undefined);
     assert.equal(payload.components.length, 1);
     assert.equal(payload.components[0].components.length, 3);
+    assert.equal(payload.embeds[0].data.title, '🎮 ┃ 遊戲自動簽到');
     assert.equal(payload.embeds[0].data.image.url, 'attachment://game-check-in-banner.png');
     assert.deepEqual(payload.files, [{
         attachment: path.join(__dirname, '..', 'assets', 'gameCheckIn', 'banner.png'),
@@ -253,7 +254,7 @@ test('啟用/停用簽到面板為 ephemeral 七按鈕，切換後原地更新�
     const payload = opened.calls.at(-1)[1];
     assert.equal(opened.calls.at(-1)[0], 'reply');
     assert.equal(payload.flags, MessageFlags.Ephemeral);
-    assert.equal(payload.embeds[0].data.title, '🎮 ┃ 遊戲自動簽到（BETA） - 啟用/停用簽到');
+    assert.equal(payload.embeds[0].data.title, '🎮 ┃ 遊戲自動簽到 - 啟用/停用簽到');
     assert.deepEqual(payload.components.map(row => row.components.length), [5, 2]);
     assert.equal(payload.components.flatMap(row => row.components)
         .every(button => button.data.style === 3 && button.data.emoji === undefined), true);
@@ -311,7 +312,7 @@ test('憑證教學合併為單一私密 Embed，並以兩個平台按鈕開啟 M
     const payload = guide.calls.at(-1)[1];
     assert.equal(payload.flags, MessageFlags.Ephemeral);
     assert.equal(payload.embeds.length, 1);
-    assert.equal(payload.embeds[0].data.title, '🎮 ┃ 遊戲自動簽到（BETA） - 輸入/更新憑證');
+    assert.equal(payload.embeds[0].data.title, '🎮 ┃ 遊戲自動簽到 - 輸入/更新憑證');
     assert.match(payload.embeds[0].data.description, /## 目前設定狀態/);
     assert.match(payload.embeds[0].data.description, /- HoYoLAB：未設定（不自動簽到）/);
     assert.match(payload.embeds[0].data.description, /- SKPORT：已設定/);
@@ -320,6 +321,9 @@ test('憑證教學合併為單一私密 Embed，並以兩個平台按鈕開啟 M
     assert.match(payload.embeds[0].data.description, /```json/);
     assert.deepEqual(payload.components[0].components.map(item => item.data.custom_id), [
         'game_checkin_credentials_hoyolab', 'game_checkin_credentials_skport'
+    ]);
+    assert.deepEqual(payload.components[0].components.map(item => item.data.label), [
+        '輸入／更新 HoYLAB 憑證', '輸入／更新 SKPORT 憑證'
     ]);
     assert.equal(payload.components[0].components.every(item => item.toJSON().type === 2), true);
     assert.equal(setup.command.componentHandlers, undefined);
@@ -340,7 +344,8 @@ test('憑證教學合併為單一私密 Embed，並以兩個平台按鈕開啟 M
     await setup.command.buttonHandlers.game_checkin_credentials_skport(skport, setup.context);
     const skportModal = skport.calls.at(-1)[1];
     assert.equal(skportModal.data.custom_id, 'game_checkin_credentials_modal:skport');
-    assert.equal(skportModal.components[0].components[0].data.style, TextInputStyle.Short);
+    assert.equal(skportModal.components[0].components[0].data.style, TextInputStyle.Paragraph);
+    assert.equal(skportModal.components[0].components[0].data.max_length, 4000);
 });
 
 test('Modal 分欄組合 HoYoLAB 憑證，唯讀驗證成功才保存且空白會停用平台', async t => {
@@ -361,9 +366,10 @@ test('Modal 分欄組合 HoYoLAB 憑證，唯讀驗證成功才保存且空白�
 
     const skport = createInteraction({
         customId: 'game_checkin_credentials_modal:skport',
-        credential: 'skport-secret'
+        credential: '{"code":0,"data":{"content":"skport-secret"},"msg":""}'
     });
     await setup.command.modalSubmitHandlers.game_checkin_credentials_modal(skport, setup.context);
+    assert.deepEqual(setup.validations.at(-1), ['skport', 'skport-secret']);
     assert.match(setup.logs.at(-1)[1], /遊戲簽到 miguo_tw 的 SKPORT 憑證已更新。/);
     assert.doesNotMatch(setup.logs.at(-1)[1], /skport-secret/);
 
@@ -406,6 +412,18 @@ test('驗證錯誤保留舊憑證且不將秘密放入回覆', async t => {
     const reply = JSON.stringify(interaction.calls.at(-1)[1]);
     assert.match(reply, /Cookie 已失效/);
     assert.doesNotMatch(reply, /new-secret|old-secret/);
+
+    await setup.repository.setCredential(interaction.user.id, 'skport', 'old-skport-secret');
+    const oldSkportCredential = (await setup.repository.readUser(interaction.user.id)).credentials.skport;
+    const invalidSkport = createInteraction({
+        customId: 'game_checkin_credentials_modal:skport',
+        credential: 'raw-skport-secret'
+    });
+    await setup.command.modalSubmitHandlers.game_checkin_credentials_modal(invalidSkport, setup.context);
+    assert.deepEqual((await setup.repository.readUser(interaction.user.id)).credentials.skport, oldSkportCredential);
+    const skportReply = JSON.stringify(invalidSkport.calls.at(-1)[1]);
+    assert.match(skportReply, /貼上 account_token 網頁顯示的所有內容/);
+    assert.doesNotMatch(skportReply, /raw-skport-secret|old-skport-secret/);
 });
 
 test('通知依 all → failures → off → all 循環，切換時只顯示設定結果', async t => {
@@ -799,7 +817,7 @@ test('結果 Embed 依狀態分組顯示遊戲，錯誤項目保留原因', () =
             { game: 'HoYoLAB', account: null, status: 'unknown', message: 'HoYoLAB 無法辨識結果。' }
         ] }
     });
-    assert.equal(embed.data.title, '🎮 ┃ 遊戲自動簽到（BETA） - 結果');
+    assert.equal(embed.data.title, '🎮 ┃ 遊戲自動簽到 - 結果');
     assert.equal(embed.data.description, undefined);
     assert.deepEqual(embed.data.fields, [
         { name: `${resultEmojis.success} 簽到成功`, value: '`原神`、`崩壞：星穹鐵道`' },

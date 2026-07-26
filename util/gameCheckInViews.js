@@ -14,7 +14,7 @@ function createGameCheckInPanelBanner() {
 function createGameCheckInPanelEmbed(config, nextTriggerAt) {
     return new EmbedBuilder()
         .setColor(config.embed.color.default)
-        .setTitle(`${config.commands.gameCheckIn.emoji} ┃ 遊戲自動簽到（BETA）`)
+        .setTitle(`${config.commands.gameCheckIn.emoji} ┃ 遊戲自動簽到`)
         .setDescription([
             '還在每天往返不同網站，只為完成繁瑣的遊戲簽到嗎？',
             `只需設定一次憑證，<@${config.startup.clientId}> 便會每日自動完成所有已綁定遊戲的簽到，省時又省心！`,

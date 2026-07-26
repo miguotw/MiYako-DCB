@@ -290,6 +290,29 @@ function validateSkportToken(value) {
     return token;
 }
 
+function parseSkportAccountTokenResponse(value) {
+    const input = String(value || '').trim();
+    if (!input) return '';
+    let response;
+    try {
+        response = JSON.parse(input);
+    } catch {
+        throw new GameCheckInAdapterError(
+            'SKPORT_ACCOUNT_TOKEN_RESPONSE_INVALID',
+            'SKPORT 憑證格式不正確，請貼上 account_token 網頁顯示的所有內容。',
+            { validation: true }
+        );
+    }
+    if (Number(response?.code) !== 0 || typeof response?.data?.content !== 'string') {
+        throw new GameCheckInAdapterError(
+            'SKPORT_ACCOUNT_TOKEN_RESPONSE_INVALID',
+            'SKPORT 憑證內容無效，請重新登入後貼上 account_token 網頁顯示的所有內容。',
+            { validation: true }
+        );
+    }
+    return validateSkportToken(response.data.content);
+}
+
 function generateSkportSign(path, method, headers, query, body, token) {
     let source = path + (String(method).toUpperCase() === 'GET' ? (query || '') : (body || ''));
     if (headers.timestamp) source += String(headers.timestamp);
@@ -529,6 +552,7 @@ module.exports = {
     HOYOLAB_GAMES,
     createGameCheckInAdapters,
     generateSkportSign,
+    parseSkportAccountTokenResponse,
     parseHoyolabCookie,
     runHoyolabCheckIn,
     runSkportCheckIn,

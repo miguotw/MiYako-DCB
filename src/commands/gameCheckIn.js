@@ -16,7 +16,8 @@ const { createLogTools } = require('../../core/sendLog');
 const {
     buildHoyolabCookie,
     GameCheckInAdapterError,
-    createGameCheckInAdapters
+    createGameCheckInAdapters,
+    parseSkportAccountTokenResponse
 } = require('../../util/gameCheckInAdapters');
 const { gamesForPlatform, getGameByID } = require('../../util/gameCheckInCatalog');
 const { createGameCheckInCredentialCodec } = require('../../util/gameCheckInCredentialCodec');
@@ -112,7 +113,7 @@ function createCommand(config, {
         const status = platform => record.credentials[platform] ? '已設定' : '未設定（不自動簽到）';
         return new EmbedBuilder()
             .setColor(color)
-            .setTitle(`${emoji} ┃ 遊戲自動簽到（BETA） - 輸入/更新憑證`)
+            .setTitle(`${emoji} ┃ 遊戲自動簽到 - 輸入/更新憑證`)
             .setDescription([
                 '## 目前設定狀態',
                 `- HoYoLAB：${status('hoyolab')}`,
@@ -135,7 +136,7 @@ function createCommand(config, {
                 '### SKPORT 帳號 Token 取得方式',
                 '1. 使用瀏覽器登入 [Gryphline](https://user.gryphline.com/) 。',
                 '2. 使用瀏覽器開啟 https://web-api.gryphline.com/cookie_store/account_token 。',
-                '3. 畫面會顯示類似以下 JSON，只複製 `data.content` 的值。',
+                '3. 全選並複製頁面顯示的所有內容，直接貼到 SKPORT 憑證欄位，不需要自行分離任何欄位。',
                 '```json',
                 '{"code":0,"data":{"content":"YourAccountTokenHere"},"msg":""}',
                 '```'
@@ -146,11 +147,11 @@ function createCommand(config, {
         return new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId('game_checkin_credentials_hoyolab')
-                .setLabel('HoYoLAB')
+                .setLabel('輸入／更新 HoYLAB 憑證')
                 .setStyle(ButtonStyle.Primary),
             new ButtonBuilder()
                 .setCustomId('game_checkin_credentials_skport')
-                .setLabel('SKPORT')
+                .setLabel('輸入／更新 SKPORT 憑證')
                 .setStyle(ButtonStyle.Primary)
         );
     }
@@ -158,7 +159,7 @@ function createCommand(config, {
     function createGameSettingsEmbed() {
         return new EmbedBuilder()
             .setColor(color)
-            .setTitle(`${emoji} ┃ 遊戲自動簽到（BETA） - 啟用/停用簽到`)
+            .setTitle(`${emoji} ┃ 遊戲自動簽到 - 啟用/停用簽到`)
             .setDescription([
                 '點選下方按鈕可分別啟用或停用自動簽到。',
                 '> 已開始或等待重試的遊戲將沿用當日設定，其餘變更可立即生效。',
@@ -209,11 +210,11 @@ function createCommand(config, {
         return modal.addComponents(new ActionRowBuilder().addComponents(
             new TextInputBuilder()
                 .setCustomId('credential')
-                .setLabel('account_token（留空停用）')
-                .setPlaceholder('只貼上 data.content 的值')
-                .setStyle(TextInputStyle.Short)
+                .setLabel('網頁完整內容（留空停用）')
+                .setPlaceholder('{"code":0,"data":{"content":"..."},"msg":""}')
+                .setStyle(TextInputStyle.Paragraph)
                 .setRequired(false)
-                .setMaxLength(2048)
+                .setMaxLength(4000)
         ));
     }
 
@@ -283,7 +284,7 @@ function createCommand(config, {
                     interaction.fields.getTextInputValue('ltoken_v2'),
                     interaction.fields.getTextInputValue('ltuid_v2')
                 )
-                : interaction.fields.getTextInputValue('credential').trim();
+                : parseSkportAccountTokenResponse(interaction.fields.getTextInputValue('credential'));
             if (value) await adapters.validate[platform](value, { http: context.http, signal: context.signal });
             const changed = await repository(context).setCredential(interaction.user.id, platform, value);
             const action = value ? (changed.changed ? '已驗證並保存' : '未變更') : '已清除並停用';

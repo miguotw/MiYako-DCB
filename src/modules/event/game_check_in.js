@@ -78,7 +78,7 @@ function resultEmbed(config, item) {
     }
     const embed = new EmbedBuilder()
         .setColor(config.embed.color.default)
-        .setTitle(`${config.commands.gameCheckIn.emoji} ┃ 遊戲自動簽到（BETA） - 結果`);
+        .setTitle(`${config.commands.gameCheckIn.emoji} ┃ 遊戲自動簽到 - 結果`);
     if (fields.length) embed.addFields(fields);
     else embed.setDescription('本次沒有可顯示的簽到結果。');
     return embed;
