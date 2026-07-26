@@ -35,12 +35,11 @@ function createLegacyRepository() {
 
 /** 新通知成功前不得刪除舊訊息；函式只負責傳送並回傳新 locator。 */
 async function sendPackageUpdate(client, record, packageData) {
-    const embed = createPackageEmbed(record, packageData, '物流貨態更新');
+    const embed = createPackageEmbed(record, packageData);
     const payload = {
-        content: `<@${record.userID}>`,
         embeds: [embed],
         components: createPackageNotificationActionsRows(record),
-        allowedMentions: { users: [record.userID] }
+        allowedMentions: { parse: [] }
     };
 
     const channel = record.channelID ? await client.channels.fetch(record.channelID).catch(() => null) : null;
@@ -51,7 +50,7 @@ async function sendPackageUpdate(client, record, packageData) {
 
     const user = await client.users.fetch(record.userID).catch(() => null);
     if (user) {
-        const message = await user.send({ embeds: [embed], components: createPackageNotificationActionsRows(record) });
+        const message = await user.send(payload);
         return { channelID: message.channelId, messageID: message.id };
     }
 
@@ -125,6 +124,9 @@ async function checkPackages(client, signal, repository) {
 
             if (signature !== observed) {
                 await repository.stageNotification(record.userID, record.userPackageID, { signature, packageData });
+                sendLog(client, `📦 ${record.username || '使用者'} 的物流追蹤有更新：${record.trackingNumber}`, 'INFO', null, {
+                    sensitiveValues: [record.trackingNumber]
+                });
                 continue;
             }
 

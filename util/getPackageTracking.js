@@ -20,6 +20,7 @@ const DEFAULT_ARCHIVE_AFTER_DAYS = 14;
 const DEFAULT_CHECK_INTERVAL_MINUTES = 30;
 const MS_PER_DAY = 86400000;
 const MS_PER_MINUTE = 60000;
+const MAX_EMBED_TITLE_LENGTH = 256;
 
 // 共用 Discord 元件 ---------------------------------------------------------
 
@@ -63,7 +64,7 @@ function createPackageNotificationActionsRows(record) {
             ),
             createPackageActionButton(
                 createScopedPackageCustomId('package_panel_archive', record),
-                '封存',
+                '封存包裹',
                 ButtonStyle.Secondary
             )
         )
@@ -267,50 +268,50 @@ function getArchiveHintFooter() {
 
 // 顯示格式 ------------------------------------------------------------------
 
-function createPackageEmbed(record, packageData, title = '包裹貨態') {
+function createPackageTitle(record) {
+    const prefix = `${EMBED_EMOJI} ┃ 物流追蹤 - `;
+    const suffix = record.status === 'archived' ? '（已封存）' : '';
+    const note = String(record.note || '').trim() || '無備註';
+    return `${prefix}${note.slice(0, MAX_EMBED_TITLE_LENGTH - prefix.length - suffix.length)}${suffix}`;
+}
+
+function formatTrackingNumber(trackingNumber) {
+    return `||\`${trackingNumber}\`||`;
+}
+
+function createPackageEmbed(record, packageData) {
     const latestHistory = getLatestHistory(packageData);
     const historyLines = getSortedHistories(packageData)
         .slice(1, 11)
         .map(history => `- ${formatHistoryLine(history)}`);
     const carrierName = packageData?.carrier?.name || record.carrierName || '未知物流';
     const trackingNumber = packageData?.tracking_number || record.trackingNumber;
-    const shortUrl = packageData?.short_url?.identifier ? `https://track.tw/u/${packageData.short_url.identifier}` : null;
-    const embed = new EmbedBuilder()
+    return new EmbedBuilder()
         .setColor(EMBED_COLOR)
-        .setTitle(`${EMBED_EMOJI} ┃ ${title}`)
+        .setTitle(createPackageTitle(record))
         .addFields(
             { name: '物流商', value: carrierName || '未知', inline: true },
-            { name: '物流單號', value: `\`${trackingNumber}\``, inline: true },
+            { name: '物流單號', value: formatTrackingNumber(trackingNumber), inline: true },
             { name: '追蹤狀態', value: formatRecordStatus(record.status), inline: true },
             { name: '最新貨態', value: formatHistoryLine(latestHistory), inline: false },
             { name: '歷史貨態', value: historyLines.length ? historyLines.join('\n').slice(0, 1024) : '- 尚無貨態資料', inline: false }
         )
         .setFooter({ text: getArchiveHintFooter() })
         .setTimestamp();
-
-    if (record.note) {
-        embed.setDescription(record.note);
-    }
-
-    if (shortUrl) {
-        embed.setURL(shortUrl);
-    }
-
-    return embed;
 }
 
-function createStoredPackageEmbed(record, title = '包裹貨態') {
+function createStoredPackageEmbed(record) {
     if (record.lastPackageData) {
-        return createPackageEmbed(record, record.lastPackageData, title);
+        return createPackageEmbed(record, record.lastPackageData);
     }
 
     return new EmbedBuilder()
         .setColor(EMBED_COLOR)
-        .setTitle(`${EMBED_EMOJI} ┃ ${title}`)
-        .setDescription(record.note || '尚無本機貨態快照。')
+        .setTitle(createPackageTitle(record))
+        .setDescription('尚無本機貨態快照。')
         .addFields(
             { name: '物流商', value: record.carrierName || '未知', inline: true },
-            { name: '物流單號', value: `\`${record.trackingNumber}\``, inline: true },
+            { name: '物流單號', value: formatTrackingNumber(record.trackingNumber), inline: true },
             { name: '追蹤狀態', value: formatRecordStatus(record.status), inline: true },
             { name: '最新貨態', value: '尚無本機貨態快照', inline: false },
             { name: '歷史貨態', value: '- 尚無本機貨態快照', inline: false }
@@ -352,6 +353,8 @@ return {
     findCarrier,
     getLatestHistory,
     createHistorySignature,
+    createPackageTitle,
+    formatTrackingNumber,
     createPackageEmbed,
     createStoredPackageEmbed,
     createAddPackageButton,

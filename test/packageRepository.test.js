@@ -145,3 +145,46 @@ test('新物流通知失敗時舊通知仍存在且 delivered signature 不前�
     assert.equal(oldDeletes, 0);
     assert.equal((await repository.getPackage(ownerID, 'p1')).lastHistorySignature, 'old');
 });
+
+test('物流更新通知不提及使用者，成功送出後提交 locator 並刪除舊通知', async t => {
+    const { root, repository } = repositoryFixture();
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const ownerID = '12345678901234567';
+    const reservation = await repository.reserveImport(ownerID, { carrierID: 'c', trackingNumber: 'TRACK123' });
+    await repository.commitImport(ownerID, reservation.id, {
+        userID: ownerID, userPackageID: 'p1', carrierID: 'c', carrierName: 'carrier', note: '測試備註',
+        trackingNumber: 'TRACK123', status: 'active', channelID: 'target',
+        lastHistorySignature: 'old', lastNotificationChannelID: 'old-channel', lastNotificationMessageID: 'old-message'
+    });
+    const packageData = {
+        tracking_number: 'TRACK123', carrier: { name: 'carrier' },
+        package_history: [{ status: '已出貨', time: 1_720_000_000 }]
+    };
+    await repository.stageNotification(ownerID, 'p1', { signature: 'new', packageData });
+    const sent = [];
+    let oldDeletes = 0;
+    const client = {
+        channels: {
+            fetch: async channelID => channelID === 'target'
+                ? {
+                    send: async payload => {
+                        sent.push(payload);
+                        return { channelId: 'target', id: 'new-message' };
+                    }
+                }
+                : { messages: { fetch: async () => ({ delete: async () => { oldDeletes += 1; } }) } }
+        },
+        users: { fetch: async () => null }
+    };
+    const initializer = createInitializer(loadConfig(), { logTools: { sendLog() {} } });
+    await initializer._test.processOutbox(client, repository, new AbortController().signal);
+
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].content, undefined);
+    assert.deepEqual(sent[0].allowedMentions, { parse: [] });
+    assert.equal(sent[0].embeds[0].data.title, `${loadConfig().commands.packageTracking.emoji} ┃ 物流追蹤 - 測試備註`);
+    assert.equal(oldDeletes, 1);
+    const updated = await repository.getPackage(ownerID, 'p1');
+    assert.equal(updated.lastHistorySignature, 'new');
+    assert.equal(updated.lastNotificationMessageID, 'new-message');
+});

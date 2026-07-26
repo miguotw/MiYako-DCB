@@ -186,7 +186,7 @@ SIGINT 與 SIGTERM 共用一個冪等 shutdown promise，依序停止 Router、�
 
 ### 物流、Twitch 與臨時語音
 
-物流以 owner ID 與 package ID 直接定位。active 加 reserved 不得超過設定上限；匯入或喚醒會在遠端 I/O 前原子保留名額，失敗則釋放。降低上限不會刪除既有資料，但超額使用者在降回上限以下前不能新增或喚醒。通知採 persisted outbox，新通知成功後才提交 signature 與 locator。
+物流以 owner ID 與 package ID 直接定位。active 加 reserved 不得超過設定上限；匯入或喚醒會在遠端 I/O 前原子保留名額，失敗則釋放。降低上限不會刪除既有資料，但超額使用者在降回上限以下前不能新增或喚醒。通知採 persisted outbox，不提及使用者；新通知成功後才提交 signature 與 locator，再盡力刪除舊通知。
 
 Twitch OAuth token provider 與 Helix client 使用共用 HTTP policy；Helix ID 每批最多 100 筆，401 最多失效 token 並重取一次。沒有角色或角色遺失時不提及任何人，絕不退回 `@everyone`。移除訂閱只更新該 Guild 的舊通知與 locator。
 

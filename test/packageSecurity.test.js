@@ -7,7 +7,8 @@ const { createPackageNotificationActionsRows } = require('../util/getPackageTrac
 
 test('所有既有包裹操作按鈕都攜帶 package ID', () => {
     const record = { userPackageID: 'package-1' };
-    const activeIDs = createPackageNotificationActionsRows(record)
+    const activeRows = createPackageNotificationActionsRows(record);
+    const activeIDs = activeRows
         .flatMap(row => row.components.map(component => component.data.custom_id))
         .filter(id => id && id !== 'package_panel_add:detached');
     assert.deepEqual(activeIDs, [
@@ -15,11 +16,16 @@ test('所有既有包裹操作按鈕都攜帶 package ID', () => {
         'package_panel_note:package-1',
         'package_panel_archive:package-1'
     ]);
+    assert.equal(activeRows[0].components[2].data.label, '封存包裹');
 
-    const archivedIDs = command._test.createArchivedActionsRows(record)
+    const archivedRows = command._test.createArchivedActionsRows(record);
+    const archivedIDs = archivedRows
         .flatMap(row => row.components.map(component => component.data.custom_id))
         .filter(id => id && id !== 'package_panel_add:detached');
     assert.deepEqual(archivedIDs, ['package_panel_wake:package-1', 'package_panel_delete:package-1']);
+    assert.equal(archivedRows[0].components[0].data.label, '恢復追蹤');
+    assert.equal(archivedRows[0].components[1].data.label, '刪除包裹');
+    assert.equal(archivedRows[0].components[1].data.style, 4);
 });
 
 test('物流 action customId 必須包含 package ID 並通過 owner 驗證', () => {
