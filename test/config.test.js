@@ -23,7 +23,7 @@ const {
 
 const originalConfigDirectory = process.env.MIYAKO_CONFIG_DIR;
 const COMMAND_CONFIG_SECTIONS = [
-    'announcement', 'raffle', 'dataCollection', 'messageDelete', 'userInfo', 'stream',
+    'announcement', 'globalAnnouncement', 'raffle', 'dataCollection', 'messageDelete', 'userInfo', 'stream',
     'about', 'ping', 'hitokoto', 'packageTracking', 'gameCheckIn', 'ipQuery', 'minecraft', 'unixTimestamp', 'music'
 ];
 
@@ -113,9 +113,10 @@ test('startup.guildId 可省略，有填寫時必須是有效 Snowflake', () => 
     }
 });
 
-test('16 個指令開關缺省為啟用，並接受顯式停用', () => {
+test('17 個指令開關缺省為啟用，並接受顯式停用', () => {
     const defaults = createValidConfigDocuments();
     for (const section of COMMAND_CONFIG_SECTIONS) delete defaults['configCommands.yml'][section].enable;
+    delete defaults['configCommands.yml'].globalAnnouncement;
     delete defaults['configCommands.yml'].music.maxConcurrentYtDlpProcesses;
     delete defaults['configCommands.yml'].gameCheckIn.resultEmojis;
     delete defaults['configCommands.yml'].gameCheckIn.toggleEmojis;
@@ -128,6 +129,7 @@ test('16 個指令開關缺省為啟用，並接受顯式停用', () => {
     try {
         const config = loadConfig();
         for (const section of COMMAND_CONFIG_SECTIONS) assert.equal(config.commands[section].enable, true, section);
+        assert.equal(config.commands.globalAnnouncement.emoji, '📢');
         assert.equal(config.commands.music.maxConcurrentYtDlpProcesses, 3);
         assert.deepEqual(config.commands.gameCheckIn.resultEmojis, {
             success: '🟢', already: '🟡', skipped: '🟠', error: '🔴'

@@ -13,6 +13,8 @@ MiYako-DCB 是以 discord.js 建立的繁體中文 Discord Bot。現行版本將
 
 管理功能集中在設定的管理指令名稱下，包含公告、訊息刪除、用戶資料、資料收集、抽選、臨時語音與 Twitch 通知。移除臨時語音入口時會以私密 Embed 下拉選單列出已設定頻道。另有關鍵字回應、成員生命週期、活動狀態與四種 Discord 事件 logger。
 
+服務提供者可使用獨立的 `/發送全域消息`，預覽並確認後將 Bot 最新消息發到各 Guild 的系統訊息頻道；系統頻道不可用時，只會選擇非 NSFW 且具備檢視、發送及嵌入權限的一般文字頻道。此指令由 Router 依 `about.provider` 集中驗證，不要求服務提供者同時具有 Guild 管理員權限。
+
 ## 執行環境與安裝
 
 - Linux/POSIX
@@ -61,6 +63,8 @@ chmod 600 config/config.yml config/configCommands.yml config/configModules.yml
 
 每個 Slash Command 區段都有 `enable: true|false`。公開與管理指令位於 `configCommands.yml`；臨時語音沿用 `configModules.yml` 的 `temporaryVoice.enable`。缺省值為 `true`，設為 `false` 會停用整個 feature，包括 Slash／元件路由、listener、scheduler、背景輪詢與該 feature 所需的 Gateway Intents。全部管理指令停用時不會發布管理 aggregate。
 
+`globalAnnouncement.enable` 控制服務提供者全域消息；舊設定檔尚未加入此區段時會以啟用及 `📢` emoji 作為相容預設。消息中的「新增應用程式」按鈕使用 Discord Provided Link，因此仍需在 Discord Developer Portal 的 Installation 頁設定安裝情境、預設 scopes 與 Bot 權限。
+
 Twitch Client ID／Secret 必須同時有值或同時空白。兩者全空時只停用 Twitch 輪詢；Track.TW token 空白時只停用物流背景輪詢，對應指令會回報尚未設定。
 
 ## 啟動與指令部署
@@ -86,7 +90,7 @@ npm run undeploy:guild
 
 四個 CLI 都不接受參數；global 入口不需要 `startup.guildId`，guild 入口缺少該設定時會直接失敗。部署以單次 PUT 原子取代固定 scope 的 catalog，因此會移除該 scope 的過時指令；撤銷則 PUT 空 catalog。global 與 guild 不會互相清除，兩者同時發布時 Discord 可能顯示重複指令，應先明確撤銷不需要的 scope。所有流程都不建立 Discord Client、不登入、不啟動 feature 或 scheduler；REST 失敗會以非零狀態結束。
 
-新增 `/遊戲簽到` 後必須由部署者重新執行所需 scope 的 deploy 指令，runtime 不會自行發布；請勿把 deploy 當作一般驗證命令。
+新增或調整 Slash Command（包含 `/遊戲簽到`、`/發送全域消息`）後，必須由部署者重新執行所需 scope 的 deploy 指令；runtime 不會自行發布，請勿把 deploy 當作一般驗證命令。
 
 ## 專案結構
 
@@ -133,7 +137,7 @@ npm run undeploy:guild
 { client, config, logger, router, http, store, scheduler, processManager, signal }
 ```
 
-Router 對 Slash、Modal、Button 與所有 Select 分別維護 exact/prefix Map。prefix 只匹配 `prefix:<非空 payload>`；啟動時會拒絕重複 route、namespace 覆蓋與 admin/public 衝突。管理員權限由 Router 統一檢查，Discord default permissions 只作介面 gate。未知、過期或關機中的互動會立即收到私密 validation Embed。
+Router 對 Slash、Modal、Button 與所有 Select 分別維護 exact/prefix Map。prefix 只匹配 `prefix:<非空 payload>`；啟動時會拒絕重複 route、namespace 覆蓋與不同 access 的覆蓋。管理員與 `about.provider` 服務提供者權限均由 Router 統一檢查，Discord default permissions 只作管理指令的介面 gate。未知、過期或關機中的互動會立即收到私密 validation Embed。
 
 互動系統錯誤由 `errorReply()` 單點記錄，終端與 Discord 日誌各只送一次。使用者回覆只包含經 secret/control-character／路徑遮罩及截斷的錯誤第一行與事件 ID，不包含 stack 或 debug details；可預期的 Discord 輸入錯誤使用 validation 回覆且不寫 ERROR 日誌。
 

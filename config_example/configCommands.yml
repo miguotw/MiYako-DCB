@@ -8,6 +8,15 @@ announcement:
 
 
 #-------------------------------
+# /發送全域消息 指令的設定（僅限 about.provider 使用）：
+globalAnnouncement:
+  enable: true
+
+  # 標題使用的 emoji。
+  emoji: "📢"
+
+
+#-------------------------------
 # /admin 抽選系統 指令的設定：
 raffle:
   enable: true

@@ -3,7 +3,7 @@ const { createReplyTools } = require('./Reply');
 
 const INTERACTION_KINDS = new Set(['button', 'modal', 'select']);
 const MATCH_TYPES = new Set(['exact', 'prefix']);
-const ACCESS_TYPES = new Set(['public', 'admin']);
+const ACCESS_TYPES = new Set(['public', 'admin', 'provider']);
 
 function createRegistry() {
     return { exact: new Map(), prefix: new Map() };
@@ -11,7 +11,7 @@ function createRegistry() {
 
 function assertDescriptor(descriptor, label) {
     if (!descriptor || typeof descriptor !== 'object') throw new TypeError(`${label} descriptor 不可為空。`);
-    if (!ACCESS_TYPES.has(descriptor.access)) throw new TypeError(`${label} 必須宣告 access: public | admin。`);
+    if (!ACCESS_TYPES.has(descriptor.access)) throw new TypeError(`${label} 必須宣告 access: public | admin | provider。`);
     if (typeof descriptor.execute !== 'function') throw new TypeError(`${label} 必須提供 execute。`);
 }
 
@@ -77,14 +77,23 @@ function resolveComponentDescriptor(kindRegistry, customId) {
     return kindRegistry.prefix.get(customId.slice(0, separatorIndex)) || null;
 }
 
-async function assertAccess(interaction, descriptor, validationReply) {
-    if (descriptor.access !== 'admin') return true;
-    const allowed = interaction.inGuild?.()
-        && interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
+async function assertAccess(interaction, descriptor, validationReply, config) {
+    if (descriptor.access === 'public') return true;
+    const inGuild = interaction.inGuild?.();
+    let allowed = false;
+    let message;
+    if (descriptor.access === 'admin') {
+        allowed = inGuild && interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
+        message = inGuild
+            ? '**你必須是伺服器管理員才能使用此功能。**'
+            : '**此功能僅能在伺服器中使用。**';
+    } else {
+        allowed = inGuild && String(interaction.user?.id || '') === String(config?.commands?.about?.provider || '');
+        message = inGuild
+            ? '**此功能僅限 Bot 服務提供者使用。**'
+            : '**此功能僅能在伺服器中使用。**';
+    }
     if (allowed) return true;
-    const message = interaction.inGuild?.()
-        ? '**你必須是伺服器管理員才能使用此功能。**'
-        : '**此功能僅能在伺服器中使用。**';
     await validationReply(interaction, message, { ephemeral: true });
     return false;
 }
@@ -142,7 +151,7 @@ function createInteractionRouter({ logger = null, config } = {}) {
 
         try {
             if (!replies) throw new Error('Interaction Router dispatch 需要 config。');
-            if (!await assertAccess(interaction, descriptor, replies.validationReply)) return false;
+            if (!await assertAccess(interaction, descriptor, replies.validationReply, config)) return false;
             await descriptor.execute(interaction, context);
             return true;
         } catch (error) {

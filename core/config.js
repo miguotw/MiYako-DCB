@@ -100,6 +100,10 @@ const baseConfigSchema = strictObject({
 
 const commandsConfigSchema = strictObject({
     announcement: strictObject({ enable: commandEnable(), emoji: emoji('announcement.emoji') }),
+    globalAnnouncement: strictObject({
+        enable: commandEnable(),
+        emoji: emoji('globalAnnouncement.emoji')
+    }).default({ enable: true, emoji: '📢' }),
     raffle: strictObject({ enable: commandEnable(), emoji: emoji('raffle.emoji') }),
     dataCollection: strictObject({
         enable: commandEnable(),

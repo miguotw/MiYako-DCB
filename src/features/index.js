@@ -6,6 +6,7 @@ const featureModules = [
     require('./ping'),
     require('./unixTimestamp'),
     require('./announcement'),
+    require('./globalAnnouncement'),
     require('./messageDelete'),
     require('./userInfo'),
     require('./music'),
