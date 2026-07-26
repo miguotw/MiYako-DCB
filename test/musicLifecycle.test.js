@@ -93,6 +93,14 @@ async function waitFor(predicate, timeoutMs = 3000) {
     assert.equal(predicate(), true, '等待非同步直播狀態逾時');
 }
 
+async function waitForAsync(predicate, timeoutMs = 3000) {
+    const deadline = Date.now() + timeoutMs;
+    while (!await predicate() && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.equal(await predicate(), true, '等待非同步狀態逾時');
+}
+
 test.after(() => {
     for (const state of guildStates.values()) cleanupState(state, true);
 });
@@ -108,7 +116,16 @@ test('音樂面板、序列、暫停、移除、清空與 preparation 狀態皆�
     };
     const voiceChannel = { id: 'voice-channel', guild };
     const { interaction, panelMessage, calls } = interactionFixture(voiceChannel);
-    const command = createCommand(loadConfig());
+    const localConfig = loadConfig();
+    const backendLogs = [];
+    interaction.client.isReady = () => true;
+    interaction.client.channels.cache = new Map([[localConfig.log.channel, {
+        send(payload) {
+            backendLogs.push(payload);
+            return Promise.resolve();
+        }
+    }]]);
+    const command = createCommand(localConfig);
 
     const buttonRows = command._test.createButtons({ current: null, queue: [], paused: false });
     assert.equal(buttonRows.length, 2);
@@ -179,6 +196,7 @@ test('音樂面板、序列、暫停、移除、清空與 preparation 狀態皆�
     assert.equal(await togglePause(state), true);
     assert.equal(await togglePause(state), false);
     await command.buttonHandlers.music_pause(interaction, context);
+    await command.buttonHandlers.music_pause(interaction, context);
 
     state.queue = Array.from({ length: 12 }, (_, index) => temporaryTrack(root, `queue-${index}`, `queue-${index}`));
     interaction.customId = 'music_queue_open:1';
@@ -198,6 +216,20 @@ test('音樂面板、序列、暫停、移除、清空與 preparation 狀態皆�
     await command.modalSubmitHandlers.music_queue_clear_modal(interaction, context);
     assert.equal(state.queue.length, 0);
 
+    interaction.customId = 'music_skip';
+    await command.buttonHandlers.music_skip(interaction, context);
+    assert.equal(state.current, null);
+    await waitForAsync(async () => {
+        const savedPanel = await store.musicPanel.read(interaction.guildId);
+        return savedPanel?.messageID !== panelMessage.id;
+    });
+    await command._test.snapshotWriter(context).flushAll();
+
+    for (const message of ['暫停了目前的音樂', '繼續播放目前的音樂', '開啟了完整播放序列',
+        '從播放序列移除了 2 首歌曲', '清空了播放序列，共移除 10 首歌曲', '跳過了歌曲：current']) {
+        assert.ok(backendLogs.some(payload => payload.content.includes(message)), `後台應提示：${message}`);
+    }
+
     state.queue = [temporaryTrack(root, 'direct-remove', 'direct-remove')];
     assert.equal(removeQueuedTracks(state, ['direct-remove']).length, 1);
     state.queue = [temporaryTrack(root, 'direct-clear', 'direct-clear')];
@@ -206,6 +238,8 @@ test('音樂面板、序列、暫停、移除、清空與 preparation 狀態皆�
     assert.equal(state.preparingTracks, 1);
     endTrackPreparation(state);
     assert.equal(state.preparingTracks, 0);
+    cleanupState(state, true);
+    await command._test.snapshotWriter(context).flushAll();
 });
 
 test('召喚等待 Ready、同頻道冪等，空閒可搬移但播放工作中拒絕', async t => {
