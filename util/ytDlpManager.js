@@ -240,11 +240,15 @@ function isExtractorFailure(error) {
 }
 
 /** 可預期的存取限制屬於輸入結果，不應建立系統事件或 ERROR 日誌。 */
-function normalizeMediaError(error) {
+function normalizeMediaError(error, source) {
     if (error?.code === 'MUSIC_VALIDATION') return error;
     const message = `${error?.message || ''}\n${error?.stderr || ''}`.toLowerCase();
+    const isBilibili = source === 'bilibili' || /\bbilibili\b/.test(message);
+    if (isBilibili && /http(?:\s+error)?\s*412\b|precondition failed/.test(message)) {
+        return musicValidationError('伺服器連線遭到 Bilibili 拒絕，請稍後再試或改用其他來源。');
+    }
     if (/upcoming|premieres? in|will begin|scheduled/.test(message)) {
-        return musicValidationError('此直播尚未開始，目前不會等待預定直播。');
+        return musicValidationError('此直播尚未開始。');
     }
     if (/private|members.only|premium members|supporter.only|registered users|login required|log in|sign in|geo.?restrict|not available in your country|video unavailable|has been removed|does not exist/.test(message)) {
         return musicValidationError('此媒體無法公開存取，可能已失效、受地區限制或需要登入。');
@@ -332,7 +336,7 @@ async function extractResolvedTrack(query, requestedBy, options = {}, trackOptio
             await ensureYtDlp(options, true);
             return extractResolvedTrack(query, requestedBy, options, trackOptions, true);
         }
-        throw normalizeMediaError(error);
+        throw normalizeMediaError(error, trackOptions.provider);
     }
 }
 
@@ -386,7 +390,7 @@ async function extractYouTubePlaylist(input, requestedBy, options = {}, retried 
             await ensureYtDlp(options, true);
             return extractYouTubePlaylist(input, requestedBy, options, true);
         }
-        throw normalizeMediaError(error);
+        throw normalizeMediaError(error, 'youtube');
     }
 }
 
@@ -442,7 +446,7 @@ async function extractBilibiliTracks(input, requestedBy, options = {}, retried =
             await ensureYtDlp(options, true);
             return extractBilibiliTracks(input, requestedBy, options, true);
         }
-        throw normalizeMediaError(error);
+        throw normalizeMediaError(error, 'bilibili');
     }
 }
 
@@ -666,7 +670,7 @@ async function downloadTrack(track, options = {}, onProgress = null, retried = f
             await ensureYtDlp(options, true);
             return downloadTrack(track, options, onProgress, true);
         }
-        throw normalizeMediaError(error);
+        throw normalizeMediaError(error, track.provider);
     }
 }
 

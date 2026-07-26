@@ -50,6 +50,8 @@ test('非專案 CWD 仍使用專案根目錄下的固定 runtime 路徑', t => {
     const store = createStoreRegistry();
     assert.equal(store.packageTracking.directory,
         path.join(PROJECT_ROOT, 'runtime', 'data', 'package-tracking'));
+    assert.equal(store.gameCheckIn.directory,
+        path.join(PROJECT_ROOT, 'runtime', 'data', 'game-check-in'));
     assert.equal(store.musicQueue.directory,
         path.join(PROJECT_ROOT, 'runtime', 'data', 'music', 'queues'));
 });

@@ -37,7 +37,7 @@ function packageData(status = '運送中') {
     return {
         tracking_number: 'TRACK123', carrier: { name: '測試物流' }, short_url: { identifier: 'short' },
         package_history: [
-            { status, delivery_stage: 'shipping', checkpoint_status: 'moving', time: 1_720_000_000 },
+            { status, delivery_stage: 'shipping', checkpoint_status: 'moving', time: 1_820_000_000 },
             { status: '[已收件](https://unsafe.example)', created_at: '2026-07-13T00:00:00.000Z' }
         ]
     };
@@ -83,6 +83,9 @@ test('物流多步互動從新增到刪除皆以 owner ID 與 package ID 直接�
     const interaction = createInteraction();
     await command.execute(interaction, context);
     assert.equal(interaction.calls.at(-1)[0], 'reply');
+    const panelButtons = interaction.calls.at(-1)[1].components[0].components.map(button => button.data);
+    assert.deepEqual(panelButtons.slice(1).map(button => button.label), ['追蹤中包裹', '已封存包裹', '刪除包裹']);
+    assert.equal(panelButtons.at(-1).style, 4, '刪除包裹按鈕使用紅色 Danger');
 
     interaction.customId = 'package_panel_add';
     await command.buttonHandlers.package_panel_add(interaction, context);
@@ -94,6 +97,18 @@ test('物流多步互動從新增到刪除皆以 owner ID 與 package ID 直接�
     let record = await repository.getPackage(interaction.user.id, 'package-1');
     assert.equal(record.status, 'active');
     assert.equal(record.userID, interaction.user.id);
+    const backendLogs = [];
+    interaction.client = {
+        isReady: () => true,
+        channels: {
+            cache: new Map([[localConfig.log.channel, {
+                send(payload) {
+                    backendLogs.push(payload);
+                    return Promise.resolve();
+                }
+            }]])
+        }
+    };
 
     interaction.customId = 'package_panel_active';
     await command.buttonHandlers.package_panel_active(interaction, context);
@@ -108,12 +123,21 @@ test('物流多步互動從新增到刪除皆以 owner ID 與 package ID 直接�
     interaction.setFields({ note: '更新後備註' });
     await command.modalSubmitHandlers.package_panel_note_modal(interaction, context);
     assert.equal((await repository.getPackage(interaction.user.id, 'package-1')).note, '更新後備註');
+    const notedPayload = interaction.calls.filter(([name]) => name === 'editReply').at(-1)[1];
+    assert.equal(notedPayload.embeds[0].data.title,
+        `${localConfig.commands.packageTracking.emoji} ┃ 物流追蹤 - 更新後備註`);
 
     interaction.customId = 'package_panel_refresh:package-1';
     await command.buttonHandlers.package_panel_refresh(interaction, context);
     interaction.customId = 'package_panel_archive:package-1';
     await command.buttonHandlers.package_panel_archive(interaction, context);
     assert.equal((await repository.getPackage(interaction.user.id, 'package-1')).status, 'archived');
+    const archivedPayload = interaction.calls.filter(([name]) => name === 'editReply').at(-1)[1];
+    assert.equal(archivedPayload.embeds[0].data.title,
+        `${localConfig.commands.packageTracking.emoji} ┃ 物流追蹤 - 更新後備註（已封存）`);
+    const archivedDeleteButton = command._test.createArchivedActionsRows(record).at(0).components.at(1).data;
+    assert.equal(archivedDeleteButton.label, '刪除包裹');
+    assert.equal(archivedDeleteButton.style, 4);
 
     interaction.customId = 'package_panel_archived';
     await command.buttonHandlers.package_panel_archived(interaction, context);
@@ -145,6 +169,10 @@ test('物流多步互動從新增到刪除皆以 owner ID 與 package ID 直接�
     await command.modalSubmitHandlers.package_panel_delete_confirm(interaction, context);
     assert.equal(await repository.getPackage(interaction.user.id, 'package-1'), null);
     assert.deepEqual(stateChanges, ['archive', 'inbox', 'archive', 'delete']);
+    for (const message of ['物流追蹤有更新', '修改了物流追蹤備註', '封存了物流追蹤', '刪除了物流追蹤']) {
+        assert.ok(backendLogs.some(payload => payload.content.includes(message)), `後台應提示：${message}`);
+    }
+    assert.ok(backendLogs.every(payload => !payload.content.includes('TRACK123')), '後台日誌不得洩漏物流單號');
 
     interaction.deferred = false;
     interaction.replied = false;
@@ -268,7 +296,16 @@ test('Track.TW view helpers 正規化歷史、按鈕與本機 snapshot', () => {
         interaction: createInteraction(), carrier: { id: 'c', name: 'Carrier' },
         trackingNumber: 'TRACK', note: 'note', userPackageID: 'p', packageData: data
     });
-    assert.equal(tools.createPackageEmbed(record, data).data.fields.length, 5);
-    assert.equal(tools.createStoredPackageEmbed({ ...record, lastPackageData: null }).data.fields.length, 5);
+    const embed = tools.createPackageEmbed(record, data).data;
+    assert.equal(embed.fields.length, 5);
+    assert.equal(embed.title, `${localConfig.commands.packageTracking.emoji} ┃ 物流追蹤 - note`);
+    assert.equal(embed.description, undefined);
+    assert.equal(embed.url, undefined);
+    assert.equal(embed.fields.find(field => field.name === '物流單號').value, '||`TRACK123`||');
+    const archived = tools.createStoredPackageEmbed({ ...record, status: 'archived' }).data;
+    assert.equal(archived.title, `${localConfig.commands.packageTracking.emoji} ┃ 物流追蹤 - note（已封存）`);
+    const noSnapshot = tools.createStoredPackageEmbed({ ...record, note: '', lastPackageData: null }).data;
+    assert.equal(noSnapshot.title, `${localConfig.commands.packageTracking.emoji} ┃ 物流追蹤 - 無備註`);
+    assert.equal(noSnapshot.fields.find(field => field.name === '物流單號').value, '||`TRACK`||');
     assert.equal(tools.withAddPackageRow([]).length, 1);
 });

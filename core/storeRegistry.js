@@ -6,6 +6,7 @@ const { createJsonRepository } = require('./jsonRepository');
 function createStoreRegistry({ dataRoot = path.join(PROJECT_ROOT, 'runtime', 'data') } = {}) {
     return Object.freeze({
         packageTracking: createJsonRepository({ directory: path.join(dataRoot, 'package-tracking'), schemaVersion: 1 }),
+        gameCheckIn: createJsonRepository({ directory: path.join(dataRoot, 'game-check-in'), schemaVersion: 1 }),
         dataCollection: createJsonRepository({ directory: path.join(dataRoot, 'data-collection'), schemaVersion: 1 }),
         raffle: createJsonRepository({ directory: path.join(dataRoot, 'raffle'), schemaVersion: 1 }),
         temporaryVoice: createJsonRepository({ directory: path.join(dataRoot, 'temporary-voice'), schemaVersion: 1 }),

@@ -20,8 +20,8 @@ function disabledLoggerConfig() {
 
 const FEATURE_FILES = [
     'about', 'hitokoto', 'ipQuery', 'minecraft', 'ping', 'unixTimestamp',
-    'announcement', 'messageDelete', 'userInfo', 'music', 'packageTracking',
-    'dataCollection', 'raffle', 'temporaryVoice', 'twitchStream', 'keywords',
+    'announcement', 'globalAnnouncement', 'messageDelete', 'userInfo', 'music', 'packageTracking',
+    'gameCheckIn', 'dataCollection', 'raffle', 'temporaryVoice', 'twitchStream', 'keywords',
     'memberLifecycle', 'memberLogger', 'messageLogger', 'roleLogger', 'voiceLogger', 'presence'
 ];
 
@@ -33,10 +33,12 @@ const COMMAND_FEATURES = new Map([
     ['ping', config => config.commands.ping],
     ['unixTimestamp', config => config.commands.unixTimestamp],
     ['announcement', config => config.commands.announcement],
+    ['globalAnnouncement', config => config.commands.globalAnnouncement],
     ['messageDelete', config => config.commands.messageDelete],
     ['userInfo', config => config.commands.userInfo],
     ['music', config => config.commands.music],
     ['packageTracking', config => config.commands.packageTracking],
+    ['gameCheckIn', config => config.commands.gameCheckIn],
     ['dataCollection', config => config.commands.dataCollection],
     ['raffle', config => config.commands.raffle],
     ['temporaryVoice', config => config.modules.temporaryVoice],
@@ -76,7 +78,7 @@ test('runtime/deploy 共用 catalog 的 command JSON 與 enabled command descrip
     assert.equal(catalog.commandJson.length, catalog.commands.length);
     assert.deepEqual(
         catalog.commandJson.map(command => command.name),
-        ['關於みやこ', '一言', '網際協定位址資訊', '麥塊', '延遲', '時間戳', '音樂', '物流追蹤', config.startup.adminCommandName]
+        ['關於みやこ', '一言', '網際協定位址資訊', '麥塊', '延遲', '時間戳', '發送全域消息', '音樂', '物流追蹤', '遊戲簽到', config.startup.adminCommandName]
     );
 
     const admin = catalog.commands.find(command => command.name === config.startup.adminCommandName);
@@ -109,6 +111,32 @@ test('實際 enabled manifests 推導出預設最小 Gateway Intents 聯集', ()
 
     assert.deepEqual(new Set(catalog.intents), new Set(minimumIntents));
     assert.equal(catalog.intents.includes(GatewayIntentBits.DirectMessages), false);
+});
+
+test('遊戲簽到 manifest 註冊遊戲設定 exact 與 toggle prefix 路由', () => {
+    const config = loadConfig();
+    const manifest = createFeatureManifests(config).find(item => item.name === 'gameCheckIn');
+    const games = manifest.interactions.find(route => route.kind === 'button' && route.id === 'game_checkin_games');
+    const toggle = manifest.interactions.find(route => route.kind === 'button'
+        && route.id === 'game_checkin_game_toggle');
+    assert.equal(games.match, 'exact');
+    assert.equal(toggle.match, 'prefix');
+    assert.equal(games.access, 'public');
+    assert.equal(toggle.access, 'public');
+});
+
+test('全域消息 manifest 使用 provider gate 與動態確認按鈕路由', () => {
+    const config = loadConfig();
+    const manifest = createFeatureManifests(config).find(item => item.name === 'globalAnnouncement');
+    assert.equal(manifest.commands[0].scope, 'provider');
+    assert.equal(manifest.commands[0].access, 'provider');
+    assert.equal(manifest.commands[0].data.toJSON().dm_permission, false);
+    assert.equal(manifest.intents.includes(GatewayIntentBits.MessageContent), true);
+    for (const id of ['global_announcement_confirm', 'global_announcement_cancel']) {
+        const route = manifest.interactions.find(item => item.kind === 'button' && item.id === id);
+        assert.equal(route.match, 'prefix');
+        assert.equal(route.access, 'provider');
+    }
 });
 
 test('停用四種 logger 後不會加入 manifest 或額外 Gateway Intent', () => {
@@ -154,7 +182,7 @@ test('停用四種 logger 後不會加入 manifest 或額外 Gateway Intent', ()
     assert.equal(isolatedCatalog.intents.includes(disabledOnlyIntent), false);
 });
 
-test('15 個指令開關會停用整個 feature、互動、啟動與 intents', () => {
+test('17 個指令開關會停用整個 feature、互動、啟動與 intents', () => {
     for (const [featureName, selectConfig] of COMMAND_FEATURES) {
         const config = structuredClone(loadConfig());
         selectConfig(config).enable = false;

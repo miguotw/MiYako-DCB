@@ -415,7 +415,9 @@ async function handleQueueOpen(interaction, context) {
         requireCurrentPanel(interaction, state);
         const page = Number(interaction.customId.split(':')[1] || 0);
         const payload = createQueuePayload(state, page);
-        return interaction.reply(payload);
+        const reply = await interaction.reply(payload);
+        sendLog(interaction.client, `🎵 ${interaction.user.tag} 開啟了完整播放序列。`);
+        return reply;
     } catch (error) { return replyError(interaction, error); }
 }
 
@@ -470,6 +472,7 @@ const command = {
                 const paused = await togglePause(state);
                 if (paused === null) throw musicValidationError('目前沒有播放中的音樂。');
                 await interaction.reply({ embeds: [createActionEmbed(paused ? '⏸️ ┃ 已暫停播放' : `${SUCCESS_EMOJI} ┃ 已繼續播放`, `<@${interaction.user.id}> ${paused ? '暫停了目前的音樂。' : '繼續播放目前的音樂。'}`, SUCCESS_COLOR)] });
+                sendLog(interaction.client, `🎵 ${interaction.user.tag} ${paused ? '暫停了' : '繼續播放'}目前的音樂。`);
             } catch (error) { return replyError(interaction, error); }
         },
         music_skip: async (interaction, context) => {
@@ -480,6 +483,7 @@ const command = {
                 const skippedTitle = state.current?.title;
                 if (!skipCurrent(state)) throw musicValidationError('目前沒有播放中的音樂。');
                 await interaction.reply({ embeds: [createActionEmbed('⏭️ ┃ 已跳過歌曲', `<@${interaction.user.id}> 跳過了 **${skippedTitle}**。`, SUCCESS_COLOR)] });
+                sendLog(interaction.client, `🎵 ${interaction.user.tag} 跳過了歌曲：${skippedTitle}`);
             } catch (error) { return replyError(interaction, error); }
         },
         music_summon: async (interaction, context) => {
@@ -490,7 +494,7 @@ const command = {
                 const result = await withGuildLock(interaction.guildId, () => summonToVoiceChannel(state, voiceChannel));
                 const action = result === 'moved' ? '已移動至' : result === 'alreadyConnected' ? '已在' : '已加入';
                 await interaction.reply({
-                    embeds: [createActionEmbed(`${SUCCESS_EMOJI} ┃ 召喚成功`, `<@${interaction.user.id}>，Bot ${action} <#${voiceChannel.id}>。`, SUCCESS_COLOR)]
+                    embeds: [createActionEmbed(`${SUCCESS_EMOJI} ┃ 召喚成功`, `<@${interaction.user.id}>，<@${config.startup.clientId}> ${action} <#${voiceChannel.id}>。`, SUCCESS_COLOR)]
                 });
             } catch (error) { return replyError(interaction, error); }
         },
@@ -515,6 +519,9 @@ const command = {
                 const payload = createQueuePayload(state, page);
                 payload.content = removed.length ? `${SUCCESS_EMOJI} 已從序列移除 ${removed.length} 首歌曲。` : `${ERROR_EMOJI} 選擇的歌曲已不在序列中。`;
                 await interaction.update(payload);
+                if (removed.length) {
+                    sendLog(interaction.client, `🎵 ${interaction.user.tag} 從播放序列移除了 ${removed.length} 首歌曲。`);
+                }
             } catch (error) { return replyError(interaction, error); }
         }
     },
@@ -530,6 +537,7 @@ const command = {
                 const message = await channel?.messages?.fetch(messageID).catch(() => null);
                 await message?.edit(createQueuePayload(state, 0)).catch(() => {});
                 await interaction.reply({ embeds: [createActionEmbed('🗑️ ┃ 已清空序列', `<@${interaction.user.id}> 已移除全部 **${removed.length}** 首待播歌曲。`, SUCCESS_COLOR)] });
+                sendLog(interaction.client, `🎵 ${interaction.user.tag} 清空了播放序列，共移除 ${removed.length} 首歌曲。`);
             } catch (error) { return replyError(interaction, error); }
         },
         music_request_modal: async (interaction, context) => {

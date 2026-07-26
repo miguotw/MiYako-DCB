@@ -38,6 +38,36 @@ test('物流週期工作會將系統性 API 失敗傳回 scheduler 以啟動退�
     );
 });
 
+test('物流週期工作偵測到新貨態時建立 outbox 並寫入後台提示', async () => {
+    const logs = [];
+    const staged = [];
+    const record = {
+        userID: '12345678901234567',
+        username: 'owner#0001',
+        userPackageID: 'package-1',
+        trackingNumber: 'secret-tracking',
+        status: 'active',
+        lastHistorySignature: 'old'
+    };
+    const initializer = createInitializer(loadConfig(), {
+        logTools: { sendLog: (...args) => logs.push(args) },
+        packageTools: {
+            getPackageTrackingConfig: () => ({ checkInterval: 60000, archiveAfter: 86400000 }),
+            hasTrackTwToken: () => true,
+            trackingPackage: async () => ({ state: 'new' }),
+            createHistorySignature: () => 'new'
+        }
+    });
+    await initializer._test.checkPackages({}, new AbortController().signal, {
+        listPackages: async () => [record],
+        stageNotification: async (...args) => staged.push(args)
+    });
+
+    assert.equal(staged.length, 1);
+    assert.match(logs[0][1], /物流追蹤有更新/);
+    assert.deepEqual(logs[0][4], { sensitiveValues: ['secret-tracking'] });
+});
+
 test('Twitch 管理指令觸發的合併檢查會強制通知當下已直播的新訂閱', async () => {
     const config = structuredClone(loadConfig());
     config.commands.stream.twitchClientId = 'client-id';

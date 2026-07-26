@@ -5,7 +5,12 @@ const test = require('node:test');
 const { MessageFlags, PermissionFlagsBits } = require('discord.js');
 const { loadConfig } = require('../core/config');
 const { createInteractionRouter: createRouter } = require('../core/router');
-const createInteractionRouter = () => createRouter({ config: loadConfig() });
+const TEST_PROVIDER_ID = '123456789012345678';
+const createInteractionRouter = () => {
+    const config = structuredClone(loadConfig());
+    config.commands.about.provider = TEST_PROVIDER_ID;
+    return createRouter({ config });
+};
 
 const noop = async () => {};
 
@@ -27,12 +32,14 @@ function createInteraction({
     customId = 'unused',
     commandName,
     inGuild = true,
-    administrator = false
+    administrator = false,
+    userID = '999999999999999999'
 } = {}) {
     const replies = [];
     const interaction = {
         customId,
         commandName,
+        user: { id: userID },
         deferred: false,
         replied: false,
         inGuild: () => inGuild,
@@ -199,6 +206,32 @@ test('Router 集中執行 admin gate，無權限與 DM 均無法觸發 handler',
     assert.equal(await router.dispatch(administrator.interaction, {}), true);
     assert.equal(executions, 1);
     assert.equal(administrator.replies.length, 0);
+});
+
+test('Router 集中執行 provider gate，服務提供者不需要管理員權限', async () => {
+    let executions = 0;
+    const router = createInteractionRouter();
+    router.registerCommand(command('全域消息', 'provider', async () => {
+        executions += 1;
+    }));
+
+    const unauthorized = createInteraction({
+        kind: 'command', commandName: '全域消息', userID: '888888888888888888'
+    });
+    assert.equal(await router.dispatch(unauthorized.interaction, {}), false);
+    assertEphemeralValidation(unauthorized.replies, /僅限 Bot 服務提供者/);
+
+    const dm = createInteraction({
+        kind: 'command', commandName: '全域消息', inGuild: false, userID: TEST_PROVIDER_ID
+    });
+    assert.equal(await router.dispatch(dm.interaction, {}), false);
+    assertEphemeralValidation(dm.replies, /僅能在伺服器中使用/);
+
+    const provider = createInteraction({
+        kind: 'command', commandName: '全域消息', userID: TEST_PROVIDER_ID, administrator: false
+    });
+    assert.equal(await router.dispatch(provider.interaction, {}), true);
+    assert.equal(executions, 1);
 });
 
 test('handler 與 Discord 錯誤回覆同時失敗時，dispatch 仍會收斂且不重複 logger', async () => {

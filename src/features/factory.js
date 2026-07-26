@@ -9,7 +9,9 @@ const PREFIX_ROUTES = new Set([
     'modal:data_collection_delete_modal', 'modal:data_collection_modal', 'button:raffle_join',
     'select:twitch_stream_remove', 'select:package_panel_select_carrier',
     'select:package_panel_select_carrier_2', 'button:package_panel_extra_fields',
-    'modal:package_panel_extra_fields_modal', 'button:temporary_voice_remove_page'
+    'modal:package_panel_extra_fields_modal', 'button:temporary_voice_remove_page',
+    'modal:game_checkin_credentials_modal', 'button:game_checkin_game_toggle',
+    'button:global_announcement_confirm', 'button:global_announcement_cancel'
 ]);
 
 const EXACT_VARIANTS = new Map([
@@ -69,10 +71,12 @@ function createFeature({ name, command, scope = 'public', intents = [], enabled 
     let started = false;
     let cleanup = null;
     let listeners = [];
-    const access = scope === 'admin' ? 'admin' : 'public';
+    const access = scope === 'admin' ? 'admin' : scope === 'provider' ? 'provider' : 'public';
 
-    if (scope === 'admin') {
+    if (scope === 'admin' || scope === 'provider') {
         command?.data?.setDMPermission?.(false);
+    }
+    if (scope === 'admin') {
         command?.data?.setDefaultMemberPermissions?.(PermissionFlagsBits.Administrator);
     }
 

@@ -18,7 +18,8 @@ function getConfiguredSecrets() {
     return [
         config.startup?.token,
         configCommands.packageTracking?.trackTwToken,
-        configCommands.stream?.twitchClientSecret
+        configCommands.stream?.twitchClientSecret,
+        configCommands.gameCheckIn?.credentialEncryptionKey
     ];
 }
 

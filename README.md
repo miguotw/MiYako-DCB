@@ -9,8 +9,11 @@ MiYako-DCB 是以 discord.js 建立的繁體中文 Discord Bot。現行版本將
 - `/關於みやこ`、`/一言`、`/網際協定位址資訊`、`/麥塊`、`/延遲`、`/時間戳`
 - `/音樂`：YouTube／Bilibili 點播、YouTube 公開直播、插播、暫停、跳過、召喚、序列管理及重啟快照恢復
 - `/物流追蹤`：新增、查詢、更新、封存、喚醒，以及以分頁選單確認刪除封存包裹
+- `/遊戲簽到`：管理 HoYoLAB／SKPORT 憑證、每日自動簽到與私人通知
 
 管理功能集中在設定的管理指令名稱下，包含公告、訊息刪除、用戶資料、資料收集、抽選、臨時語音與 Twitch 通知。移除臨時語音入口時會以私密 Embed 下拉選單列出已設定頻道。另有關鍵字回應、成員生命週期、活動狀態與四種 Discord 事件 logger。
+
+服務提供者可使用獨立的 `/發送全域消息`，預覽並確認後將 Bot 最新消息發到各 Guild 的系統訊息頻道；系統頻道不可用時，只會選擇非 NSFW 且具備檢視、發送及嵌入權限的一般文字頻道。此指令由 Router 依 `about.provider` 集中驗證，不要求服務提供者同時具有 Guild 管理員權限。
 
 ## 執行環境與安裝
 
@@ -48,11 +51,19 @@ chmod 600 config/config.yml config/configCommands.yml config/configModules.yml
 重要容量設定：
 
 - `packageTracking.maxActivePackages`：每位使用者 active 加 reserved 包裹上限，預設 20，範圍 1–100。
+- `gameCheckIn.checkInTime`：每日簽到的 `HH:mm` 時間；時區校正沿用 `config.yml` 的 `log.timezone`，語意與自動抽選相同：`0` 代表主機本機時間，其他數值是在主機時間上人工校正的小時數。
+- `gameCheckIn.userDelayMinMs/userDelayMaxMs`：同一批第二位使用者相對第一位的隨機啟動間隔，預設 500–2500ms，允許 0–10000ms。
+- `gameCheckIn.batchDelayMinMs/batchDelayMaxMs`：前一批完成至下一批開始的隨機間隔，預設 5000–15000ms，允許 0–60000ms。
+- `gameCheckIn.credentialEncryptionKey`：遊戲簽到憑證的 AES-256-GCM 主金鑰。功能啟用時必須填入 64 字元十六進位字串，可用 `openssl rand -hex 32` 產生；不得提交或傳送給他人。
+- `gameCheckIn.resultEmojis`：分別設定簽到成功、重複簽到、未綁定遊戲與錯誤的結果標題 Emoji。
+- `gameCheckIn.toggleEmojis`：設定啟用/停用簽到 Embed 圖例中「啟用」與「停用」狀態的 Emoji；遊戲按鈕固定以綠色表示啟用、紅色表示停用。
 - `music.maxQueueTracks`：每個 Guild 的序列上限。
 - `music.maxFileSizeMiB`：單一下載檔案上限。
 - `music.maxCacheSizeMiB`：整體音樂 cache 上限，必須不小於單檔上限。
 
 每個 Slash Command 區段都有 `enable: true|false`。公開與管理指令位於 `configCommands.yml`；臨時語音沿用 `configModules.yml` 的 `temporaryVoice.enable`。缺省值為 `true`，設為 `false` 會停用整個 feature，包括 Slash／元件路由、listener、scheduler、背景輪詢與該 feature 所需的 Gateway Intents。全部管理指令停用時不會發布管理 aggregate。
+
+`globalAnnouncement.enable` 控制服務提供者全域消息；舊設定檔尚未加入此區段時會以啟用及 `📢` emoji 作為相容預設。消息中的「新增應用程式」按鈕使用 Discord Provided Link，因此仍需在 Discord Developer Portal 的 Installation 頁設定安裝情境、預設 scopes 與 Bot 權限。
 
 Twitch Client ID／Secret 必須同時有值或同時空白。兩者全空時只停用 Twitch 輪詢；Track.TW token 空白時只停用物流背景輪詢，對應指令會回報尚未設定。
 
@@ -78,6 +89,8 @@ npm run undeploy:guild
 ```
 
 四個 CLI 都不接受參數；global 入口不需要 `startup.guildId`，guild 入口缺少該設定時會直接失敗。部署以單次 PUT 原子取代固定 scope 的 catalog，因此會移除該 scope 的過時指令；撤銷則 PUT 空 catalog。global 與 guild 不會互相清除，兩者同時發布時 Discord 可能顯示重複指令，應先明確撤銷不需要的 scope。所有流程都不建立 Discord Client、不登入、不啟動 feature 或 scheduler；REST 失敗會以非零狀態結束。
+
+新增或調整 Slash Command（包含 `/遊戲簽到`、`/發送全域消息`）後，必須由部署者重新執行所需 scope 的 deploy 指令；runtime 不會自行發布，請勿把 deploy 當作一般驗證命令。
 
 ## 專案結構
 
@@ -107,6 +120,7 @@ npm run undeploy:guild
 │   ├── undeployGuildCommands.js # 無參數 Guild 撤銷 CLI
 │   └── verifyCoverage.js        # 完整 coverage gate
 ├── test/                        # node:test 單元、整合、smoke 與 lifecycle 測試
+├── assets/                      # 受版本控制的 production 靜態圖片
 ├── config_example/              # 無 secret 的 strict 設定範例
 └── runtime/                     # 執行期資料；完全忽略於 Git
 ```
@@ -123,7 +137,7 @@ npm run undeploy:guild
 { client, config, logger, router, http, store, scheduler, processManager, signal }
 ```
 
-Router 對 Slash、Modal、Button 與所有 Select 分別維護 exact/prefix Map。prefix 只匹配 `prefix:<非空 payload>`；啟動時會拒絕重複 route、namespace 覆蓋與 admin/public 衝突。管理員權限由 Router 統一檢查，Discord default permissions 只作介面 gate。未知、過期或關機中的互動會立即收到私密 validation Embed。
+Router 對 Slash、Modal、Button 與所有 Select 分別維護 exact/prefix Map。prefix 只匹配 `prefix:<非空 payload>`；啟動時會拒絕重複 route、namespace 覆蓋與不同 access 的覆蓋。管理員與 `about.provider` 服務提供者權限均由 Router 統一檢查，Discord default permissions 只作管理指令的介面 gate。未知、過期或關機中的互動會立即收到私密 validation Embed。
 
 互動系統錯誤由 `errorReply()` 單點記錄，終端與 Discord 日誌各只送一次。使用者回覆只包含經 secret/control-character／路徑遮罩及截斷的錯誤第一行與事件 ID，不包含 stack 或 debug details；可預期的 Discord 輸入錯誤使用 validation 回覆且不寫 ERROR 日誌。
 
@@ -142,6 +156,7 @@ Store registry 的資料位置：
 
 ```text
 runtime/data/package-tracking/<ownerId>.json
+runtime/data/game-check-in/<ownerId>.json
 runtime/data/twitch/<guildId>.json
 runtime/data/raffle/<guildId>.json
 runtime/data/data-collection/<guildId>.json
@@ -154,7 +169,7 @@ runtime/data/music/panels/<guildId>.json
 
 Interval scheduler 每輪 awaited 完成後才排下一輪，手動 trigger 在工作中只合併一個 pending run。失敗由 5 秒開始倍增退避，成功重設；timeout 使用 AbortSignal。不合作的工作在取消寬限後標記 stuck 並停用，舊工作未結束前不會啟動新工作。
 
-Deadline scheduler 用於抽選、資料收集、臨時語音刪除及其他持久截止狀態。抽選會先原子保存固定 winners；資料收集會先保存 pending-sync，再更新 Discord。重啟只重送同一結果，不重新抽選。
+Deadline scheduler 用於抽選、資料收集、遊戲簽到、臨時語音刪除及其他持久截止狀態。抽選會先原子保存固定 winners；資料收集會先保存 pending-sync，再更新 Discord。遊戲簽到依設定的 UTC 偏移補跑當日未完成平台，暫時錯誤最多嘗試三次。重啟只恢復持久狀態，不重新產生已提交結果。
 
 SIGINT 與 SIGTERM 共用一個冪等 shutdown promise，依序停止 Router、凍結播放器並 flush 音樂快照、取消 HTTP、停止 scheduler、終止程序樹、反向停止 features 與播放器，最後 destroy Discord Client。總期限 20 秒；第二次 signal 或逾時會以失敗狀態強制結束。
 
@@ -175,11 +190,29 @@ SIGINT 與 SIGTERM 共用一個冪等 shutdown promise，依序停止 Router、�
 
 ### 物流、Twitch 與臨時語音
 
-物流以 owner ID 與 package ID 直接定位。active 加 reserved 不得超過設定上限；匯入或喚醒會在遠端 I/O 前原子保留名額，失敗則釋放。降低上限不會刪除既有資料，但超額使用者在降回上限以下前不能新增或喚醒。通知採 persisted outbox，新通知成功後才提交 signature 與 locator。
+物流以 owner ID 與 package ID 直接定位。active 加 reserved 不得超過設定上限；匯入或喚醒會在遠端 I/O 前原子保留名額，失敗則釋放。降低上限不會刪除既有資料，但超額使用者在降回上限以下前不能新增或喚醒。通知採 persisted outbox，不提及使用者；新通知成功後才提交 signature 與 locator，再盡力刪除舊通知。
 
 Twitch OAuth token provider 與 Helix client 使用共用 HTTP policy；Helix ID 每批最多 100 筆，401 最多失效 token 並重取一次。沒有角色或角色遺失時不提及任何人，絕不退回 `@everyone`。移除訂閱只更新該 Guild 的舊通知與 locator。
 
 臨時語音對每個受管頻道使用 mutex 與持久化 generation。刪除前重新讀取 repository、抓取成員並比對 generation；成員返回會使舊 deadline 失效。暫時性 Discord 錯誤會退避，未知頻道視為已刪除。
+
+### 遊戲自動簽到
+
+`/遊戲簽到` 的主面板是公開且不含個人狀態的通用入口；憑證教學、平台按鈕、Modal、啟用/停用簽到、驗證結果與通知設定全部是 ephemeral。每位 Discord 使用者可保存一組 HoYoLAB Cookie 與一組 SKPORT `account_token`；HoYoLAB 表單分別貼上瀏覽器複製出的 `ltoken_v2:"…"` 與 `ltuid_v2:"…"` 完整內容，由 Bot 自行組合 Cookie，只有裸值的輸入不會接受。SKPORT 表單則直接貼上 `https://web-api.gryphline.com/cookie_store/account_token` 顯示的完整 JSON，由 Bot 擷取其中的 token。兩個 HoYoLAB 欄位或 SKPORT 欄位留空提交會清除該平台並停用自動簽到，既有秘密不會重新顯示。送出非空憑證只會查詢帳號／角色以確認有效性，不會立即簽到或傳送測試 DM；自動簽到會等到下一個正常排程時間。
+
+「啟用/停用簽到」可分別停用 HoYoLAB 五款與 SKPORT 兩款支援遊戲，預設全部啟用，也允許全部停用。停用單一遊戲不會清除平台憑證；若全部遊戲皆停用，排程不會建立簽到工作或傳送空白通知。尚未開始的平台會採用最新設定，已開始、等待重試或完成的平台則沿用當日遊戲快照，變更於下一日生效。
+
+主面板會顯示 Discord 動態倒數時間戳，並持久保存訊息 locator；每個 Guild 或 DM channel 只追蹤最新一個面板，新面板會停用被取代面板的全部按鈕，舊格式 locator 也會在啟動同步時收斂。啟動補跑或每日排程完成後會更新為下一次自動簽到時間。真正有待處理的平台時，後臺日誌會記錄觸發日期、使用者數、平台數與處理完成訊息，但不包含憑證。
+
+排程以每批最多兩位使用者處理：第一位立即開始，第二位依 `userDelayMinMs/userDelayMaxMs` 隨機錯開；整批完成後，再依 `batchDelayMinMs/batchDelayMaxMs` 等待下一批。使用者內的平台、遊戲與角色維持依序執行。單輪排程期限為 6 小時，隨機等待與 API 時間計入該輪期限；15／60 分鐘失敗重試使用持久 deadline，於後續 scheduler run 取得新的期限。
+
+HoYoLAB 支援原神、崩壞：星穹鐵道、崩壞3rd、未定事件簿與絕區零；實作參考 [canaria3406/hoyolab-auto-sign](https://github.com/canaria3406/hoyolab-auto-sign)。SKPORT 使用長效 `account_token` 動態交換短效憑證並探索明日方舟繁中服及明日方舟：終末地的全部已綁定角色／伺服器；流程參考 [canaria3406/skport-auto-sign PR #4](https://github.com/canaria3406/skport-auto-sign/pull/4)。兩者皆為第三方、非官方且可能變動的 API adapter；已知的重複簽到、驗證失敗與暫時性錯誤會分別回報，未知拒絕僅保留安全的數字錯誤碼或 HTTP 狀態，不會輸出完整上游 response。
+
+通知模式依序為啟用所有通知、僅失敗時通知、停用所有通知，預設只通知失敗。切換時只會以 ephemeral 回覆目前模式；正式簽到結果由 persisted outbox 嘗試 DM。使用者需在 Discord「使用者設定 → Content & Social → Direct messages」允許共同伺服器私人訊息。簽到與 DM 都可能因平台或 Discord 的外部狀態失敗。
+
+憑證以 `aes-256-gcm-v1` 格式保存於 owner-scoped JSON，使用 `gameCheckIn.credentialEncryptionKey` 設定的 AES-256-GCM 主金鑰加密。每次寫入都使用新的隨機 IV，驗證資料會綁定 Discord 使用者、平台、revision 與更新時間；JSON、outbox 與日誌不保存憑證明文。啟動時會在 scheduler 建立前驗證全部加密憑證，金鑰錯誤或資料遭竄改會阻止 Bot 啟動，且不會輸出金鑰、密文或憑證。
+
+本版不讀取或遷移舊 `plain-v1` 憑證；舊值會視為未設定，升級前應由部署者離線清理殘留明文，之後請使用者重新輸入。初版不支援金鑰輪替；遺失或直接更換主金鑰會使既有憑證無法解密並阻止啟動。備份時應分別妥善保護 `runtime/data/` 與設定金鑰，避免存放於同一份可被同時取得的備份。
 
 ## 執行期路徑與 legacy 資料
 
@@ -189,9 +222,9 @@ Twitch OAuth token provider 與 Helix client 使用共用 HTTP policy；Helix ID
 - 音樂 cache：`runtime/cache/music/`
 - yt-dlp binary：`runtime/bin/yt-dlp`
 - Minecraft 暫存：`runtime/tmp/minecraft/`
-- Minecraft 預設靜態圖示：專案根目錄的 `assets/minecraft/default_icon.png`
+- 靜態圖片：專案根目錄的 `assets/minecraft/default_icon.png` 與 `assets/gameCheckIn/banner.png`
 
-舊 `assets/` JSON、音樂 cache、binary 與功能 Store 是 legacy 資料；新版本不讀取、不搬移也不刪除。只有 Minecraft 的版本控制內預設圖示仍是靜態 asset，路徑由 `PROJECT_ROOT` 解析，不受 CWD 影響。
+舊 `assets/` JSON、音樂 cache、binary 與功能 Store 是 legacy 資料；新版本不讀取、不搬移也不刪除。受版本控制的 production 靜態圖片路徑由 `PROJECT_ROOT` 解析，不受 CWD 影響。
 
 ## 資料備份與恢復
 

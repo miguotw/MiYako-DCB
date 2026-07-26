@@ -17,13 +17,14 @@ const {
 const {
     createConfigFixture,
     createValidConfigDocuments,
-    removeConfigFixture
+    removeConfigFixture,
+    TEST_GAME_CHECK_IN_ENCRYPTION_KEY
 } = require('./helpers/configFixture');
 
 const originalConfigDirectory = process.env.MIYAKO_CONFIG_DIR;
 const COMMAND_CONFIG_SECTIONS = [
-    'announcement', 'raffle', 'dataCollection', 'messageDelete', 'userInfo', 'stream',
-    'about', 'ping', 'hitokoto', 'packageTracking', 'ipQuery', 'minecraft', 'unixTimestamp', 'music'
+    'announcement', 'globalAnnouncement', 'raffle', 'dataCollection', 'messageDelete', 'userInfo', 'stream',
+    'about', 'ping', 'hitokoto', 'packageTracking', 'gameCheckIn', 'ipQuery', 'minecraft', 'unixTimestamp', 'music'
 ];
 
 function useFixture(options) {
@@ -60,6 +61,20 @@ test('loadConfig 回傳統一 camelCase 結構，空白外部憑證可停用輪�
         assert.equal(config.commands.stream.twitchClientSecret, '');
         assert.equal(config.commands.packageTracking.trackTwToken, '');
         assert.equal(config.commands.packageTracking.maxActivePackages, 20);
+        assert.equal(config.commands.gameCheckIn.checkInTime, '04:00');
+        assert.equal(config.commands.gameCheckIn.userDelayMinMs, 500);
+        assert.equal(config.commands.gameCheckIn.userDelayMaxMs, 2500);
+        assert.equal(config.commands.gameCheckIn.batchDelayMinMs, 5000);
+        assert.equal(config.commands.gameCheckIn.batchDelayMaxMs, 15000);
+        assert.equal(config.commands.gameCheckIn.credentialEncryptionKey, TEST_GAME_CHECK_IN_ENCRYPTION_KEY);
+        assert.deepEqual(config.commands.gameCheckIn.resultEmojis, {
+            success: '✅', already: '⚠️', skipped: '⚠️', error: '⚠️'
+        });
+        assert.deepEqual(config.commands.gameCheckIn.toggleEmojis, {
+            enabled: '🟢', disabled: '🔴'
+        });
+        assert.equal(config.commands.gameCheckIn.timezone, undefined);
+        assert.equal(config.log.timezone, 0);
         assert.equal(config.commands.music.maxQueueTracks, 100);
         assert.equal(config.commands.music.maxConcurrentYtDlpProcesses, 3);
         assert.equal(config.commands.music.maxFileSizeMiB, 256);
@@ -98,16 +113,34 @@ test('startup.guildId 可省略，有填寫時必須是有效 Snowflake', () => 
     }
 });
 
-test('15 個指令開關缺省為啟用，並接受顯式停用', () => {
+test('17 個指令開關缺省為啟用，並接受顯式停用', () => {
     const defaults = createValidConfigDocuments();
     for (const section of COMMAND_CONFIG_SECTIONS) delete defaults['configCommands.yml'][section].enable;
+    delete defaults['configCommands.yml'].globalAnnouncement;
     delete defaults['configCommands.yml'].music.maxConcurrentYtDlpProcesses;
+    delete defaults['configCommands.yml'].gameCheckIn.resultEmojis;
+    delete defaults['configCommands.yml'].gameCheckIn.toggleEmojis;
+    delete defaults['configCommands.yml'].gameCheckIn.userDelayMinMs;
+    delete defaults['configCommands.yml'].gameCheckIn.userDelayMaxMs;
+    delete defaults['configCommands.yml'].gameCheckIn.batchDelayMinMs;
+    delete defaults['configCommands.yml'].gameCheckIn.batchDelayMaxMs;
     delete defaults['configModules.yml'].temporaryVoice.enable;
     let fixture = useFixture({ documents: defaults });
     try {
         const config = loadConfig();
         for (const section of COMMAND_CONFIG_SECTIONS) assert.equal(config.commands[section].enable, true, section);
+        assert.equal(config.commands.globalAnnouncement.emoji, '📢');
         assert.equal(config.commands.music.maxConcurrentYtDlpProcesses, 3);
+        assert.deepEqual(config.commands.gameCheckIn.resultEmojis, {
+            success: '🟢', already: '🟡', skipped: '🟠', error: '🔴'
+        });
+        assert.deepEqual(config.commands.gameCheckIn.toggleEmojis, {
+            enabled: '✅', disabled: '⏸️'
+        });
+        assert.equal(config.commands.gameCheckIn.userDelayMinMs, 500);
+        assert.equal(config.commands.gameCheckIn.userDelayMaxMs, 2500);
+        assert.equal(config.commands.gameCheckIn.batchDelayMinMs, 5000);
+        assert.equal(config.commands.gameCheckIn.batchDelayMaxMs, 15000);
         assert.equal(config.modules.temporaryVoice.enable, true);
     } finally {
         removeConfigFixture(fixture.directory);
@@ -169,6 +202,65 @@ test('packageTracking.maxActivePackages 未填時預設 20，邊界 1 與 100 �
     }
 });
 
+test('遊戲簽到加密金鑰啟用時必須是 32-byte hex，停用時可留空', () => {
+    for (const value of [TEST_GAME_CHECK_IN_ENCRYPTION_KEY, TEST_GAME_CHECK_IN_ENCRYPTION_KEY.toUpperCase()]) {
+        const documents = createValidConfigDocuments();
+        documents['configCommands.yml'].gameCheckIn.credentialEncryptionKey = value;
+        const fixture = useFixture({ documents });
+        try {
+            assert.equal(loadConfig().commands.gameCheckIn.credentialEncryptionKey, value);
+        } finally {
+            removeConfigFixture(fixture.directory);
+            _resetConfigCacheForTests();
+        }
+    }
+
+    for (const value of ['', 'a'.repeat(63), 'z'.repeat(64), undefined]) {
+        const documents = createValidConfigDocuments();
+        if (value === undefined) delete documents['configCommands.yml'].gameCheckIn.credentialEncryptionKey;
+        else documents['configCommands.yml'].gameCheckIn.credentialEncryptionKey = value;
+        const fixture = useFixture({ documents });
+        try {
+            assert.throws(() => loadConfig(), error => {
+                assert.ok(error instanceof ConfigError);
+                assert.match(error.message, /credentialEncryptionKey/);
+                if (typeof value === 'string' && value) assert.doesNotMatch(error.message, new RegExp(value));
+                return true;
+            });
+        } finally {
+            removeConfigFixture(fixture.directory);
+            _resetConfigCacheForTests();
+        }
+    }
+
+    const disabled = createValidConfigDocuments();
+    disabled['configCommands.yml'].gameCheckIn.enable = false;
+    disabled['configCommands.yml'].gameCheckIn.credentialEncryptionKey = '';
+    const fixture = useFixture({ documents: disabled });
+    try {
+        assert.equal(loadConfig().commands.gameCheckIn.credentialEncryptionKey, '');
+    } finally {
+        removeConfigFixture(fixture.directory);
+    }
+});
+
+test('遊戲簽到批次延遲接受零值與設定上界', () => {
+    for (const values of [
+        { userDelayMinMs: 0, userDelayMaxMs: 0, batchDelayMinMs: 0, batchDelayMaxMs: 0 },
+        { userDelayMinMs: 10000, userDelayMaxMs: 10000, batchDelayMinMs: 60000, batchDelayMaxMs: 60000 }
+    ]) {
+        const documents = createValidConfigDocuments();
+        Object.assign(documents['configCommands.yml'].gameCheckIn, values);
+        const fixture = useFixture({ documents });
+        try {
+            const settings = loadConfig().commands.gameCheckIn;
+            for (const [key, value] of Object.entries(values)) assert.equal(settings[key], value);
+        } finally {
+            removeConfigFixture(fixture.directory);
+        }
+    }
+});
+
 test('舊設定鍵與未知鍵會被 strict schema 拒絕', () => {
     for (const mutate of [
         documents => {
@@ -187,6 +279,15 @@ test('舊設定鍵與未知鍵會被 strict schema 拒絕', () => {
         },
         documents => {
             documents['configCommands.yml'].music.ytDlpPath = 'assets/music/yt-dlp';
+        },
+        documents => {
+            documents['configCommands.yml'].gameCheckIn.timezone = 8;
+        },
+        documents => {
+            documents['configCommands.yml'].gameCheckIn.resultEmojis.unknown = '❔';
+        },
+        documents => {
+            documents['configCommands.yml'].gameCheckIn.toggleEmojis.unknown = '❔';
         }
     ]) {
         const documents = createValidConfigDocuments();
@@ -224,6 +325,15 @@ test('固定數值範圍與 Discord 欄位限制會被驗證', () => {
         ['configCommands.yml', document => { document.packageTracking.archiveAfterDays = 3651; }],
         ['configCommands.yml', document => { document.packageTracking.maxActivePackages = 0; }],
         ['configCommands.yml', document => { document.packageTracking.maxActivePackages = 101; }],
+        ['configCommands.yml', document => { document.gameCheckIn.checkInTime = '24:00'; }],
+        ['configCommands.yml', document => { document.gameCheckIn.checkInTime = '9:00'; }],
+        ['configCommands.yml', document => { document.gameCheckIn.userDelayMinMs = -1; }],
+        ['configCommands.yml', document => { document.gameCheckIn.userDelayMaxMs = 10001; }],
+        ['configCommands.yml', document => { document.gameCheckIn.userDelayMinMs = 1.5; }],
+        ['configCommands.yml', document => { document.gameCheckIn.batchDelayMinMs = -1; }],
+        ['configCommands.yml', document => { document.gameCheckIn.batchDelayMaxMs = 60001; }],
+        ['configCommands.yml', document => { document.gameCheckIn.resultEmojis.error = ''; }],
+        ['configCommands.yml', document => { document.gameCheckIn.toggleEmojis.enabled = ''; }],
         ['configCommands.yml', document => { document.music.ytDlpUpdateHours = 721; }],
         ['configCommands.yml', document => { document.music.maxConcurrentYtDlpProcesses = 11; }],
         ['configCommands.yml', document => { document.music.liveReconnectWindowSeconds = 9; }],
@@ -298,6 +408,14 @@ test('跨欄位規則拒絕半套 Twitch 憑證、反向音樂時長與無效關
         document => {
             document.music.maxFileSizeMiB = 512;
             document.music.maxCacheSizeMiB = 256;
+        },
+        document => {
+            document.gameCheckIn.userDelayMinMs = 2501;
+            document.gameCheckIn.userDelayMaxMs = 2500;
+        },
+        document => {
+            document.gameCheckIn.batchDelayMinMs = 15001;
+            document.gameCheckIn.batchDelayMaxMs = 15000;
         },
         document => { document.about.botNickname = 'Bad Name'; }
     ];

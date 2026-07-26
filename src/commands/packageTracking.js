@@ -40,7 +40,9 @@ const {
     withAddPackageRow,
     createPackageRecord,
     createHistorySignature,
-    createStoredPackageEmbed
+    createStoredPackageEmbed,
+    createPackageTitle,
+    formatTrackingNumber
 } = createPackageTrackingTools(config);
 
 const configCommands = config.commands;
@@ -121,15 +123,15 @@ function createPanelRows() {
             createAddPackageButton(),
             new ButtonBuilder()
                 .setCustomId('package_panel_active')
-                .setLabel('追蹤中')
+                .setLabel('追蹤中包裹')
                 .setStyle(ButtonStyle.Secondary),
             new ButtonBuilder()
                 .setCustomId('package_panel_archived')
-                .setLabel('已封存')
+                .setLabel('已封存包裹')
                 .setStyle(ButtonStyle.Secondary),
             new ButtonBuilder()
                 .setCustomId('package_panel_delete_archived')
-                .setLabel('刪除')
+                .setLabel('刪除包裹')
                 .setStyle(ButtonStyle.Danger)
         )
     ];
@@ -157,6 +159,7 @@ function createPackageAddModal(detached = false) {
                     .setCustomId('note')
                     .setLabel('備註')
                     .setStyle(TextInputStyle.Short)
+                    .setMaxLength(200)
                     .setRequired(false)
             )
         );
@@ -167,6 +170,7 @@ function createNoteModal(record) {
         .setCustomId('note')
         .setLabel('備註')
         .setStyle(TextInputStyle.Short)
+        .setMaxLength(200)
         .setRequired(false);
 
     if (record.note) {
@@ -237,8 +241,8 @@ function createPackageSelectRow(records, customId, placeholder) {
         .addOptions(
             records.slice(0, MAX_SELECT_OPTIONS).map(record =>
                 new StringSelectMenuOptionBuilder()
-                    .setLabel(`${record.carrierName} ${record.trackingNumber}`.slice(0, 100))
-                    .setDescription((record.note || '未設定備註').slice(0, 100))
+                    .setLabel((record.note || '無備註').slice(0, 100))
+                    .setDescription((record.carrierName || '未知物流').slice(0, 100))
                     .setValue(record.userPackageID.slice(0, 100))
             )
         );
@@ -273,7 +277,7 @@ function createArchivedDeletePayload(records, requestedPage = 0) {
         embeds: [new EmbedBuilder()
             .setColor(EMBED_COLOR)
             .setTitle(`${EMBED_EMOJI} ┃ 物流追蹤 - 刪除已封存包裹`)
-            .setDescription(`請選擇要刪除的物流單號。選取後仍需輸入 y 確認。\n頁數：${page + 1} / ${totalPages}`)],
+            .setDescription(`請選擇要刪除的包裹。選取後仍需輸入 y 確認。\n頁數：${page + 1} / ${totalPages}`)],
         components
     };
 }
@@ -286,7 +290,7 @@ function createDeleteConfirmationModal(record) {
             new TextInputBuilder()
                 .setCustomId('confirmation')
                 .setLabel('輸入 y 以永久刪除這筆物流追蹤')
-                .setPlaceholder(`${record.carrierName} ${record.trackingNumber}`.slice(0, 100))
+                .setPlaceholder(`${record.note || '無備註'}｜${record.carrierName || '未知物流'}`.slice(0, 100))
                 .setStyle(TextInputStyle.Short)
                 .setRequired(true)
                 .setMaxLength(1)
@@ -303,11 +307,11 @@ function createArchivedActionsRows(record) {
         new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId(`package_panel_wake:${record.userPackageID}`)
-                .setLabel('喚醒')
+                .setLabel('恢復追蹤')
                 .setStyle(ButtonStyle.Primary),
             new ButtonBuilder()
                 .setCustomId(`package_panel_delete:${record.userPackageID}`)
-                .setLabel('刪除')
+                .setLabel('刪除包裹')
                 .setStyle(ButtonStyle.Danger)
         )
     ], 'package_panel_add:detached');
@@ -315,16 +319,15 @@ function createArchivedActionsRows(record) {
 
 function createManageEmbed(record, packageData = null) {
     if (packageData) {
-        return createPackageEmbed(record, packageData, '物流追蹤 - 包裹已更新');
+        return createPackageEmbed(record, packageData);
     }
 
     return new EmbedBuilder()
         .setColor(EMBED_COLOR)
-        .setTitle(`${EMBED_EMOJI} ┃ 物流追蹤 - 已刪除包裹`)
-        .setDescription(record.note || '未設定備註')
+        .setTitle(createPackageTitle(record))
         .addFields(
             { name: '物流商', value: record.carrierName || '未知', inline: true },
-            { name: '物流單號', value: `\`${record.trackingNumber}\``, inline: true },
+            { name: '物流單號', value: formatTrackingNumber(record.trackingNumber), inline: true },
             {
                 name: '追蹤狀態',
                 value: record.status === 'active' ? '追蹤中' : record.status === 'deleted' ? '已刪除' : '已封存',
@@ -391,7 +394,7 @@ async function importAndStorePackage(interaction, pending, extraFields, context)
         });
         await repository.commitImport(interaction.user.id, reservation.id, record);
         committed = true;
-        const embed = createPackageEmbed(record, packageData, '物流追蹤 - 新增完成');
+        const embed = createPackageEmbed(record, packageData);
         await interaction.editReply({ embeds: [embed], components: createPackageActionsRows(record) });
         sendLog(
             interaction.client,
@@ -577,7 +580,8 @@ async function updateActiveRecord(context, record) {
 
     return {
         packageData,
-        record: await getRepository(context).updatePackage(record.userID, record.userPackageID, updates) || record
+        record: await getRepository(context).updatePackage(record.userID, record.userPackageID, updates) || record,
+        hasUpdate: signature !== record.lastHistorySignature
     };
 }
 
@@ -595,6 +599,11 @@ async function handleActivePackageSelected(interaction, context) {
             embeds: [createManageEmbed(updated.record, updated.packageData)],
             components: createPackageActionsRows(updated.record)
         });
+        if (updated.hasUpdate) {
+            sendLog(interaction.client, `📦 ${interaction.user.tag} 的物流追蹤有更新：${record.trackingNumber}`, 'INFO', null, {
+                sensitiveValues: [record.trackingNumber]
+            });
+        }
     } catch (error) {
         return replyPackageError(interaction, error, '更新選取的物流包裹');
     }
@@ -609,7 +618,7 @@ async function handleArchivedPackageSelected(interaction, context) {
     }
 
     await interaction.editReply({
-        embeds: [createStoredPackageEmbed(record, '物流追蹤 - 包裹已封存')],
+        embeds: [createStoredPackageEmbed(record)],
         components: createArchivedActionsRows(record)
     });
 }
@@ -642,6 +651,11 @@ async function handleRefreshSelected(interaction, context) {
             embeds: [createManageEmbed(updated.record, updated.packageData)],
             components: createPackageActionsRows(updated.record)
         });
+        if (updated.hasUpdate) {
+            sendLog(interaction.client, `📦 ${interaction.user.tag} 的物流追蹤有更新：${record.trackingNumber}`, 'INFO', null, {
+                sensitiveValues: [record.trackingNumber]
+            });
+        }
     } catch (error) {
         return replyPackageError(interaction, error, '立即更新物流包裹');
     }
@@ -656,8 +670,11 @@ async function handleArchiveSelected(interaction, context) {
         await changePackageState(record.userPackageID, 'archive');
         const updatedRecord = await getRepository(context).updatePackage(record.userID, record.userPackageID, { status: 'archived' }) || record;
         await interaction.editReply({
-            embeds: [createStoredPackageEmbed(updatedRecord, '物流追蹤 - 已封存包裹')],
+            embeds: [createStoredPackageEmbed(updatedRecord)],
             components: createArchivedActionsRows(updatedRecord)
+        });
+        sendLog(interaction.client, `📦 ${interaction.user.tag} 封存了物流追蹤：${record.trackingNumber}`, 'INFO', null, {
+            sensitiveValues: [record.trackingNumber]
         });
     } catch (error) {
         return replyPackageError(interaction, error, '封存物流包裹');
@@ -679,6 +696,9 @@ async function handleDeleteSelected(interaction, context) {
         await interaction.editReply({
             embeds: [createManageEmbed(updatedRecord)],
             components: []
+        });
+        sendLog(interaction.client, `📦 ${interaction.user.tag} 刪除了物流追蹤：${record.trackingNumber}`, 'INFO', null, {
+            sensitiveValues: [record.trackingNumber]
         });
     } catch (error) {
         return replyPackageError(interaction, error, '刪除物流包裹');
@@ -702,7 +722,7 @@ async function handleWakeSelected(interaction, context) {
         ) || record;
         committed = true;
         await interaction.editReply({
-            embeds: [createStoredPackageEmbed(updatedRecord, '物流追蹤 - 包裹已更新')],
+            embeds: [createStoredPackageEmbed(updatedRecord)],
             components: createPackageActionsRows(updatedRecord)
         });
     } catch (error) {
@@ -723,8 +743,11 @@ async function handleNoteModalSubmit(interaction, context) {
     const note = interaction.fields.getTextInputValue('note')?.trim() || '';
     const updatedRecord = await getRepository(context).updatePackage(record.userID, record.userPackageID, { note }) || record;
     await interaction.editReply({
-        embeds: [createStoredPackageEmbed(updatedRecord, '物流追蹤 - 包裹已更新')],
+        embeds: [createStoredPackageEmbed(updatedRecord)],
         components: createPackageActionsRows(updatedRecord)
+    });
+    sendLog(interaction.client, `📦 ${interaction.user.tag} 修改了物流追蹤備註：${record.trackingNumber}`, 'INFO', null, {
+        sensitiveValues: [record.trackingNumber]
     });
 }
 
